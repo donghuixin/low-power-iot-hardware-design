@@ -1,0 +1,35 @@
+{
+  "_comment": "示例: CR2032 供电的 BLE 温湿度+IMU 节点。电流均为典型量级的示意值, 使用时替换为所选器件 datasheet 或实测值。",
+  "battery": {
+    "name": "CR2032",
+    "capacity_mAh": 225,
+    "nominal_V": 3.0,
+    "usable_fraction": 0.75,
+    "self_discharge_pct_per_year": 1.0,
+    "eol_open_circuit_V": 2.6,
+    "eol_internal_resistance_ohm": 40
+  },
+  "regulator": {
+    "_comment": "type: none(电池直供) | ldo | switcher。switcher 需给 vout_V、efficiency_sleep、efficiency_active。",
+    "type": "none",
+    "iq_uA": 0
+  },
+  "system": {
+    "min_input_V": 2.0,
+    "path_resistance_ohm": 0.5
+  },
+  "period_s": 60,
+  "always_on": [
+    {"name": "SoC 睡眠 + RTC + RAM 保持", "current_uA": 1.8},
+    {"name": "IMU 运动唤醒模式", "current_uA": 3.0},
+    {"name": "温湿度传感器待机", "current_uA": 0.1},
+    {"name": "SPI Flash 深度掉电", "current_uA": 0.5},
+    {"name": "TVS 与电容漏电", "current_uA": 0.2, "at_battery": true}
+  ],
+  "events": [
+    {"name": "BLE 广播 (1 s 间隔)", "current_mA": 5.0, "duration_ms": 3.5, "count_per_period": 60, "peak_mA": 8.0},
+    {"name": "温湿度采样", "current_mA": 0.6, "duration_ms": 10, "count_per_period": 1},
+    {"name": "MCU 处理", "current_mA": 3.0, "duration_ms": 2, "count_per_period": 1},
+    {"name": "Flash 写入 (每 10 分钟一次折算)", "current_mA": 10.0, "duration_ms": 5, "count_per_period": 0.1}
+  ]
+}
