@@ -29,6 +29,7 @@ references/
   07-layout.md                   布局布线
   08-bringup-production.md       可测试性、调试、认证、量产
   09-schematic-readability.md    原理图绘制流程与可读性规范
+  10-easyeda-execution.md        嘉立创EDA 实施、器件标准化、资料归档与保存验收
   checklists.md                  各阶段逐项核对清单
 scripts/
   power_budget.py                功耗预算与峰值压降检查
