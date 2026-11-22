@@ -404,13 +404,20 @@
       if (app.layers.sats) {
         for (const s of p.satellites) {
           if (!s.placed || !s._active || !this.onSide(s.placed.side)) continue;
-          if (drag && drag.kind === 'part' && s.parent[0] === drag.ref && !s.pinned) continue;
+          if (drag && drag.kind === 'part' && drag.visible && s.parent[0] === drag.ref && !s.pinned) continue;
           let sc = 1, alpha = 1, off = null;
           const pop = this.anims.find((a) => a.type === 'pop' && a.ref === s.ref);
           if (pop) {
             const t = Math.max(0, Math.min(1, (now - pop.t0 - pop.delay) / pop.dur));
-            sc = 0.3 + 0.7 * easeOutBack(t); alpha = t > 0 ? 1 : 0;
-            if (pop.from) off = { x: (pop.from.x - s.placed.x) * (1 - easeOut(t)), y: (pop.from.y - s.placed.y) * (1 - easeOut(t)) };
+            if (pop.orbit) {
+              // 从轨道飞落：先保持悬浮，再沿弧线落到贴放位置
+              const e = easeOut(t);
+              sc = 1.15 - 0.15 * easeOutBack(t);
+              off = { x: (pop.from.x - s.placed.x) * (1 - e), y: (pop.from.y - s.placed.y) * (1 - e) + Math.sin(Math.PI * t) * 0.8 };
+            } else {
+              sc = 0.3 + 0.7 * easeOutBack(t); alpha = t > 0 ? 1 : 0;
+              if (pop.from) off = { x: (pop.from.x - s.placed.x) * (1 - easeOut(t)), y: (pop.from.y - s.placed.y) * (1 - easeOut(t)) };
+            }
             if (t >= 1) pop.done = true;
           }
           const res = app.ev && app.ev.satResults[s.ref];
@@ -469,7 +476,8 @@
 
       this.anims = this.anims.filter((a) => !a.done);
       const blinking = critical.size > 0 && !app.reducedMotion;
-      if (this.anims.length || blinking || (drag && drag.status === 'bad')) this.requestDraw();
+      const orbiting = drag && drag.visible && drag.kind === 'part' && !app.reducedMotion && orbitSats(p, drag.ref).length;
+      if (this.anims.length || blinking || orbiting || (drag && drag.status === 'bad')) this.requestDraw();
       if (!this.opts.noInsets) app.emit('drawn');
     }
 
@@ -561,7 +569,54 @@
       // 器件本体跟随指针，抬起并放大
       const raw = drag.raw || drag.pl;
       const pl = { ...drag.pl, x: raw.x, y: raw.y };
+      if (!isSat) this.drawOrbit(item, pl, now, 'below');
       this.drawAt(item, isSat ? M.satFootprint(item, pl) : M.footprint(item, pl), pl, isSat, { lift: 1, scale: 1.04 });
+      if (!isSat) {
+        // 悬浮中的器件也显示位号
+        const sr = this.screenRect(M.footprint(item, pl));
+        const m = Math.min(sr.w, sr.h);
+        if (m >= 14) {
+          ctx.save();
+          ctx.font = `600 ${Math.max(9, Math.min(13, m * 0.28))}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          const light = ['chip_antenna', 'module', 'coin', 'usb_c', 'pouch', 'fpc', 'mic'].includes(item.shape);
+          ctx.fillStyle = light ? 'rgba(30,32,36,0.85)' : 'rgba(255,255,255,0.92)';
+          ctx.fillText(item.ref, sr.x + sr.w / 2, sr.y + sr.h / 2 - 4);
+          ctx.restore();
+        }
+        this.drawOrbit(item, pl, now, 'above');
+      }
+    }
+
+    /**
+     * 卫星环绕：被拾取器件的自动卫星沿两条倾斜的椭圆轨道绕行（近侧压在器件上方、远侧被器件挡住），
+     * 位置记入 this.orbitPos，落地时卫星从这里飞向自动贴放的位置。
+     */
+    drawOrbit(part, pl, now, layer) {
+      const sats = orbitSats(this.app.p, part.ref);
+      if (!sats.length) return;
+      const pos = orbitPositions(part, pl, sats, this.app.reducedMotion ? 0 : now);
+      if (layer === 'below') this.orbitPos = {};
+      const ctx = this.ctx;
+      // 轨道线
+      if (layer === 'below') {
+        for (const ring of [0, 1]) {
+          const o = pos.rings[ring];
+          if (!o) continue;
+          const c = this.boardToScreen(pl.x, pl.y);
+          ctx.save();
+          ctx.beginPath();
+          ctx.ellipse(c.x, c.y - 4, o.rx * this.s, o.ry * this.s, 0, 0, Math.PI * 2);
+          ctx.setLineDash([3, 5]); ctx.strokeStyle = 'rgba(255,255,255,0.28)'; ctx.lineWidth = 1; ctx.stroke();
+          ctx.restore();
+        }
+      }
+      for (const q of pos.items) {
+        if ((layer === 'above') !== q.front) continue;
+        this.orbitPos[q.sat.ref] = { x: q.x, y: q.y };
+        const spl = { x: q.x, y: q.y, rot: q.rot, side: pl.side };
+        this.drawAt(q.sat, M.satFootprint(q.sat, { ...spl, rot: 0 }), spl, true, { lift: 0.8 + q.depth * 0.4, scale: 1.05 + q.depth * 0.12, alpha: q.front ? 1 : 0.75 });
+      }
     }
 
     drawGrid(mask, bb) {
@@ -706,6 +761,33 @@
     }
   }
 
+  /** 跟随被拾取器件一起悬浮的卫星：该器件的全部未固定卫星（未摆放的器件也有）。 */
+  function orbitSats(p, ref) { return p.satellites.filter((s) => s.parent[0] === ref && !s.pinned); }
+  /**
+   * 轨道位置（毫米，板面坐标）。两条轨道：内圈放小件，外圈放晶体、电感等较大的卫星；
+   * 椭圆略扁，模拟俯视下倾斜的轨道；depth ∈ [-1, 1] 表示在轨道近侧(+)还是远侧(−)。
+   */
+  function orbitPositions(part, pl, sats, now) {
+    const [w, h] = M.dims(part.w, part.h, pl.rot || 0);
+    const base = Math.max(w, h) / 2;
+    const big = (s) => Math.max(s.w, s.h) >= 1.6;
+    const ringOf = sats.map((s) => (sats.length > 4 && big(s) ? 1 : 0));
+    const counts = [ringOf.filter((r) => r === 0).length, ringOf.filter((r) => r === 1).length];
+    const rings = [0, 1].map((k) => (counts[k] ? { rx: base + 1.4 + k * 1.8, ry: (base + 1.4 + k * 1.8) * 0.78 } : null));
+    const idx = [0, 0];
+    const t = now / 1000;
+    const items = sats.map((s, i) => {
+      const k = ringOf[i];
+      const j = idx[k]++;
+      const speed = k === 0 ? 1.15 : -0.8;
+      const ang = (j / counts[k]) * Math.PI * 2 + t * speed + k * 0.6;
+      const o = rings[k];
+      const depth = -Math.sin(ang);   // 屏幕下方为近侧
+      return { sat: s, x: pl.x + o.rx * Math.cos(ang), y: pl.y + o.ry * Math.sin(ang), rot: ((ang * 180) / Math.PI + 90) % 360, depth, front: depth > -0.15, ang, ring: k };
+    });
+    return { items, rings };
+  }
+
   /** 托盘缩略图：把器件画进一个小画布。 */
   function drawThumb(canvas, item) {
     const ctx = canvas.getContext('2d');
@@ -723,5 +805,5 @@
   }
 
   LP.Renderer2D = Renderer2D;
-  LP.render2d = { drawItem, drawThumb, roundRectPath, MASK, ACCENT };
+  LP.render2d = { drawItem, drawThumb, roundRectPath, MASK, ACCENT, orbitSats, orbitPositions };
 })(globalThis.LP = globalThis.LP || {});

@@ -78,7 +78,9 @@
           if (!s.placed || !s._active || s.pinned || s.parent[0] !== opts.ref) continue;
           const b = satBefore.get(s.ref);
           if (b && Math.hypot(b.x - s.placed.x, b.y - s.placed.y) < 0.01) continue;
-          r.animate('pop', { ref: s.ref, delay: 140 + 20 * k++, dur: 260, from: parent && parent.placed ? { x: parent.placed.x, y: parent.placed.y } : null });
+          const orbit = opts.orbitFrom && opts.orbitFrom[s.ref];
+          if (orbit) r.animate('pop', { ref: s.ref, delay: 60 + 35 * k++, dur: 420, from: orbit, orbit: true });
+          else r.animate('pop', { ref: s.ref, delay: 140 + 20 * k++, dur: 260, from: parent && parent.placed ? { x: parent.placed.x, y: parent.placed.y } : null });
         }
         if (parent && parent.placed) {
           r.animate('drop', { ref: opts.ref });
@@ -146,9 +148,9 @@
       if (part.sides.includes('bottom') && (this.flipped || !part.sides.includes('top'))) return 'bottom';
       return part.sides[0];
     },
-    placePart(ref, pl) {
+    placePart(ref, pl, extra) {
       const part = M.partByRef(this.p, ref);
-      return this.commit(LP.t('ui.op_place'), () => { part.placed = { ...pl }; }, { ref });
+      return this.commit(LP.t('ui.op_place'), () => { part.placed = { ...pl }; }, { ref, ...(extra || {}) });
     },
     tryTransform(ref, fn, label) {
       const part = M.partByRef(this.p, ref);

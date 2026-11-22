@@ -44,6 +44,9 @@ code { font-family: var(--mono); }
 #app.is-3d #three-host { display: block; }
 #overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 #overlay > * { pointer-events: auto; }
+#overlay > .labels3d { position: absolute; inset: 0; pointer-events: none; }
+#app:not(.is-3d) .labels3d { display: none; }
+.label3d { position: absolute; left: 0; top: 0; font: 700 12px var(--mono); color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75); white-space: nowrap; pointer-events: none; }
 
 /* ---------- 面板 ---------- */
 .panel { position: absolute; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2); }
@@ -173,6 +176,7 @@ button.primary:hover { opacity: 0.88; }
 .tray-card.pulse { animation: pulse 0.9s ease-out 2; }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--sel) 55%, transparent); } 100% { box-shadow: 0 0 0 12px transparent; } }
 #app.tray-dragging #stage { cursor: grabbing; }
+#app.carrying #stage, #app.carrying #stage * { cursor: none !important; }
 
 /* ---------- 浮层 ---------- */
 .float { position: absolute; left: 0; top: 0; }

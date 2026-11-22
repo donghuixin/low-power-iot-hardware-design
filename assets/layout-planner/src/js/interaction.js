@@ -82,7 +82,71 @@
         d.status = st.level; d.reason = st;
       } else d.status = satStatus(item, pl);
       if (d.status !== 'bad') d.lastLegal = { ...pl };
+      setCarrying(d.kind === 'part');
       App.emit('dragmove', { sp });
+      App.redraw();
+    }
+
+    /** 拾取中：隐藏系统光标，由器件本身充当光标。 */
+    function setCarrying(on) {
+      document.getElementById('app').classList.toggle('carrying', !!on);
+    }
+
+    /**
+     * 单击拾取：器件（和它的卫星）悬浮在光标处，移动指针即跟随；
+     * 再次单击落地。点到托盘则放回托盘，点到其他面板或按 Esc 则取消。右键在拾取中旋转 90°。
+     */
+    let carry = null;
+    function startCarry(ref, sp, fromTray) {
+      if (!startDrag('part', ref, sp, fromTray)) return false;
+      App.drag.carry = true;
+      App.emit('hover', null);
+      if (fromTray) App.drag.visible = false;
+      else { App.drag.visible = true; App.drag.moved = false; App.drag.raw = { ...App.drag.pl }; setCarrying(true); }
+      LP.ui.setTrayDragging(ref, true);
+      const move = (ev) => {
+        if (!App.drag) return;
+        if (overStage(ev)) moveDrag(local(ev), ev.altKey);
+        else { App.drag.visible = false; setCarrying(false); App.emit('dragmove', { offStage: true }); App.redraw(); }
+      };
+      const down = (ev) => {
+        if (!App.drag) { cleanup(); return; }
+        ev.preventDefault(); ev.stopPropagation();
+        if (ev.button === 2) { rotateDrag(); return; }
+        const inTray = ev.target && ev.target.closest && ev.target.closest('#tray');
+        cleanup();
+        if (overStage(ev)) {
+          if (!App.drag.moved) moveDrag(local(ev), ev.altKey);
+          endDrag(true);
+        } else if (inTray && App.drag.orig) { cancelDrag(); App.unplace(ref); }
+        else cancelDrag();
+      };
+      const ctx = (ev) => { ev.preventDefault(); };
+      function cleanup() {
+        window.removeEventListener('pointermove', move, true);
+        window.removeEventListener('pointerdown', down, true);
+        window.removeEventListener('contextmenu', ctx, true);
+        LP.ui.setTrayDragging(ref, false);
+        carry = null;
+      }
+      window.addEventListener('pointermove', move, true);
+      window.addEventListener('pointerdown', down, true);
+      window.addEventListener('contextmenu', ctx, true);
+      carry = { cleanup };
+      App.redraw();
+      return true;
+    }
+    function cancelDrag() {
+      if (carry) carry.cleanup();
+      const d = App.drag;
+      App.drag = null;
+      setCarrying(false);
+      if (R()) R().orbitPos = null;
+      App.emit('dragend');
+      if (d && d.orig) {
+        // 取消：卫星落回原位
+        LP.satellites.satsOf(App.p, d.ref).forEach((s, k) => { if (s.placed && s._active && !s.pinned) R().animate('pop', { ref: s.ref, delay: 30 * k, dur: 260 }); });
+      }
       App.redraw();
     }
     function rotateDrag() {
@@ -98,6 +162,7 @@
     function endDrag(dropOnStage) {
       const d = App.drag;
       App.drag = null;
+      setCarrying(false);
       App.emit('dragend');
       if (!d) return;
       if (!d.moved && !d.fromTray) { App.redraw(); return; }
@@ -107,8 +172,20 @@
         const why = d.reason ? LP.t(`ui.toast_illegal_${d.reason.reason}`, { ref: d.ref, with: d.reason.with || '' }) : LP.t('ui.toast_illegal_overlap', { ref: d.ref, with: '' });
         App.toast(why + (target ? LP.t('ui.toast_reverted') : ''), 'bad');
       }
-      if (!target || (d.orig && target.x === d.orig.x && target.y === d.orig.y && target.rot === d.orig.rot && target.side === d.orig.side)) { App.redraw(); return; }
-      if (d.kind === 'part') App.placePart(d.ref, target);
+      const orbitFrom = d.kind === 'part' && R().orbitPos ? { ...R().orbitPos } : null;
+      if (R()) R().orbitPos = null;
+      if (!target || (d.orig && target.x === d.orig.x && target.y === d.orig.y && target.rot === d.orig.rot && target.side === d.orig.side)) {
+        // 没有移动：卫星从轨道飞回原位
+        if (orbitFrom && d.orig) {
+          let k = 0;
+          for (const [ref, from] of Object.entries(orbitFrom)) {
+            const s = M.satByRef(App.p, ref);
+            if (s && s.placed && s._active) R().animate('pop', { ref, delay: 40 + 30 * k++, dur: 380, from, orbit: true });
+          }
+        }
+        App.redraw(); return;
+      }
+      if (d.kind === 'part') App.placePart(d.ref, target, { orbitFrom });
       else App.moveSat(d.ref, target);
       if (d.kind === 'part' && d.reason && d.reason.level === 'warn' && d.reason.reason === 'halo') App.toast(LP.t('ui.toast_halo', { with: d.reason.with, kind: d.reason.kind }), 'warn');
     }
@@ -123,6 +200,7 @@
     // ---------- 指针事件 ----------
     stage.addEventListener('pointerdown', (e) => {
       if (LP.ui.isOverPanel(e.clientX, e.clientY)) return;
+      App.emit('hover', null);
       stage.setPointerCapture(e.pointerId);
       const sp = local(e);
       ptrs.set(e.pointerId, sp);
@@ -209,11 +287,12 @@
       if (g.type === 'press') {
         const hit = R().pick(sp.x, sp.y);
         App.focusIssue = null;
+        if (hit && hit.type === 'part' && e.button === 0 && !M.partByRef(App.p, hit.ref).locked) { startCarry(hit.ref, g.start, false); return; }
         App.select(hit ? { type: hit.type, ref: hit.ref } : null);
       }
     };
     stage.addEventListener('pointerup', up);
-    stage.addEventListener('pointercancel', (e) => { ptrs.delete(e.pointerId); if (gesture && gesture.type === 'drag') { App.drag = null; App.emit('dragend'); App.redraw(); } gesture = null; });
+    stage.addEventListener('pointercancel', (e) => { ptrs.delete(e.pointerId); if (gesture && gesture.type === 'drag') cancelDrag(); gesture = null; });
     stage.addEventListener('contextmenu', (e) => e.preventDefault());
     stage.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -240,7 +319,7 @@
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', done);
         window.removeEventListener('pointercancel', done);
-        if (!started) { App.select({ type: 'part', ref }); return; }
+        if (!started) { if (ev.type === 'pointerup') startCarry(ref, local(ev), true); return; }
         LP.ui.setTrayDragging(ref, false);
         endDrag(ev.type === 'pointerup' && overStage(ev) && App.drag && App.drag.moved);
       };
@@ -261,7 +340,7 @@
       if (mod && (k === 'z' || k === 'Z')) { e.preventDefault(); if (e.shiftKey) App.redo(); else App.undo(); return; }
       if (mod && (k === 'y' || k === 'Y')) { e.preventDefault(); App.redo(); return; }
       if (mod) return;
-      if (k === 'Escape') { if (App.drag) { App.drag = null; App.emit('dragend'); App.redraw(); } else { App.focusIssue = null; App.select(null); } return; }
+      if (k === 'Escape') { if (App.drag) cancelDrag(); else { App.focusIssue = null; App.select(null); } return; }
       if (k === 't' || k === 'T') { LP.ui.setView(App.view === '2d' ? '3d' : '2d'); return; }
       if (k === 'b' || k === 'B') { LP.ui.flipBoard(); return; }
       if (App.drag && (k === 'r' || k === 'R')) { rotateDrag(); return; }
@@ -283,7 +362,7 @@
     });
     window.addEventListener('keyup', (e) => { if (e.key === ' ') spaceDown = false; });
 
-    return { trayDrag };
+    return { trayDrag, startCarry, cancelDrag };
   }
 
   LP.interaction = { init, GRID };

@@ -202,13 +202,11 @@
         btn.classList.remove('loading'); btn.textContent = t('view3d');
         App.view = '3d';
         this.root.classList.add('is-3d');
-        this.r3.syncFrom(this.r2);
         App.renderer = this.r3;
-        this.r3.resize(); this.r3.rebuild();
+        this.r3.resize(); this.r3.rebuild(); this.r3.fit(false);
       } else {
         App.view = '2d';
         this.root.classList.remove('is-3d');
-        if (this.r3) this.r2.syncFrom3d && this.r2.syncFrom3d(this.r3);
         App.renderer = this.r2;
         this.r2.resize();
       }

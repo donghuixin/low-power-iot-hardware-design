@@ -82,7 +82,7 @@
   <dialog id="intro" class="modal" data-ui>
     <h2>布局规划器</h2>
     <ol class="intro-steps">
-      <li><strong>拖出主器件。</strong>从下方托盘把主控、传感器、天线等拖到板上。去耦电容、晶体这些小件会自动跟随贴放。</li>
+      <li><strong>拾取主器件。</strong>单击托盘或板上的器件把它拿起来，它的去耦电容、晶体等卫星器件会跟着悬浮环绕；再单击放下，卫星自动落到最近的合适位置。</li>
       <li><strong>看反馈。</strong>右侧实时显示布线难易和规则问题，每次移动都会说明指标为什么变了。</li>
       <li><strong>导出。</strong>摆好后导出布局 JSON，交回给 Claude 做正式的 Layout 评审。</li>
     </ol>
@@ -94,8 +94,9 @@
     <h2>操作说明</h2>
     <table class="keys">
       <tbody>
-        <tr><td>选中 / 拖动器件</td><td><kbd>左键</kbd></td></tr>
-        <tr><td>旋转 90°</td><td><kbd>R</kbd>（拖动中也可以）</td></tr>
+        <tr><td>拾取 / 放下器件</td><td>左键单击拾取，器件和它的卫星跟随光标悬浮；再次单击落地。也可以按住拖动</td></tr>
+        <tr><td>放回托盘 / 取消拾取</td><td>拾取中点击托盘 / <kbd>Esc</kbd></td></tr>
+        <tr><td>旋转 90°</td><td><kbd>R</kbd>（拾取中也可以按 <kbd>R</kbd> 或右键）</td></tr>
         <tr><td>换面</td><td><kbd>F</kbd></td></tr>
         <tr><td>锁定 / 解锁</td><td><kbd>L</kbd></td></tr>
         <tr><td>放回托盘</td><td><kbd>Delete</kbd> 或 <kbd>Backspace</kbd></td></tr>
