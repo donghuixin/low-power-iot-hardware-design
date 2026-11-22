@@ -1,6 +1,6 @@
 ---
 name: low-power-iot-hardware-design
-description: 低功耗物联网(IoT)硬件设计与评审的完整流程：需求挖掘(含用户没想到的隐性需求及其对应的硬件形态)、器件与无线选型(BLE/WiFi/Thread/LoRa/蜂窝)、传感器放置(如IMU是否需要居中)、原理图可靠性审查(上拉下拉、三态、开漏/推挽、电平匹配、驱动电压电流、峰值/静态电流、电源树与去耦)、PCB布局布线(射频与天线、信号完整性、电源完整性、EMC、DFM、测试点)以及打样后的bring-up。只要用户提到电池供电设备、可穿戴、传感器节点、nRF52/nRF53/nRF54/ESP32/STM32L/STM32WB 等低功耗SoC的硬件、原理图或PCB评审、续航/功耗预算、睡眠电流偏大、天线或射频布局、"帮我看看这个板子/这张原理图"等，都应使用本skill，即使用户没有明确说"硬件设计"。Low-power IoT hardware design and review skill covering requirements elicitation, wireless/part selection, sensor placement, schematic reliability review, power budgeting, and PCB layout review for battery-powered devices.
+description: 低功耗物联网(IoT)硬件设计与评审的完整流程：交互式需求澄清、设计资料收集与核验、需求挖掘(含用户没想到的隐性需求及其对应的硬件形态)、器件与无线选型(BLE/WiFi/Thread/LoRa/蜂窝)、传感器放置(如IMU是否需要居中)、原理图可靠性审查(上拉下拉、三态、开漏/推挽、电平匹配、驱动电压电流、峰值/静态电流、电源树与去耦)、PCB布局布线(射频与天线、信号完整性、电源完整性、EMC、DFM、测试点)以及打样后的bring-up。只要用户提到电池供电设备、可穿戴、传感器节点、nRF52/nRF53/nRF54/ESP32/STM32L/STM32WB 等低功耗SoC的硬件、原理图或PCB评审、续航/功耗预算、睡眠电流偏大、天线或射频布局、"帮我看看这个板子/这张原理图"等，都应使用本skill，即使用户没有明确说"硬件设计"。Low-power IoT hardware design and review skill covering requirements elicitation, wireless/part selection, sensor placement, schematic reliability review, power budgeting, and PCB layout review for battery-powered devices.
 ---
 
 # 低功耗 IoT 硬件设计
@@ -36,6 +36,14 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：需�
 | 板子回来了有问题（睡眠电流大、射频距离短、偶发复位） | 阶段四的调试流程 | 回查阶段二、三相关条目 |
 
 用户给的材料可能是：文字描述、原理图 PDF/截图、KiCad 文件（`.kicad_sch` / `.kicad_pcb` 是文本 S 表达式，可直接读取网络与器件）、网表、BOM 表、Gerber、layout 截图。先把材料读完整，再开始评审；图片看不清的地方请用户补充局部截图。
+
+## 贯穿各阶段的交互式引导与设计资料管理
+
+**从使用场景推导电路参数。** 先用一句话复述已知的使用场景，再针对当前设计中影响选型或取值的缺口提问。用户难以直接给出电气参数时，改问他们能观察或决定的事情。例如用户说“要实时报警”，可以问“从事件发生到手机提示，最迟可以等多久？手机是否一直在附近？”根据回答把端到端时限分配给采样、处理、无线传输和手机端，给出采样周期和无线唤醒间隔的候选上限。向用户说明这些取值对续航的影响，请其确认场景、时限和取舍。收到修正后更新对应的需求编号、参数和预算。记录每项指标的单位、适用工况、推导依据和验收方法，区分用户已确认的目标与暂用的设计假设。
+
+**按当前决策收集资料。** 先检查附件、BOM 和项目已有资料，再请用户上传缺少的文档或提供原厂链接，说明需要哪个完整料号或板卡版本，以及该资料将决定什么。例如核对传感器能否直连 MCU 时，请用户提供双方对应型号的数据手册及标有供电电压的原理图页，用实际供电条件下的输出电平保证值与输入门限核对接口余量。
+
+在项目的资料索引中登记文件路径或链接、型号与封装、文档版本、关键页码或表号，将参数、测试条件和受影响的设计项一起记录。收到新版或发现型号、条件不一致时，标出差异并复核受影响的结论。暂缺资料时，列明待补文件与待核验的设计项，继续处理依据充分的部分。嘉立创 EDA 工程沿用 `references/10-easyeda-execution.md` 的资料目录和索引。
 
 ## 阶段一：需求明确与硬件形态
 
