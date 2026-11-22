@@ -47,7 +47,7 @@
       this.overlay = $('#overlay');
       this.buildToolbar();
       this.buildFloat();
-      App.on('load', () => this.renderAll(true));
+      App.on('load', () => { this.renderAll(true); const d = $('#board-setup'); if (d && d.open && App.boardConfirmed) d.close(); });
       App.on('change', (d) => { this.renderAll(); this.showDeltaCard(d); });
       App.on('select', () => { this.renderSelection(); this.renderSteps(); });
       App.on('drawn', () => this.positionOverlays());
@@ -638,8 +638,100 @@
     maybeIntro() {
       let seen = false;
       try { seen = localStorage.getItem('lp:intro-seen') === '1'; } catch (e) { /* 存储不可用 */ }
+      $('#intro-start').addEventListener('click', () => {
+        try { localStorage.setItem('lp:intro-seen', '1'); } catch (e) { /* 存储不可用 */ }
+        $('#intro').close();
+        this.maybeBoardSetup();
+      });
       if (!seen) $('#intro').showModal();
-      $('#intro-start').addEventListener('click', () => { try { localStorage.setItem('lp:intro-seen', '1'); } catch (e) { /* 存储不可用 */ } $('#intro').close(); });
+      else this.maybeBoardSetup();
+    },
+
+    // ---------- 开场：选定板子尺寸 ----------
+    maybeBoardSetup() {
+      if (!this.App.boardConfirmed) this.openBoardSetup();
+    },
+    openBoardSetup() {
+      const App = this.App, p = App.p, o = p.board.outline;
+      const d = $('#board-setup');
+      const body = $('#board-setup-body');
+      body.innerHTML = '';
+      const area = M.partsArea(p);
+      const need = Math.ceil(Math.max(area.top, area.bottom) * 2.2 / 10) * 10;
+      const presets = [];
+      if (o.type === 'rect') presets.push({ id: 'project', label: t('bs_project'), outline: { type: 'rect', w: o.w, h: o.h, corner_r: o.corner_r || 0 } });
+      if (o.type === 'circle') presets.push({ id: 'project', label: t('bs_project'), outline: { type: 'circle', d: o.d } });
+      presets.push(
+        { id: 'r30', label: t('bs_compact'), outline: { type: 'rect', w: 30, h: 20, corner_r: 2 } },
+        { id: 'r40', label: t('bs_standard'), outline: { type: 'rect', w: 40, h: 30, corner_r: 3 } },
+        { id: 'r50', label: t('bs_roomy'), outline: { type: 'rect', w: 50, h: 35, corner_r: 3 } },
+        { id: 'c32', label: t('bs_round'), outline: { type: 'circle', d: 32 } },
+        { id: 'custom', label: t('bs_custom'), outline: null },
+      );
+      let chosen = presets[0];
+      const dimText = (ol) => ol.type === 'circle' ? `Ø ${ol.d} mm` : `${ol.w} × ${ol.h} mm`;
+      const fits = (ol) => {
+        const A = G.outlineArea({ corner_r: 0, ...ol });
+        const bb = G.outlineBBox(ol);
+        const minSide = Math.min(bb.x1 - bb.x0, bb.y1 - bb.y0) * (ol.type === 'circle' ? 0.7 : 1);
+        return A >= need && minSide >= area.maxDim + 2;
+      };
+      const grid = h('div', { class: 'preset-grid', role: 'radiogroup', 'aria-label': t('bs_title') });
+      const custom = h('div', { class: 'custom-row', hidden: true });
+      const cShape = h('select', {}, h('option', { value: 'rect' }, t('board_rect')), h('option', { value: 'circle' }, t('board_circle')));
+      const num = (label, val) => h('label', { class: 'field' }, h('span', {}, label), h('input', { type: 'number', min: 5, step: 0.5, value: val }));
+      const cW = num(t('board_w'), o.w || 36), cH = num(t('board_h'), o.h || 28), cR = num(t('board_r'), o.corner_r ?? 2), cD = num(t('board_d'), o.d || 32);
+      custom.append(h('label', { class: 'field' }, h('span', {}, t('board_shape')), cShape), cW, cH, cR, cD);
+      const syncCustom = () => { const circ = cShape.value === 'circle'; cW.hidden = cH.hidden = cR.hidden = circ; cD.hidden = !circ; updateHint(); };
+      cShape.addEventListener('change', syncCustom);
+      custom.addEventListener('input', () => updateHint());
+      const customOutline = () => {
+        const v = (el) => parseFloat(el.querySelector('input').value);
+        return cShape.value === 'circle' ? { type: 'circle', d: v(cD) } : { type: 'rect', w: v(cW), h: v(cH), corner_r: Math.max(0, v(cR) || 0) };
+      };
+      const hint = h('p', { class: 'small bs-hint' });
+      const updateHint = () => {
+        const ol = chosen.outline || customOutline();
+        const ok = ol && Object.values(ol).every((x) => typeof x === 'string' || (Number.isFinite(x) && x >= 0));
+        const A = ok ? Math.round(G.outlineArea({ corner_r: 0, ...ol })) : 0;
+        hint.textContent = t('bs_area', { top: Math.round(area.top), bottom: Math.round(area.bottom), need, a: A });
+        hint.classList.toggle('warn', ok && !fits(ol));
+        if (ok && !fits(ol)) hint.textContent += ' ' + t('bs_too_small');
+      };
+      for (const pr of presets) {
+        const btn = h('button', { class: `preset ${pr === chosen ? 'on' : ''}`, role: 'radio', 'aria-checked': String(pr === chosen), type: 'button' });
+        const shape = h('span', { class: `preset-shape ${pr.outline && pr.outline.type === 'circle' ? 'circle' : pr.outline ? 'rect' : 'custom'}`, 'aria-hidden': 'true' });
+        if (pr.outline && pr.outline.type === 'rect') { const k = 34 / Math.max(pr.outline.w, pr.outline.h); shape.style.width = `${pr.outline.w * k}px`; shape.style.height = `${pr.outline.h * k}px`; }
+        btn.append(shape, h('span', { class: 'preset-label' }, pr.label), h('span', { class: 'preset-dim' }, pr.outline ? dimText(pr.outline) : t('bs_custom_dim')));
+        if (pr.outline && !fits(pr.outline)) btn.append(h('span', { class: 'preset-warn' }, t('bs_tight')));
+        btn.addEventListener('click', () => {
+          chosen = pr;
+          for (const b of grid.children) { b.classList.toggle('on', b === btn); b.setAttribute('aria-checked', String(b === btn)); }
+          custom.hidden = pr.id !== 'custom';
+          if (pr.id === 'custom') syncCustom(); else updateHint();
+        });
+        grid.append(btn);
+      }
+      const layers = h('select', {}, ...[2, 4, 6].map((n) => h('option', { value: n, selected: p.board.layers === n }, n)));
+      const two = h('input', { type: 'checkbox', checked: p.board.two_sided });
+      body.append(grid, custom, hint,
+        h('div', { class: 'row2 bs-opts' },
+          h('label', { class: 'field' }, h('span', {}, t('board_layers')), layers),
+          h('label', { class: 'field check' }, two, h('span', {}, t('board_two_sided')))),
+        h('p', { class: 'muted small' }, t('bs_later')));
+      updateHint();
+      const go = $('#board-setup-go');
+      go.onclick = () => {
+        const ol = chosen.outline || customOutline();
+        const bad = Object.entries(ol).some(([k, v]) => k !== 'type' && !(Number.isFinite(v) && (k === 'corner_r' ? v >= 0 : v >= 5)));
+        if (bad) { this.toast(t('bs_invalid'), 'bad'); return; }
+        d.close();
+        App.setupBoard({ outline: ol, layers: parseInt(layers.value, 10), two_sided: two.checked });
+        this.openStep = null;
+        this.renderAll();
+      };
+      d.addEventListener('cancel', (e) => e.preventDefault(), { once: false });
+      if (!d.open) d.showModal();
     },
 
     // ---------- 导入导出 ----------

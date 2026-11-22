@@ -74,3 +74,25 @@ test('完整评估在 50 ms 内', () => {
   const ms = (performance.now() - t) / 5;
   assert.ok(ms < 50, `${ms.toFixed(1)} ms`);
 });
+
+test('拥挤度峰值会随移开拥挤器件而回落，且不落在器件本体下方', () => {
+  const good = evalOf(GOOD).ev.metrics.congestion.peak;
+  const jam = evalOf({ ...GOOD, U4: [27.5, 16, 0] }).ev.metrics.congestion.peak;
+  const back = evalOf({ ...GOOD, U4: [29, 14.5, 0] }).ev.metrics.congestion.peak;
+  assert.ok(jam > good + 0.2 && Math.abs(back - good) < 1e-6, `${good.toFixed(2)} → ${jam.toFixed(2)} → ${back.toFixed(2)}`);
+  const far = evalOf({ ...GOOD, U2: [8, 12, 180] });
+  const pt = far.ev.metrics.congestion.peakPoint;
+  for (const x of far.p.parts) if (x.placed && x.placed.side === 'top') {
+    const r = LP.model.footprint(x);
+    assert.ok(!(pt.x > r.x0 && pt.x < r.x1 && pt.y > r.y0 && pt.y < r.y1), `峰值落在 ${x.ref} 本体下 (${pt.x}, ${pt.y})`);
+  }
+  assert.ok(far.ev.metrics.congestion.peak <= good + 0.15, `IMU 移远不应虚高：${far.ev.metrics.congestion.peak.toFixed(2)}`);
+});
+
+test('规划合格的卫星不计入拥挤度，超距的才计入', () => {
+  const { p, ev } = evalOf(GOOD);
+  const okAll = LP.metrics.congestionMetric(p, ev.metrics.edges, ev.zones, ev.satResults).peak;
+  const badAll = Object.fromEntries(Object.entries(ev.satResults).map(([k, r]) => [k, { ...r, ok: false }]));
+  const counted = LP.metrics.congestionMetric(p, ev.metrics.edges, ev.zones, badAll).peak;
+  assert.ok(counted > okAll, `${okAll.toFixed(2)} vs ${counted.toFixed(2)}`);
+});

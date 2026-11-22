@@ -108,3 +108,13 @@ test('脚本：make_layout_project.py 校验', () => {
   assert.match(bad.stderr, /nets\[0\]\.pins\[1\]: 位号 ANT9 不存在/);
   assert.match(bad.stderr, /parts\[0\]\.pins\[0\]\.pos/);
 });
+
+test('改板框尺寸时固定孔跟着最近的板角移动', () => {
+  const p = loadExample(LP);
+  const b = p.board;
+  const old = { ...b.outline };
+  b.outline = { type: 'rect', w: 30, h: 20, corner_r: 2 };
+  M.remapBoardFeatures(b, old, b.outline);
+  assert.equal(JSON.stringify(b.holes.map((h) => [h.x, h.y])), JSON.stringify([[3.5, 17], [26.5, 3.5]]));
+  for (const h of b.holes) assert.ok(G.rectInBoard(b.outline, G.rectFromCenter(h.x, h.y, h.d, h.d)));
+});

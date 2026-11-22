@@ -110,21 +110,27 @@
     return { value, pairs: list, density, status: status(density, CONFIG.crossDensity) };
   }
 
-  /** 遮挡物：{rect, side:'top'|'bottom'|'both', ref, own}。 */
-  function obstacles(p, satRects) {
+  /**
+   * 遮挡物：{rect, side:'top'|'bottom'|'both', ref, kind}。
+   * 卫星器件规划合格（在距离上限内）时不计入：贴放算法已避开出线通道，小件之间和其他层仍可走线；
+   * 只有超距、放不下或被手动放坏的卫星才扣容量。没有贴放结果时卫星全部不计。
+   */
+  function obstacles(p, satResults) {
     const out = [];
     for (const pt of p.parts) {
       if (!pt.placed) continue;
       out.push({ rect: M.footprint(pt), side: pt.through ? 'both' : pt.placed.side, ref: pt.ref, kind: 'part', shape: pt.shape });
     }
     for (const s of p.satellites) {
-      if (!s.placed || (satRects && !satRects.has(s.ref))) continue;
+      if (!s.placed || !s._active) continue;
+      const r = satResults && satResults[s.ref];
+      if (!r || r.ok) continue;
       out.push({ rect: M.satFootprint(s), side: s.placed.side, ref: s.ref, kind: 'sat', parent: s.parent[0] });
     }
     return out;
   }
 
-  function congestionMetric(p, edges, zones) {
+  function congestionMetric(p, edges, zones, satResults) {
     const b = p.board, cell = CONFIG.cell;
     const bb = G.outlineBBox(b.outline);
     const nx = Math.max(1, Math.ceil((bb.x1 - bb.x0) / cell)), ny = Math.max(1, Math.ceil((bb.y1 - bb.y0) / cell));
@@ -147,7 +153,7 @@
         else if (a > 0.25) blocked[k] = 1;
       }
     };
-    for (const o of obstacles(p)) {
+    for (const o of obstacles(p, satResults)) {
       const f = o.kind === 'part' && BIG_BODY.has(o.shape) ? 0.5 : 1;
       const r = o.rect;
       if (o.side === 'top' || o.side === 'both') cover(r, covTop, f);
@@ -159,10 +165,15 @@
     for (const e of edges) {
       const half = 0.5 * e.width;
       const ia = ci(e.a.x), ja = cj(e.a.y), ib = ci(e.b.x), jb = cj(e.b.y);
-      // 端点所在格子是引脚本身，不计入通道需求（否则每个多引脚器件的边缘都会虚高）
+      // 端点所在格子是引脚本身；L 形估算路径穿过两端器件本体的部分也不计——
+      // 实际走线从引脚向外出线，不会穿过自己的芯片（否则峰值总落在主控本体下方）
+      const own = [e.a.ref, e.b.ref].map((r) => M.partByRef(p, r)).filter((x) => x && x.placed).map((x) => M.footprint(x));
       const add = (i, j, v) => {
         if ((i === ia && j === ja) || (i === ib && j === jb)) return;
-        if (i >= 0 && j >= 0 && i < nx && j < ny) demand[j * nx + i] += v;
+        if (i < 0 || j < 0 || i >= nx || j >= ny) return;
+        const cx = bb.x0 + (i + 0.5) * cell, cy = bb.y0 + (j + 0.5) * cell;
+        for (const r of own) if (cx > r.x0 && cx < r.x1 && cy > r.y0 && cy < r.y1) return;
+        demand[j * nx + i] += v;
       };
       const sx = ib >= ia ? 1 : -1, sy = jb >= ja ? 1 : -1;
       // 先横后竖
@@ -222,9 +233,9 @@
     return { items, violations: bad.length, status: st };
   }
 
-  function exitMetric(p) {
+  function exitMetric(p, satResults) {
     const b = p.board, pitch = b.track + b.space;
-    const obs = obstacles(p);
+    const obs = obstacles(p, satResults);
     const keep = (b.keepouts || []).map((k) => ({ x0: k.x, y0: k.y, x1: k.x + k.w, y1: k.y + k.h }));
     const list = [];
     for (const pt of p.parts) {
@@ -291,9 +302,9 @@
     const edges = netEdges(p);
     const length = lengthMetric(p, edges);
     const crossings = crossingMetric(p, edges);
-    const congestion = congestionMetric(p, edges, zones);
+    const congestion = congestionMetric(p, edges, zones, satResults);
     const critical = criticalMetric(p, edges, satResults);
-    const exit = exitMetric(p);
+    const exit = exitMetric(p, satResults);
     const layers = layerMetric(p, crossings, congestion);
     return { edges, length, crossings, congestion, critical, exit, layers };
   }

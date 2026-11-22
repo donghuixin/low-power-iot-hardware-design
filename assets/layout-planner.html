@@ -227,6 +227,20 @@ button.primary:hover { opacity: 0.88; }
 .modal.wide { max-width: 620px; }
 .modal::backdrop { background: rgba(10, 10, 12, 0.35); backdrop-filter: blur(2px); }
 .modal h2 { margin: 0 0 12px; font-size: 17px; }
+.preset-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
+.preset { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 8px 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-solid); }
+.preset:hover { background: var(--hover); }
+.preset.on { border-color: var(--sel); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sel) 22%, transparent); }
+.preset-shape { display: block; height: 34px; margin-bottom: 4px; background: linear-gradient(135deg, #24694f, #1f5c46); border-radius: 4px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); }
+.preset-shape.circle { width: 34px; border-radius: 50%; }
+.preset-shape.custom { width: 34px; background: none; border: 2px dashed var(--muted); box-shadow: none; }
+.preset-label { font-weight: 650; font-size: 13px; }
+.preset-dim { font: 12px var(--mono); color: var(--muted); }
+.preset-warn { position: absolute; top: 6px; right: 6px; font-size: 10.5px; color: var(--warn); font-weight: 600; }
+.custom-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 6px; }
+.bs-hint { margin: 6px 0; }
+.bs-hint.warn { color: var(--warn); }
+.bs-opts { margin: 8px 0 4px; align-items: end; }
 .intro-steps { padding-left: 20px; display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; }
 .keys { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 8px; }
 .keys td { padding: 6px 4px; border-bottom: 1px solid var(--line); }
@@ -341,6 +355,13 @@ button.primary:hover { opacity: 0.88; }
     </ol>
     <p class="muted small">这个工具来自开源的低功耗 IoT 硬件设计 skill。觉得有用，欢迎在 <a href="https://github.com/donghuixin/low-power-iot-hardware-design" target="_blank" rel="noopener">GitHub</a> 上 Star 或 Fork，方便获取后续更新、提交改进。</p>
     <div class="btn-row end"><button id="intro-start" class="primary">开始</button></div>
+  </dialog>
+
+  <dialog id="board-setup" class="modal wide" data-ui aria-labelledby="board-setup-title">
+    <h2 id="board-setup-title">先选定板子尺寸</h2>
+    <p class="muted small">板框由外壳决定。选好尺寸再开始摆放器件。</p>
+    <div id="board-setup-body"></div>
+    <div class="btn-row end"><button id="board-setup-go" class="primary">确定尺寸，开始摆放</button></div>
   </dialog>
 
   <dialog id="help" class="modal wide" data-ui>
@@ -604,6 +625,12 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       board_confirm: '确认板框，开始摆放', board_reconfirm: '完成修改',
       board_edit_hint: '也可以拖动板子右边、上边或右上角的圆点直接改尺寸。',
       board_holes: '固定孔 {n} 个、禁布区 {m} 个（在项目数据中编辑）',
+      bs_title: '先选定板子尺寸', bs_project: '项目原始尺寸', bs_compact: '紧凑', bs_standard: '常用', bs_roomy: '宽松', bs_round: '圆形',
+      bs_custom: '自定义', bs_custom_dim: '输入尺寸', bs_tight: '可能放不下',
+      bs_area: '主器件与卫星正面合计约 {top} mm²、背面 {bottom} mm²，建议板面积不小于 {need} mm²；当前选择 {a} mm²。',
+      bs_too_small: '偏小，摆放会很紧。',
+      bs_later: '固定孔和禁布区会跟着最近的板角移动。之后仍可在左侧第 1 步修改尺寸，或拖动板子边上的圆点。',
+      bs_invalid: '请输入有效的尺寸（不小于 5 mm）',
       mask_green: '墨绿', mask_blue: '深蓝', mask_black: '哑黑', mask_white: '白色',
       check_unplaced: '还有 {n} 个主器件未摆放：{refs}',
       check_ready: '没有 P0/P1 问题，可以导出。',
@@ -1182,6 +1209,49 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     return parseFloat(m[1]) * mul;
   }
 
+  // ---------- 改板框时同步固定孔与禁布区 ----------
+  /**
+   * 板框尺寸改变后，固定孔和禁布区保持到最近板角（矩形）或板边（圆形）的相对位置，
+   * 避免缩小板子后它们落到板外。多边形板框不做调整。
+   */
+  function remapBoardFeatures(board, oldO, newO) {
+    if (oldO.type === 'polygon' || newO.type === 'polygon') return;
+    const ob = G.outlineBBox(oldO), nb = G.outlineBBox(newO);
+    const mapPoint = (x, y) => {
+      if (oldO.type === 'circle' && newO.type === 'circle') {
+        const oc = G.center(ob), nc = G.center(nb), r0 = oldO.d / 2, r1 = newO.d / 2;
+        const dx = x - oc.x, dy = y - oc.y, d = Math.hypot(dx, dy) || 1;
+        const inset = r0 - d;
+        const nd = Math.max(0, r1 - inset);
+        return { x: nc.x + (dx / d) * nd, y: nc.y + (dy / d) * nd };
+      }
+      const fx = (x - ob.x0) / Math.max(ob.x1 - ob.x0, 1e-9), fy = (y - ob.y0) / Math.max(ob.y1 - ob.y0, 1e-9);
+      const nx = fx < 0.5 ? nb.x0 + (x - ob.x0) : nb.x1 - (ob.x1 - x);
+      const ny = fy < 0.5 ? nb.y0 + (y - ob.y0) : nb.y1 - (ob.y1 - y);
+      return { x: nx, y: ny };
+    };
+    for (const h of board.holes || []) { const q = mapPoint(h.x, h.y); h.x = r2(q.x); h.y = r2(q.y); }
+    for (const k of board.keepouts || []) {
+      const c = mapPoint(k.x + k.w / 2, k.y + k.h / 2);
+      // 贴边的禁布区保持贴边
+      const q = mapPoint(k.x, k.y);
+      const fx = (k.x + k.w / 2 - ob.x0) / Math.max(ob.x1 - ob.x0, 1e-9), fy = (k.y + k.h / 2 - ob.y0) / Math.max(ob.y1 - ob.y0, 1e-9);
+      k.x = r2(fx < 0.5 ? q.x : c.x - k.w / 2);
+      k.y = r2(fy < 0.5 ? q.y : c.y - k.h / 2);
+    }
+  }
+  /** 主器件占地面积（mm²），分正反面；用于提示板子是否够大。 */
+  function partsArea(p) {
+    let top = 0, bottom = 0, maxDim = 0;
+    for (const x of p.parts) {
+      const a = x.w * x.h;
+      if (x.sides.includes('top')) top += a; else bottom += a;
+      maxDim = Math.max(maxDim, Math.min(x.w, x.h));
+    }
+    for (const s of p.satellites) top += s.w * s.h;
+    return { top, bottom, maxDim };
+  }
+
   // ---------- 撤销快照与持久化 ----------
   function snapshot(p) {
     const parts = {}, sats = {};
@@ -1266,7 +1336,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     TOOL_VERSION, ROLES, SAT_KINDS, NET_CLASSES, SIDES, ROTS, SENSOR_ROLES,
     validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint,
     partByRef, satByRef, itemByRef, placedParts, partTags, satTags, connectedParts, parseCap,
-    snapshot, restore, definitionHash, exportLayout, resultObject, exportCSV, r2,
+    snapshot, restore, definitionHash, exportLayout, resultObject, exportCSV, r2, remapBoardFeatures, partsArea,
   };
 })(globalThis.LP = globalThis.LP || {});
 
@@ -2035,21 +2105,27 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     return { value, pairs: list, density, status: status(density, CONFIG.crossDensity) };
   }
 
-  /** 遮挡物：{rect, side:'top'|'bottom'|'both', ref, own}。 */
-  function obstacles(p, satRects) {
+  /**
+   * 遮挡物：{rect, side:'top'|'bottom'|'both', ref, kind}。
+   * 卫星器件规划合格（在距离上限内）时不计入：贴放算法已避开出线通道，小件之间和其他层仍可走线；
+   * 只有超距、放不下或被手动放坏的卫星才扣容量。没有贴放结果时卫星全部不计。
+   */
+  function obstacles(p, satResults) {
     const out = [];
     for (const pt of p.parts) {
       if (!pt.placed) continue;
       out.push({ rect: M.footprint(pt), side: pt.through ? 'both' : pt.placed.side, ref: pt.ref, kind: 'part', shape: pt.shape });
     }
     for (const s of p.satellites) {
-      if (!s.placed || (satRects && !satRects.has(s.ref))) continue;
+      if (!s.placed || !s._active) continue;
+      const r = satResults && satResults[s.ref];
+      if (!r || r.ok) continue;
       out.push({ rect: M.satFootprint(s), side: s.placed.side, ref: s.ref, kind: 'sat', parent: s.parent[0] });
     }
     return out;
   }
 
-  function congestionMetric(p, edges, zones) {
+  function congestionMetric(p, edges, zones, satResults) {
     const b = p.board, cell = CONFIG.cell;
     const bb = G.outlineBBox(b.outline);
     const nx = Math.max(1, Math.ceil((bb.x1 - bb.x0) / cell)), ny = Math.max(1, Math.ceil((bb.y1 - bb.y0) / cell));
@@ -2072,7 +2148,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         else if (a > 0.25) blocked[k] = 1;
       }
     };
-    for (const o of obstacles(p)) {
+    for (const o of obstacles(p, satResults)) {
       const f = o.kind === 'part' && BIG_BODY.has(o.shape) ? 0.5 : 1;
       const r = o.rect;
       if (o.side === 'top' || o.side === 'both') cover(r, covTop, f);
@@ -2084,10 +2160,15 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     for (const e of edges) {
       const half = 0.5 * e.width;
       const ia = ci(e.a.x), ja = cj(e.a.y), ib = ci(e.b.x), jb = cj(e.b.y);
-      // 端点所在格子是引脚本身，不计入通道需求（否则每个多引脚器件的边缘都会虚高）
+      // 端点所在格子是引脚本身；L 形估算路径穿过两端器件本体的部分也不计——
+      // 实际走线从引脚向外出线，不会穿过自己的芯片（否则峰值总落在主控本体下方）
+      const own = [e.a.ref, e.b.ref].map((r) => M.partByRef(p, r)).filter((x) => x && x.placed).map((x) => M.footprint(x));
       const add = (i, j, v) => {
         if ((i === ia && j === ja) || (i === ib && j === jb)) return;
-        if (i >= 0 && j >= 0 && i < nx && j < ny) demand[j * nx + i] += v;
+        if (i < 0 || j < 0 || i >= nx || j >= ny) return;
+        const cx = bb.x0 + (i + 0.5) * cell, cy = bb.y0 + (j + 0.5) * cell;
+        for (const r of own) if (cx > r.x0 && cx < r.x1 && cy > r.y0 && cy < r.y1) return;
+        demand[j * nx + i] += v;
       };
       const sx = ib >= ia ? 1 : -1, sy = jb >= ja ? 1 : -1;
       // 先横后竖
@@ -2147,9 +2228,9 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     return { items, violations: bad.length, status: st };
   }
 
-  function exitMetric(p) {
+  function exitMetric(p, satResults) {
     const b = p.board, pitch = b.track + b.space;
-    const obs = obstacles(p);
+    const obs = obstacles(p, satResults);
     const keep = (b.keepouts || []).map((k) => ({ x0: k.x, y0: k.y, x1: k.x + k.w, y1: k.y + k.h }));
     const list = [];
     for (const pt of p.parts) {
@@ -2216,9 +2297,9 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     const edges = netEdges(p);
     const length = lengthMetric(p, edges);
     const crossings = crossingMetric(p, edges);
-    const congestion = congestionMetric(p, edges, zones);
+    const congestion = congestionMetric(p, edges, zones, satResults);
     const critical = criticalMetric(p, edges, satResults);
-    const exit = exitMetric(p);
+    const exit = exitMetric(p, satResults);
     const layers = layerMetric(p, crossings, congestion);
     return { edges, length, crossings, congestion, critical, exit, layers };
   }
@@ -4046,11 +4127,26 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     setBoard(patch) {
       this.commit(LP.t('ui.op_board'), () => {
         const b = this.p.board;
-        if (patch.outline) b.outline = { ...b.outline, ...patch.outline };
+        if (patch.outline) {
+          const old = { ...b.outline };
+          b.outline = patch.outline.type && patch.outline.type !== old.type ? { ...patch.outline } : { ...b.outline, ...patch.outline };
+          M.remapBoardFeatures(b, old, b.outline);
+        }
         for (const k of ['layers', 'thickness', 'two_sided', 'mask']) if (patch[k] !== undefined) b[k] = patch[k];
         if (patch.two_sided === false) for (const x of this.p.parts) if (x.placed && x.placed.side === 'bottom' && x.sides.includes('top')) x.placed.side = 'top';
       }, { noAnim: true, noDelta: true });
       if (this.renderer) this.renderer.requestDraw();
+    },
+    /** 开场选定的板框：直接写入（不进撤销栈），然后确认。 */
+    setupBoard(patch) {
+      const b = this.p.board;
+      const old = { ...b.outline };
+      b.outline = { corner_r: 0, ...patch.outline };
+      M.remapBoardFeatures(b, old, b.outline);
+      if (patch.layers) b.layers = patch.layers;
+      if (patch.two_sided !== undefined) b.two_sided = patch.two_sided;
+      this.confirmBoard();
+      if (this.renderer) this.renderer.fit(true);
     },
     confirmBoard() {
       this.boardConfirmed = true;
@@ -4549,7 +4645,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       this.overlay = $('#overlay');
       this.buildToolbar();
       this.buildFloat();
-      App.on('load', () => this.renderAll(true));
+      App.on('load', () => { this.renderAll(true); const d = $('#board-setup'); if (d && d.open && App.boardConfirmed) d.close(); });
       App.on('change', (d) => { this.renderAll(); this.showDeltaCard(d); });
       App.on('select', () => { this.renderSelection(); this.renderSteps(); });
       App.on('drawn', () => this.positionOverlays());
@@ -5140,8 +5236,100 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     maybeIntro() {
       let seen = false;
       try { seen = localStorage.getItem('lp:intro-seen') === '1'; } catch (e) { /* 存储不可用 */ }
+      $('#intro-start').addEventListener('click', () => {
+        try { localStorage.setItem('lp:intro-seen', '1'); } catch (e) { /* 存储不可用 */ }
+        $('#intro').close();
+        this.maybeBoardSetup();
+      });
       if (!seen) $('#intro').showModal();
-      $('#intro-start').addEventListener('click', () => { try { localStorage.setItem('lp:intro-seen', '1'); } catch (e) { /* 存储不可用 */ } $('#intro').close(); });
+      else this.maybeBoardSetup();
+    },
+
+    // ---------- 开场：选定板子尺寸 ----------
+    maybeBoardSetup() {
+      if (!this.App.boardConfirmed) this.openBoardSetup();
+    },
+    openBoardSetup() {
+      const App = this.App, p = App.p, o = p.board.outline;
+      const d = $('#board-setup');
+      const body = $('#board-setup-body');
+      body.innerHTML = '';
+      const area = M.partsArea(p);
+      const need = Math.ceil(Math.max(area.top, area.bottom) * 2.2 / 10) * 10;
+      const presets = [];
+      if (o.type === 'rect') presets.push({ id: 'project', label: t('bs_project'), outline: { type: 'rect', w: o.w, h: o.h, corner_r: o.corner_r || 0 } });
+      if (o.type === 'circle') presets.push({ id: 'project', label: t('bs_project'), outline: { type: 'circle', d: o.d } });
+      presets.push(
+        { id: 'r30', label: t('bs_compact'), outline: { type: 'rect', w: 30, h: 20, corner_r: 2 } },
+        { id: 'r40', label: t('bs_standard'), outline: { type: 'rect', w: 40, h: 30, corner_r: 3 } },
+        { id: 'r50', label: t('bs_roomy'), outline: { type: 'rect', w: 50, h: 35, corner_r: 3 } },
+        { id: 'c32', label: t('bs_round'), outline: { type: 'circle', d: 32 } },
+        { id: 'custom', label: t('bs_custom'), outline: null },
+      );
+      let chosen = presets[0];
+      const dimText = (ol) => ol.type === 'circle' ? `Ø ${ol.d} mm` : `${ol.w} × ${ol.h} mm`;
+      const fits = (ol) => {
+        const A = G.outlineArea({ corner_r: 0, ...ol });
+        const bb = G.outlineBBox(ol);
+        const minSide = Math.min(bb.x1 - bb.x0, bb.y1 - bb.y0) * (ol.type === 'circle' ? 0.7 : 1);
+        return A >= need && minSide >= area.maxDim + 2;
+      };
+      const grid = h('div', { class: 'preset-grid', role: 'radiogroup', 'aria-label': t('bs_title') });
+      const custom = h('div', { class: 'custom-row', hidden: true });
+      const cShape = h('select', {}, h('option', { value: 'rect' }, t('board_rect')), h('option', { value: 'circle' }, t('board_circle')));
+      const num = (label, val) => h('label', { class: 'field' }, h('span', {}, label), h('input', { type: 'number', min: 5, step: 0.5, value: val }));
+      const cW = num(t('board_w'), o.w || 36), cH = num(t('board_h'), o.h || 28), cR = num(t('board_r'), o.corner_r ?? 2), cD = num(t('board_d'), o.d || 32);
+      custom.append(h('label', { class: 'field' }, h('span', {}, t('board_shape')), cShape), cW, cH, cR, cD);
+      const syncCustom = () => { const circ = cShape.value === 'circle'; cW.hidden = cH.hidden = cR.hidden = circ; cD.hidden = !circ; updateHint(); };
+      cShape.addEventListener('change', syncCustom);
+      custom.addEventListener('input', () => updateHint());
+      const customOutline = () => {
+        const v = (el) => parseFloat(el.querySelector('input').value);
+        return cShape.value === 'circle' ? { type: 'circle', d: v(cD) } : { type: 'rect', w: v(cW), h: v(cH), corner_r: Math.max(0, v(cR) || 0) };
+      };
+      const hint = h('p', { class: 'small bs-hint' });
+      const updateHint = () => {
+        const ol = chosen.outline || customOutline();
+        const ok = ol && Object.values(ol).every((x) => typeof x === 'string' || (Number.isFinite(x) && x >= 0));
+        const A = ok ? Math.round(G.outlineArea({ corner_r: 0, ...ol })) : 0;
+        hint.textContent = t('bs_area', { top: Math.round(area.top), bottom: Math.round(area.bottom), need, a: A });
+        hint.classList.toggle('warn', ok && !fits(ol));
+        if (ok && !fits(ol)) hint.textContent += ' ' + t('bs_too_small');
+      };
+      for (const pr of presets) {
+        const btn = h('button', { class: `preset ${pr === chosen ? 'on' : ''}`, role: 'radio', 'aria-checked': String(pr === chosen), type: 'button' });
+        const shape = h('span', { class: `preset-shape ${pr.outline && pr.outline.type === 'circle' ? 'circle' : pr.outline ? 'rect' : 'custom'}`, 'aria-hidden': 'true' });
+        if (pr.outline && pr.outline.type === 'rect') { const k = 34 / Math.max(pr.outline.w, pr.outline.h); shape.style.width = `${pr.outline.w * k}px`; shape.style.height = `${pr.outline.h * k}px`; }
+        btn.append(shape, h('span', { class: 'preset-label' }, pr.label), h('span', { class: 'preset-dim' }, pr.outline ? dimText(pr.outline) : t('bs_custom_dim')));
+        if (pr.outline && !fits(pr.outline)) btn.append(h('span', { class: 'preset-warn' }, t('bs_tight')));
+        btn.addEventListener('click', () => {
+          chosen = pr;
+          for (const b of grid.children) { b.classList.toggle('on', b === btn); b.setAttribute('aria-checked', String(b === btn)); }
+          custom.hidden = pr.id !== 'custom';
+          if (pr.id === 'custom') syncCustom(); else updateHint();
+        });
+        grid.append(btn);
+      }
+      const layers = h('select', {}, ...[2, 4, 6].map((n) => h('option', { value: n, selected: p.board.layers === n }, n)));
+      const two = h('input', { type: 'checkbox', checked: p.board.two_sided });
+      body.append(grid, custom, hint,
+        h('div', { class: 'row2 bs-opts' },
+          h('label', { class: 'field' }, h('span', {}, t('board_layers')), layers),
+          h('label', { class: 'field check' }, two, h('span', {}, t('board_two_sided')))),
+        h('p', { class: 'muted small' }, t('bs_later')));
+      updateHint();
+      const go = $('#board-setup-go');
+      go.onclick = () => {
+        const ol = chosen.outline || customOutline();
+        const bad = Object.entries(ol).some(([k, v]) => k !== 'type' && !(Number.isFinite(v) && (k === 'corner_r' ? v >= 0 : v >= 5)));
+        if (bad) { this.toast(t('bs_invalid'), 'bad'); return; }
+        d.close();
+        App.setupBoard({ outline: ol, layers: parseInt(layers.value, 10), two_sided: two.checked });
+        this.openStep = null;
+        this.renderAll();
+      };
+      d.addEventListener('cancel', (e) => e.preventDefault(), { once: false });
+      if (!d.open) d.showModal();
     },
 
     // ---------- 导入导出 ----------

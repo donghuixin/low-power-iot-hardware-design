@@ -202,11 +202,26 @@
     setBoard(patch) {
       this.commit(LP.t('ui.op_board'), () => {
         const b = this.p.board;
-        if (patch.outline) b.outline = { ...b.outline, ...patch.outline };
+        if (patch.outline) {
+          const old = { ...b.outline };
+          b.outline = patch.outline.type && patch.outline.type !== old.type ? { ...patch.outline } : { ...b.outline, ...patch.outline };
+          M.remapBoardFeatures(b, old, b.outline);
+        }
         for (const k of ['layers', 'thickness', 'two_sided', 'mask']) if (patch[k] !== undefined) b[k] = patch[k];
         if (patch.two_sided === false) for (const x of this.p.parts) if (x.placed && x.placed.side === 'bottom' && x.sides.includes('top')) x.placed.side = 'top';
       }, { noAnim: true, noDelta: true });
       if (this.renderer) this.renderer.requestDraw();
+    },
+    /** 开场选定的板框：直接写入（不进撤销栈），然后确认。 */
+    setupBoard(patch) {
+      const b = this.p.board;
+      const old = { ...b.outline };
+      b.outline = { corner_r: 0, ...patch.outline };
+      M.remapBoardFeatures(b, old, b.outline);
+      if (patch.layers) b.layers = patch.layers;
+      if (patch.two_sided !== undefined) b.two_sided = patch.two_sided;
+      this.confirmBoard();
+      if (this.renderer) this.renderer.fit(true);
     },
     confirmBoard() {
       this.boardConfirmed = true;

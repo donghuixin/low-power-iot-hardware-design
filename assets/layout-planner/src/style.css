@@ -219,6 +219,20 @@ button.primary:hover { opacity: 0.88; }
 .modal.wide { max-width: 620px; }
 .modal::backdrop { background: rgba(10, 10, 12, 0.35); backdrop-filter: blur(2px); }
 .modal h2 { margin: 0 0 12px; font-size: 17px; }
+.preset-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
+.preset { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 8px 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-solid); }
+.preset:hover { background: var(--hover); }
+.preset.on { border-color: var(--sel); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sel) 22%, transparent); }
+.preset-shape { display: block; height: 34px; margin-bottom: 4px; background: linear-gradient(135deg, #24694f, #1f5c46); border-radius: 4px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); }
+.preset-shape.circle { width: 34px; border-radius: 50%; }
+.preset-shape.custom { width: 34px; background: none; border: 2px dashed var(--muted); box-shadow: none; }
+.preset-label { font-weight: 650; font-size: 13px; }
+.preset-dim { font: 12px var(--mono); color: var(--muted); }
+.preset-warn { position: absolute; top: 6px; right: 6px; font-size: 10.5px; color: var(--warn); font-weight: 600; }
+.custom-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 6px; }
+.bs-hint { margin: 6px 0; }
+.bs-hint.warn { color: var(--warn); }
+.bs-opts { margin: 8px 0 4px; align-items: end; }
 .intro-steps { padding-left: 20px; display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; }
 .keys { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 8px; }
 .keys td { padding: 6px 4px; border-bottom: 1px solid var(--line); }

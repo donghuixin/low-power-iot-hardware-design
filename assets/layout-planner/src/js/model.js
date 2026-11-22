@@ -315,6 +315,49 @@
     return parseFloat(m[1]) * mul;
   }
 
+  // ---------- 改板框时同步固定孔与禁布区 ----------
+  /**
+   * 板框尺寸改变后，固定孔和禁布区保持到最近板角（矩形）或板边（圆形）的相对位置，
+   * 避免缩小板子后它们落到板外。多边形板框不做调整。
+   */
+  function remapBoardFeatures(board, oldO, newO) {
+    if (oldO.type === 'polygon' || newO.type === 'polygon') return;
+    const ob = G.outlineBBox(oldO), nb = G.outlineBBox(newO);
+    const mapPoint = (x, y) => {
+      if (oldO.type === 'circle' && newO.type === 'circle') {
+        const oc = G.center(ob), nc = G.center(nb), r0 = oldO.d / 2, r1 = newO.d / 2;
+        const dx = x - oc.x, dy = y - oc.y, d = Math.hypot(dx, dy) || 1;
+        const inset = r0 - d;
+        const nd = Math.max(0, r1 - inset);
+        return { x: nc.x + (dx / d) * nd, y: nc.y + (dy / d) * nd };
+      }
+      const fx = (x - ob.x0) / Math.max(ob.x1 - ob.x0, 1e-9), fy = (y - ob.y0) / Math.max(ob.y1 - ob.y0, 1e-9);
+      const nx = fx < 0.5 ? nb.x0 + (x - ob.x0) : nb.x1 - (ob.x1 - x);
+      const ny = fy < 0.5 ? nb.y0 + (y - ob.y0) : nb.y1 - (ob.y1 - y);
+      return { x: nx, y: ny };
+    };
+    for (const h of board.holes || []) { const q = mapPoint(h.x, h.y); h.x = r2(q.x); h.y = r2(q.y); }
+    for (const k of board.keepouts || []) {
+      const c = mapPoint(k.x + k.w / 2, k.y + k.h / 2);
+      // 贴边的禁布区保持贴边
+      const q = mapPoint(k.x, k.y);
+      const fx = (k.x + k.w / 2 - ob.x0) / Math.max(ob.x1 - ob.x0, 1e-9), fy = (k.y + k.h / 2 - ob.y0) / Math.max(ob.y1 - ob.y0, 1e-9);
+      k.x = r2(fx < 0.5 ? q.x : c.x - k.w / 2);
+      k.y = r2(fy < 0.5 ? q.y : c.y - k.h / 2);
+    }
+  }
+  /** 主器件占地面积（mm²），分正反面；用于提示板子是否够大。 */
+  function partsArea(p) {
+    let top = 0, bottom = 0, maxDim = 0;
+    for (const x of p.parts) {
+      const a = x.w * x.h;
+      if (x.sides.includes('top')) top += a; else bottom += a;
+      maxDim = Math.max(maxDim, Math.min(x.w, x.h));
+    }
+    for (const s of p.satellites) top += s.w * s.h;
+    return { top, bottom, maxDim };
+  }
+
   // ---------- 撤销快照与持久化 ----------
   function snapshot(p) {
     const parts = {}, sats = {};
@@ -399,6 +442,6 @@
     TOOL_VERSION, ROLES, SAT_KINDS, NET_CLASSES, SIDES, ROTS, SENSOR_ROLES,
     validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint,
     partByRef, satByRef, itemByRef, placedParts, partTags, satTags, connectedParts, parseCap,
-    snapshot, restore, definitionHash, exportLayout, resultObject, exportCSV, r2,
+    snapshot, restore, definitionHash, exportLayout, resultObject, exportCSV, r2, remapBoardFeatures, partsArea,
   };
 })(globalThis.LP = globalThis.LP || {});
