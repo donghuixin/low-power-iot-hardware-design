@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PCB 布局规划</title>
+<meta name="description" content="低功耗 IoT 硬件设计 skill 的交互式布局规划器：摆放主器件，实时查看布线复杂度与规则问题。">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app" data-theme="light">
+  <main id="stage" aria-label="电路板画布">
+    <canvas id="c2d"></canvas>
+    <div id="three-host"></div>
+    <div id="overlay"></div>
+  </main>
+
+  <header id="toolbar" data-ui>
+    <div class="tb-group tb-left">
+      <button id="btn-steps" class="tb-btn narrow-only" aria-label="步骤">步骤</button>
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">PCB 布局规划</span></div>
+      <span id="proj-name" class="proj-name"></span>
+      <span id="storage-note" class="storage-note" hidden>未自动保存，请手动导出</span>
+    </div>
+    <div class="tb-group tb-center">
+      <div class="seg" role="tablist" aria-label="视图">
+        <button id="v2d" class="active" role="tab" aria-selected="true" title="2D 俯视（T 切换）">2D</button>
+        <button id="v3d" role="tab" aria-selected="false" title="3D 视图（T 切换）">3D</button>
+      </div>
+    </div>
+    <div class="tb-group tb-right">
+      <button id="btn-flip" class="tb-btn" title="翻板查看背面（B）"><span>翻板</span></button>
+      <button class="tb-btn" data-menu="layers" aria-haspopup="true" aria-expanded="false">图层</button>
+      <button id="btn-undo" class="tb-btn icon" title="撤销（Ctrl/⌘ + Z）" aria-label="撤销"></button>
+      <button id="btn-redo" class="tb-btn icon" title="重做（Ctrl/⌘ + Shift + Z）" aria-label="重做"></button>
+      <button class="tb-btn" data-menu="export" aria-haspopup="true" aria-expanded="false">导出</button>
+      <button class="tb-btn" data-menu="more" aria-haspopup="true" aria-expanded="false">更多</button>
+      <button id="btn-help" class="tb-btn icon" title="帮助" aria-label="帮助">?</button>
+      <a id="btn-star" class="tb-btn star" href="https://github.com/donghuixin/low-power-iot-hardware-design" target="_blank" rel="noopener" title="在 GitHub 上 Star 或 Fork 这个 skill，获取后续更新"><span>Star</span></a>
+      <button id="btn-eval" class="tb-btn narrow-only" aria-label="评估">评估</button>
+    </div>
+  </header>
+
+  <aside id="left" class="panel" data-ui aria-label="布局步骤">
+    <h2 class="panel-title">布局步骤</h2>
+    <ol id="steps" class="steps"></ol>
+    <p id="steps-hint" class="muted small"></p>
+  </aside>
+
+  <aside id="right" class="panel" data-ui aria-label="评估">
+    <section>
+      <h2 class="panel-title">布线复杂度</h2>
+      <div id="metrics" class="metrics"></div>
+    </section>
+    <section>
+      <h2 class="panel-title">本次移动</h2>
+      <div id="delta" class="delta"></div>
+    </section>
+    <section class="grow">
+      <h2 class="panel-title">问题 <span id="issue-count" class="count"></span></h2>
+      <ul id="issues" class="issues"></ul>
+    </section>
+    <p class="disclaimer">启发式估计，用于比较方案，不等于实际布线结果。</p>
+  </aside>
+
+  <footer id="tray" class="panel" data-ui aria-label="器件托盘">
+    <div class="tray-head">
+      <span class="panel-title">器件托盘</span>
+      <span id="tray-count" class="muted small"></span>
+      <span class="muted small tray-hint">拖到板上；当前步骤要放的器件已高亮</span>
+      <span id="tray-sats" class="small" hidden></span>
+    </div>
+    <div id="tray-list" class="tray-list"></div>
+  </footer>
+
+  <div id="menu-layers" class="menu" data-ui hidden role="menu"></div>
+  <div id="menu-export" class="menu" data-ui hidden role="menu"></div>
+  <div id="menu-more" class="menu" data-ui hidden role="menu"></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <input id="file-input" type="file" accept=".json,application/json" hidden>
+
+  <dialog id="intro" class="modal" data-ui>
+    <h2>布局规划器</h2>
+    <ol class="intro-steps">
+      <li><strong>拾取主器件。</strong>单击托盘或板上的器件把它拿起来，它的去耦电容、晶体等卫星器件会跟着悬浮环绕；再单击放下，卫星自动落到最近的合适位置。</li>
+      <li><strong>看反馈。</strong>右侧实时显示布线难易和规则问题，每次移动都会说明指标为什么变了。</li>
+      <li><strong>导出。</strong>摆好后导出布局 JSON，交回给 Claude 做正式的 Layout 评审。</li>
+    </ol>
+    <p class="muted small">这个工具来自开源的低功耗 IoT 硬件设计 skill。觉得有用，欢迎在 <a href="https://github.com/donghuixin/low-power-iot-hardware-design" target="_blank" rel="noopener">GitHub</a> 上 Star 或 Fork，方便获取后续更新、提交改进。</p>
+    <div class="btn-row end"><button id="intro-start" class="primary">开始</button></div>
+  </dialog>
+
+  <dialog id="help" class="modal wide" data-ui>
+    <h2>操作说明</h2>
+    <table class="keys">
+      <tbody>
+        <tr><td>拾取 / 放下器件</td><td>左键单击拾取，器件和它的卫星跟随光标悬浮；再次单击落地。也可以按住拖动</td></tr>
+        <tr><td>放回托盘 / 取消拾取</td><td>拾取中点击托盘 / <kbd>Esc</kbd></td></tr>
+        <tr><td>旋转 90°</td><td><kbd>R</kbd>（拾取中也可以按 <kbd>R</kbd> 或右键）</td></tr>
+        <tr><td>换面</td><td><kbd>F</kbd></td></tr>
+        <tr><td>锁定 / 解锁</td><td><kbd>L</kbd></td></tr>
+        <tr><td>放回托盘</td><td><kbd>Delete</kbd> 或 <kbd>Backspace</kbd></td></tr>
+        <tr><td>微调</td><td>方向键（0.5 mm），<kbd>Shift</kbd> + 方向键（5 mm）</td></tr>
+        <tr><td>临时关闭吸附</td><td>按住 <kbd>Alt</kbd></td></tr>
+        <tr><td>平移 / 缩放</td><td>拖动空白处、中键或 <kbd>空格</kbd> + 拖动 / 滚轮</td></tr>
+        <tr><td>旋转视角（仅 3D）</td><td><kbd>右键</kbd>拖动</td></tr>
+        <tr><td>2D / 3D 切换</td><td><kbd>T</kbd></td></tr>
+        <tr><td>翻板</td><td><kbd>B</kbd></td></tr>
+        <tr><td>撤销 / 重做</td><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Z</kbd> / <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></td></tr>
+        <tr><td>采纳朝向建议</td><td><kbd>Enter</kbd></td></tr>
+        <tr><td>取消选择</td><td><kbd>Esc</kbd></td></tr>
+      </tbody>
+    </table>
+    <p class="muted small">触屏：单指拖器件，双指缩放和平移；选中器件后用上方的按钮旋转、换面、锁定。托盘中的器件获得焦点后按 <kbd>Enter</kbd> 可直接放到板上。</p>
+    <p class="muted small">指标是启发式估计，只用于比较两种摆法；默认规则参数是典型值，器件手册给出具体数值时在项目数据中覆盖。</p>
+    <p class="muted small">项目主页：<a href="https://github.com/donghuixin/low-power-iot-hardware-design" target="_blank" rel="noopener">donghuixin/low-power-iot-hardware-design</a>。Star 或 Fork 可以获取后续更新，也欢迎提交改进。</p>
+    <form method="dialog" class="btn-row end"><button class="primary">知道了</button></form>
+  </dialog>
+
+  <dialog id="errors" class="modal wide" data-ui>
+    <h2 id="errors-title">项目数据有问题</h2>
+    <ul id="errors-list" class="errors-list"></ul>
+    <form method="dialog" class="btn-row end"><button class="primary">关闭</button></form>
+  </dialog>
+</div>
+
+<script type="application/json" id="project-data"></script>
+<script type="application/json" id="example-data" data-src="../../layout-project-example.json"></script>
+<script type="text/plain" id="three-src" data-src="../vendor/three.module.min.js"></script>
+<script src="js/strings.js"></script>
+<script src="js/geometry.js"></script>
+<script src="js/model.js"></script>
+<script src="js/rules.js"></script>
+<script src="js/satellites.js"></script>
+<script src="js/metrics.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/render2d.js"></script>
+<script src="js/render3d.js"></script>
+<script src="js/app.js"></script>
+<script src="js/interaction.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
