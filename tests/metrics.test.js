@@ -96,3 +96,11 @@ test('规划合格的卫星不计入拥挤度，超距的才计入', () => {
   const counted = LP.metrics.congestionMetric(p, ev.metrics.edges, ev.zones, badAll).peak;
   assert.ok(counted > okAll, `${okAll.toFixed(2)} vs ${counted.toFixed(2)}`);
 });
+
+test('关键网络按 45° 走线估计，斜向摆放不误判超限', () => {
+  const base = { BT1: [13, 13, 0, 'bottom'], J1: [27, 5, 0], SW1: [33.5, 8, 0], D1: [33, 11.5, 0], U3: [10, 25.5, 180], U4: [14, 23, 0] };
+  const { p, ev } = evalOf({ ...base, ANT1: [3.3, 9, 180], U2: [9.5, 4, 0], U1: [15, 13, 90] });
+  const rf = ev.metrics.critical.items.find((x) => x.name === 'RF_FEED');
+  const P = LP.model.pinWorld(LP.model.partByRef(p, 'U1'), 'RF'), A = LP.model.pinWorld(LP.model.partByRef(p, 'ANT1'), 'FEED');
+  assert.ok(LP.geometry.manhattan(P, A) > 10 && rf.ok, `曼哈顿 ${LP.geometry.manhattan(P, A).toFixed(1)}，45° 估计 ${rf.value.toFixed(1)}`);
+});

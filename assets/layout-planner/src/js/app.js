@@ -203,8 +203,10 @@
       this.commit(LP.t('ui.op_board'), () => {
         const b = this.p.board;
         if (patch.outline) {
-          const old = { ...b.outline };
-          b.outline = patch.outline.type && patch.outline.type !== old.type ? { ...patch.outline } : { ...b.outline, ...patch.outline };
+          const old = JSON.parse(JSON.stringify(b.outline));
+          // 带 type 的是完整板框（形状切换），否则只改尺寸
+          b.outline = patch.outline.type ? JSON.parse(JSON.stringify(patch.outline)) : { ...b.outline, ...patch.outline };
+          if (b.outline.shape === 'stadium') b.outline.corner_r = Math.min(b.outline.w, b.outline.h) / 2;
           M.remapBoardFeatures(b, old, b.outline);
         }
         for (const k of ['layers', 'thickness', 'two_sided', 'mask']) if (patch[k] !== undefined) b[k] = patch[k];
@@ -279,6 +281,7 @@
       setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     },
     exportJSON() { this.download(`${this.slug()}-layout.json`, JSON.stringify(M.exportLayout(this.p, this.ev), null, 2), 'application/json'); },
+    exportDXF() { this.download(`${this.slug()}-outline.dxf`, M.exportDXF(this.p), 'application/dxf'); },
     exportCSV() { this.download(`${this.slug()}-placement.csv`, '﻿' + M.exportCSV(this.p), 'text/csv'); },
 
     setAnim(on) {

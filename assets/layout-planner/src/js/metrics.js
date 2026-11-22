@@ -213,10 +213,15 @@
     };
   }
 
+  /** 关键网络长度：按 45° 走线估计（射频线等实际走斜线，曼哈顿距离会高估 30%～40%）。 */
+  function criticalLengths(edges) {
+    const perNet = new Map();
+    for (const e of edges) perNet.set(e.net, (perNet.get(e.net) || 0) + G.octilinear(e.a, e.b));
+    return perNet;
+  }
   function criticalMetric(p, edges, satResults) {
     const items = [];
-    const perNet = new Map();
-    for (const e of edges) perNet.set(e.net, (perNet.get(e.net) || 0) + e.len);
+    const perNet = criticalLengths(edges);
     for (const net of p.nets) {
       const limit = net.max_len || (net.class === 'rf' ? CONFIG.rfDefaultMaxLen : null);
       if (!limit || !perNet.has(net.name)) continue;
@@ -225,7 +230,7 @@
     }
     for (const [ref, r] of Object.entries(satResults || {})) {
       if (!r.considered) continue;
-      items.push({ kind: 'sat', name: `${ref} → ${r.parentRef}`, ref, value: r.dist, limit: r.limit, ok: r.ok, refs: [ref, r.parentRef], unplaced: !r.placed });
+      items.push({ kind: 'sat', name: `${ref} → ${r.parentRef}`, ref, value: r.dist, limit: r.limit, ok: r.ok, refs: [ref, r.parentRef].concat(r.blocker ? [r.blocker] : []), unplaced: !r.placed, rf: r.rf });
     }
     const bad = items.filter((x) => !x.ok);
     let st = 'good';
@@ -396,7 +401,7 @@
   }
 
   LP.metrics = {
-    CONFIG, status, netNodes, mst, netEdges, obstacles,
+    CONFIG, status, netNodes, mst, netEdges, obstacles, criticalLengths,
     lengthMetric, crossingMetric, congestionMetric, criticalMetric, exitMetric, layerMetric,
     evaluate, quick, diff, orientationSuggestion, nearestPart,
   };

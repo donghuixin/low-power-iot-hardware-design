@@ -83,3 +83,35 @@ test('规则引用的核对清单编号都存在于 references/checklists.md', (
   const used = new Set([...LP.rules.DEFAULT_RULES.map((r) => r.check), ...Object.values(M.SAT_KINDS).map((k) => k.check), 'SI-01'].filter(Boolean));
   for (const id of used) assert.ok(ids.has(id), `清单中缺少 ${id}`);
 });
+
+test('天线馈点朝向板外时提示旋转', () => {
+  const p = place(LP, loadExample(LP), { ...GOOD, ANT1: [33.2, 20, 180] });
+  const ev = LP.engine.evaluate(p);
+  assert.ok(ev.issues.some((i) => i.rule === 'antenna_feed' && i.severity === 'P2' && i.check === 'RF-05' && /转 180°/.test(i.fix)));
+  assert.ok(!LP.engine.evaluate(place(LP, loadExample(LP), GOOD)).issues.some((i) => i.rule === 'antenna_feed'));
+});
+
+test('改板框形状后固定孔压到板边时报出', () => {
+  const p = loadExample(LP);
+  const old = { ...p.board.outline };
+  p.board.outline = M.outlineFromShape('chamfer', { w: 36, h: 28, c: 6 });
+  M.remapBoardFeatures(p.board, old, p.board.outline);
+  const I = LP.engine.evaluate(p).issues;
+  assert.ok(I.some((i) => i.refs.includes('孔1') && i.severity === 'P1' && /固定孔 1/.test(i.msg)), I.map((i) => i.msg).join('\n'));
+  assert.ok(!LP.engine.evaluate(loadExample(LP)).issues.some((i) => /固定孔/.test(i.msg)), '原始板框不报');
+});
+
+test('板框形状：各形状生成有效的项目数据，L 形缺口处不在板内', () => {
+  const raw = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'assets', 'layout-project-example.json'), 'utf8'));
+  for (const s of ['rect', 'stadium', 'chamfer', 'lshape', 'circle']) {
+    raw.board.outline = M.outlineFromShape(s, { w: 40, h: 30, r: 2, c: 4, d: 32 });
+    assert.equal(M.validate(raw).length, 0, s);
+    assert.equal(M.shapeOf(raw.board.outline), s);
+  }
+  const L = M.outlineFromShape('lshape', { w: 40, h: 30, nw: 16, nh: 12 });
+  assert.equal(LP.geometry.pointInBoard(L, { x: 35, y: 25 }), false);
+  assert.equal(LP.geometry.pointInBoard(L, { x: 10, y: 25 }), true);
+  const dxf = M.exportDXF({ board: { outline: L, holes: [{ x: 3, y: 3, d: 2 }] } });
+  assert.equal((dxf.match(/\r\nLINE\r\n/g) || []).length, 6);
+  assert.equal((dxf.match(/\r\nCIRCLE\r\n/g) || []).length, 1);
+});

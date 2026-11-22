@@ -59,6 +59,8 @@
     return [{ x: r.x0, y: r.y0 }, { x: r.x1, y: r.y0 }, { x: r.x1, y: r.y1 }, { x: r.x0, y: r.y1 }];
   }
   function manhattan(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); }
+  /** 45° 走线的长度估计（横竖加斜线），用于射频馈线等关键网络。 */
+  function octilinear(a, b) { const dx = Math.abs(a.x - b.x), dy = Math.abs(a.y - b.y); return Math.max(dx, dy) + (Math.SQRT2 - 1) * Math.min(dx, dy); }
   function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
 
   function orient(a, b, c) { return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x); }
@@ -195,7 +197,7 @@
 
   LP.geometry = {
     EPS, rect, rectFromCenter, width, height, area, center, expand, expandSides, union, translate,
-    overlaps, overlapArea, rectDist, pointRectDist, containsPoint, containsRect, corners, manhattan, dist,
+    overlaps, overlapArea, rectDist, pointRectDist, containsPoint, containsRect, corners, manhattan, octilinear, dist,
     segIntersect, segIntersectionPoint, pointSegDist, segIntersectsRect,
     outlinePolygon, outlineBBox, outlineArea, pointInPolygon, pointInBoard, distToBoardEdge,
     rectInBoard, rectEdgeDistance, faceOutside,

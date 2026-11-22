@@ -237,7 +237,11 @@ button.primary:hover { opacity: 0.88; }
 .preset-label { font-weight: 650; font-size: 13px; }
 .preset-dim { font: 12px var(--mono); color: var(--muted); }
 .preset-warn { position: absolute; top: 6px; right: 6px; font-size: 10.5px; color: var(--warn); font-weight: 600; }
-.custom-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 6px; }
+.custom-row { margin-bottom: 6px; }
+.shape-editor { display: flex; flex-direction: column; gap: 8px; }
+.shape-fields { display: flex; flex-direction: column; gap: 8px; }
+.shape-fields p { margin: 0; }
+.eda-note { margin: 4px 0 0; padding: 7px 9px; border-radius: 8px; background: color-mix(in srgb, var(--sel) 9%, transparent); color: var(--text); }
 .bs-hint { margin: 6px 0; }
 .bs-hint.warn { color: var(--warn); }
 .bs-opts { margin: 8px 0 4px; align-items: end; }
@@ -537,14 +541,16 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       overlap:        { msg: '{a} 与 {b} 重叠', fix: '把其中一个移开，器件之间至少留出装配间距。' },
       outside_board:  { msg: '{a} 超出板框', fix: '把 {a} 移回板内。' },
       in_keepout:     { msg: '{a} 进入禁布区（{reason}）', fix: '把 {a} 移出禁布区。' },
+      hole_edge:      { msg: '{a}（{x}, {y}）超出板框或离板边不足 0.5 mm', fix: '在嘉立创 EDA 中按外壳图纸调整孔位，或在项目数据中修改孔的坐标。' },
       on_hole:        { msg: '{a} 压在固定孔上', fix: '把 {a} 移开固定孔，留出螺丝头和垫片的位置。' },
       edge_min_all:   { msg: '{a} 距板边 {d} mm，小于 {min} mm：分板和装配时容易损伤', fix: '把 {a} 往板内移约 {need} mm。' },
       antenna_edge:   { msg: '{a} 距板边 {d} mm，没有贴板边：天线被地平面和器件包围，辐射效率下降', fix: '把 {a} 移到板边或板角，馈点朝向板内。' },
       connector_edge: { msg: '{a} 没有贴板边或开口没有朝外：线缆插不进外壳开孔', fix: '把 {a} 移到板边，开口一侧朝外（R 键旋转）。' },
       temp_edge:      { msg: '{a} 距板边 {d} mm：远离板边时更容易受板上热量影响', fix: '把 {a} 放到板边 3 mm 以内，周围可开隔热槽。' },
       antenna_keepout:{ msg: '{b} 进入 {a} 的天线净空区：净空区内所有层都不应有铜和器件', fix: '把 {b} 移出青色区域。' },
+      antenna_feed:   { msg: '{a} 的馈点朝向板外：馈线要绕到天线最远的一端', fix: '按 R 把 {a} 转 180°，让馈点一侧朝向主控。' },
       antenna_metal:  { msg: '{b} 距天线 {a} {d} mm，小于 {min} mm：大块金属会使天线失谐', fix: '把 {b} 移到离天线至少 {min} mm 的位置，或把天线移到另一侧板边。' },
-      rf_feed_len:    { msg: '射频馈线 {net} 约 {len} mm，超过 {limit} mm：馈线损耗和失配增加', fix: '把主控的射频引脚一侧靠近天线馈点。' },
+      rf_feed_len:    { msg: '射频馈线 {net} 约 {len} mm（按 45° 走线估计），超过 {limit} mm：馈线损耗和失配增加', fix: '把主控的射频引脚一侧转向天线并靠近馈点；天线手册允许更长时在项目数据中覆盖 max_len。' },
       net_len:        { msg: '网络 {net} 约 {len} mm，超过 {limit} mm', fix: '缩短 {net} 两端器件的距离。' },
       imu_edge:       { msg: '{a} 距板边 {d} mm，小于 {min} mm：板边应力会使零偏漂移', fix: '把 {a} 往板内移约 {need} mm。' },
       imu_stress:     { msg: '{a} 距 {b} {d} mm，小于 {min} mm：螺丝、连接器和按键的受力会传到 IMU', fix: '把 {a} 移开 {b} 约 {need} mm。' },
@@ -605,6 +611,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       m_congestion: '拥挤度峰值', m_congestion_desc: '哪里走不出线', m_congestion_over: '超过容量的区域占 {p}；点击查看热力图',
       m_critical: '关键网络', m_critical_desc: '射频馈线、晶体、去耦、电源回路是否够短',
       m_critical_ok: '{n} 项均达标', m_critical_bad: '{n} 项超限', m_critical_all_ok: '关键网络全部达标',
+      m_critical_list: '{list}', m_critical_more: '等 {n} 项；点击定位',
+      m_critical_net: '{name} {v}/{limit} mm', m_critical_sat: '{name} {v}/{limit} mm', m_critical_unplaced: '{name} 放不下',
       m_exit: '出线压力', m_exit_desc: '多引脚器件的某一侧是否被堵住', m_exit_where: '{ref} {side}侧：{need} 根线，约 {ch} 条通道',
       m_layers: '层数建议', m_layers_desc: '成本影响；点击查看理由', m_layers_value: '{n} 层',
       status_good: '良好', status_warn: '留意', status_bad: '需处理',
@@ -620,7 +628,15 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       step_skip: '本项目没有这类器件，可跳过。', step_done: '本步所有规则通过',
       step_state_todo: '未完成', step_state_issues: '有问题', step_state_done: '已完成', step_state_skip: '不适用',
       board_shape: '外形', board_rect: '矩形', board_circle: '圆形', board_polygon: '多边形（来自项目数据）',
-      board_w: '宽 (mm)', board_h: '高 (mm)', board_r: '圆角 (mm)', board_d: '直径 (mm)',
+      board_w: '宽 (mm)', board_h: '高 (mm)', board_r: '圆角 (mm)', board_d: '直径 (mm)', board_c: '倒角 (mm)', board_nw: '缺口宽 (mm)', board_nh: '缺口高 (mm)',
+      shape_rect: '矩形 / 圆角矩形', shape_stadium: '胶囊形', shape_chamfer: '倒角矩形', shape_lshape: 'L 形', shape_circle: '圆形', shape_custom: '自定义多边形',
+      shape_custom_hint: '{n} 个顶点。在板上拖动顶点修改形状；双击边添加顶点，双击顶点删除。',
+      shape_lshape_hint: '缺口在右上角；需要其他方向时可改为自定义多边形再拖动顶点。',
+      board_edit_hint_poly: '在板上拖动圆点（顶点）修改形状；双击边添加顶点，双击顶点删除。',
+      toast_min_vertices: '多边形至少保留 3 个顶点',
+      eda_final_outline: '这里的板框用于摆放规划。布局完成后，建议导入嘉立创 EDA，在其中按外壳图纸绘制最终板框。',
+      eda_next_step: '下一步：导出板框 DXF 和位置表 CSV，导入嘉立创 EDA 作为摆放起点，在其中绘制最终板框并完成布线。',
+      export_dxf: '板框 DXF（导入嘉立创 EDA）', export_dxf_short: '板框 DXF',
       board_layers: '层数', board_thickness: '板厚 (mm)', board_two_sided: '允许双面贴装', board_mask: '阻焊颜色',
       board_confirm: '确认板框，开始摆放', board_reconfirm: '完成修改',
       board_edit_hint: '也可以拖动板子右边、上边或右上角的圆点直接改尺寸。',
@@ -746,6 +762,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     return [{ x: r.x0, y: r.y0 }, { x: r.x1, y: r.y0 }, { x: r.x1, y: r.y1 }, { x: r.x0, y: r.y1 }];
   }
   function manhattan(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); }
+  /** 45° 走线的长度估计（横竖加斜线），用于射频馈线等关键网络。 */
+  function octilinear(a, b) { const dx = Math.abs(a.x - b.x), dy = Math.abs(a.y - b.y); return Math.max(dx, dy) + (Math.SQRT2 - 1) * Math.min(dx, dy); }
   function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
 
   function orient(a, b, c) { return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x); }
@@ -882,7 +900,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
 
   LP.geometry = {
     EPS, rect, rectFromCenter, width, height, area, center, expand, expandSides, union, translate,
-    overlaps, overlapArea, rectDist, pointRectDist, containsPoint, containsRect, corners, manhattan, dist,
+    overlaps, overlapArea, rectDist, pointRectDist, containsPoint, containsRect, corners, manhattan, octilinear, dist,
     segIntersect, segIntersectionPoint, pointSegDist, segIntersectsRect,
     outlinePolygon, outlineBBox, outlineArea, pointInPolygon, pointInBoard, distToBoardEdge,
     rectInBoard, rectEdgeDistance, faceOutside,
@@ -1209,13 +1227,66 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     return parseFloat(m[1]) * mul;
   }
 
+  // ---------- 板框形状 ----------
+  /** 可选的板框形状。rect/stadium/circle 用解析形状；chamfer/lshape/custom 存为多边形，并记下 shape 与参数以便再次编辑。 */
+  const BOARD_SHAPES = ['rect', 'stadium', 'chamfer', 'lshape', 'circle', 'custom'];
+  /** 由形状和参数生成板框。参数：w、h、r（圆角）、c（倒角）、nw/nh（L 形右上角缺口）、d（直径）、points（自定义）。 */
+  function outlineFromShape(shape, q) {
+    const w = q.w, h = q.h;
+    switch (shape) {
+      case 'circle': return { type: 'circle', d: q.d };
+      case 'stadium': return { type: 'rect', w, h, corner_r: Math.min(w, h) / 2, shape: 'stadium' };
+      case 'chamfer': {
+        const c = Math.max(0.5, Math.min(q.c ?? 3, w / 2 - 0.5, h / 2 - 0.5));
+        return { type: 'polygon', shape: 'chamfer', w, h, c, points: [[c, 0], [w - c, 0], [w, c], [w, h - c], [w - c, h], [c, h], [0, h - c], [0, c]] };
+      }
+      case 'lshape': {
+        const nw = Math.max(1, Math.min(q.nw ?? w * 0.4, w - 2)), nh = Math.max(1, Math.min(q.nh ?? h * 0.4, h - 2));
+        return { type: 'polygon', shape: 'lshape', w, h, nw, nh, points: [[0, 0], [w, 0], [w, h - nh], [w - nw, h - nh], [w - nw, h], [0, h]] };
+      }
+      case 'custom': return { type: 'polygon', shape: 'custom', points: q.points.map((pt) => [r2(pt[0]), r2(pt[1])]) };
+      case 'rect': default: return { type: 'rect', w, h, corner_r: Math.max(0, q.r ?? 0) };
+    }
+  }
+  /** 当前板框属于哪种形状（供界面回显）。 */
+  function shapeOf(o) {
+    if (o.type === 'circle') return 'circle';
+    if (o.type === 'rect') return o.shape === 'stadium' ? 'stadium' : 'rect';
+    return ['chamfer', 'lshape'].includes(o.shape) ? o.shape : 'custom';
+  }
+  /** 转为可逐点编辑的多边形：只保留形状的特征顶点（圆角忽略，圆形取 16 边形）。 */
+  function toEditablePolygon(o) {
+    if (o.type === 'polygon') return { type: 'polygon', shape: 'custom', points: o.points.map((pt) => [...pt]) };
+    if (o.type === 'circle') {
+      const r = o.d / 2;
+      return { type: 'polygon', shape: 'custom', points: Array.from({ length: 16 }, (_, i) => { const a = (i / 16) * Math.PI * 2; return [r2(r + r * Math.cos(a)), r2(r + r * Math.sin(a))]; }) };
+    }
+    return { type: 'polygon', shape: 'custom', points: [[0, 0], [o.w, 0], [o.w, o.h], [0, o.h]] };
+  }
+  /** 板框 DXF（R12，毫米）：外框为 BOARD 层线段，固定孔为 HOLES 层圆。可导入嘉立创 EDA 作为初始板框。 */
+  function exportDXF(p) {
+    const out = ['0', 'SECTION', '2', 'HEADER', '9', '$INSUNITS', '70', '4', '0', 'ENDSEC', '0', 'SECTION', '2', 'ENTITIES'];
+    const f = (v) => (Math.round(v * 1000) / 1000).toFixed(3);
+    const o = p.board.outline;
+    if (o.type === 'circle') out.push('0', 'CIRCLE', '8', 'BOARD', '10', f(o.d / 2), '20', f(o.d / 2), '30', '0', '40', f(o.d / 2));
+    else {
+      const pts = G.outlinePolygon(o);
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i], b = pts[(i + 1) % pts.length];
+        out.push('0', 'LINE', '8', 'BOARD', '10', f(a.x), '20', f(a.y), '30', '0', '11', f(b.x), '21', f(b.y), '31', '0');
+      }
+    }
+    for (const h of p.board.holes || []) out.push('0', 'CIRCLE', '8', 'HOLES', '10', f(h.x), '20', f(h.y), '30', '0', '40', f(h.d / 2));
+    out.push('0', 'ENDSEC', '0', 'EOF');
+    return out.join('\r\n') + '\r\n';
+  }
+
   // ---------- 改板框时同步固定孔与禁布区 ----------
   /**
-   * 板框尺寸改变后，固定孔和禁布区保持到最近板角（矩形）或板边（圆形）的相对位置，
-   * 避免缩小板子后它们落到板外。多边形板框不做调整。
+   * 板框尺寸改变后，固定孔和禁布区保持到最近板角（按外包矩形）或板边（圆形之间）的相对位置，
+   * 避免缩小板子后它们落到板外。
    */
   function remapBoardFeatures(board, oldO, newO) {
-    if (oldO.type === 'polygon' || newO.type === 'polygon') return;
     const ob = G.outlineBBox(oldO), nb = G.outlineBBox(newO);
     const mapPoint = (x, y) => {
       if (oldO.type === 'circle' && newO.type === 'circle') {
@@ -1336,7 +1407,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     TOOL_VERSION, ROLES, SAT_KINDS, NET_CLASSES, SIDES, ROTS, SENSOR_ROLES,
     validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint,
     partByRef, satByRef, itemByRef, placedParts, partTags, satTags, connectedParts, parseCap,
-    snapshot, restore, definitionHash, exportLayout, resultObject, exportCSV, r2, remapBoardFeatures, partsArea,
+    snapshot, restore, definitionHash, exportLayout, resultObject, exportCSV, r2, remapBoardFeatures, partsArea, BOARD_SHAPES, outlineFromShape, shapeOf, toEditablePolygon, exportDXF,
   };
 })(globalThis.LP = globalThis.LP || {});
 
@@ -1359,6 +1430,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     { id: 'antenna_edge', type: 'edge_required', select: { roles: ['antenna', 'rf_module'] }, tol: 0.5, severity: 'P1', check: 'RF-01' },
     { id: 'connector_edge', type: 'edge_required', select: { roles: ['connector', 'button'] }, onlyEdgeFlag: true, tol: 0.5, severity: 'P0', check: 'ASM-02' },
     { id: 'temp_edge', type: 'edge_required', select: { roles: ['temp_humidity'] }, tol: 3, severity: 'P3', check: 'SEN-02' },
+    { id: 'antenna_feed', type: 'feed_facing', select: { roles: ['antenna'] }, tol: 0.5, severity: 'P2', check: 'RF-05' },
     { id: 'antenna_keepout', type: 'keepout_zone', select: { roles: ['antenna'] }, clearance: 3, severity: 'P1', check: 'RF-01' },
     { id: 'antenna_metal', type: 'min_distance', a: { roles: ['antenna', 'rf_module'] }, b: { roles: ['battery', 'connector'], tags: ['shield'] }, min: 5, severity: 'P1', check: 'RF-03' },
     { id: 'rf_feed_len', type: 'max_net_length', classes: ['rf'], def: 10, severity: 'P2', check: 'RF-04' },
@@ -1514,6 +1586,10 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
           break;
         }
         case 'inside_board': {
+          // 固定孔（含 0.5 mm 余量）须在板内：改板框形状后孔可能压到板边
+          (p.board.holes || []).forEach((h, i) => {
+            if (!G.rectInBoard(o, G.expand(holeRect(h), 0.5))) issues.push(issue({ ...rule, severity: 'P1' }, 'hole_edge', [`孔${i + 1}`], { a: `固定孔 ${i + 1}`, x: h.x, y: h.y }));
+          });
           for (const e of parts) {
             if (!G.rectInBoard(o, e.rect)) { issues.push(issue(rule, 'outside_board', [e.ref], { a: e.ref })); continue; }
             for (const k of p.board.keepouts || []) if (G.overlaps(e.rect, { x0: k.x, y0: k.y, x1: k.x + k.w, y1: k.y + k.h })) issues.push(issue(rule, 'in_keepout', [e.ref], { a: e.ref, reason: k.reason || '禁布区' }));
@@ -1540,6 +1616,17 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
             let ok = d <= rule.tol + 1e-6;
             if (ok && e.item.edge_face) ok = G.faceOutside(o, e.rect, M.worldSide(e.item.edge_face, e.item.placed), rule.tol + 0.3);
             if (!ok) issues.push(issue(rule, rule.id, [e.ref], { a: e.ref, d: f1(d), tol: rule.tol }));
+          }
+          break;
+        }
+        case 'feed_facing': {
+          // 馈点一侧贴着板边（朝向板外）：馈线要绕到天线最远端，净空区也被挤进板内
+          for (const e of parts) {
+            if (!matches(e, rule.select)) continue;
+            const feed = e.item.pins.find((q) => /feed/i.test(q.id)) || e.item.pins[0];
+            if (!feed || feed.side === 'C' || !G.rectInBoard(o, e.rect)) continue;
+            const side = M.worldSide(feed.side, e.item.placed);
+            if (G.faceOutside(o, e.rect, side, rule.tol + 0.3)) issues.push(issue(rule, 'antenna_feed', [e.ref], { a: e.ref }));
           }
           break;
         }
@@ -1574,8 +1661,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
           break;
         }
         case 'max_net_length': {
-          const per = new Map();
-          for (const e of LP.metrics.netEdges(p)) per.set(e.net, (per.get(e.net) || 0) + e.len);
+          const per = LP.metrics.criticalLengths(LP.metrics.netEdges(p));
           for (const net of p.nets) {
             const isClass = (rule.classes || []).includes(net.class);
             const limit = net.max_len || (isClass ? rule.def : null);
@@ -2208,10 +2294,15 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     };
   }
 
+  /** 关键网络长度：按 45° 走线估计（射频线等实际走斜线，曼哈顿距离会高估 30%～40%）。 */
+  function criticalLengths(edges) {
+    const perNet = new Map();
+    for (const e of edges) perNet.set(e.net, (perNet.get(e.net) || 0) + G.octilinear(e.a, e.b));
+    return perNet;
+  }
   function criticalMetric(p, edges, satResults) {
     const items = [];
-    const perNet = new Map();
-    for (const e of edges) perNet.set(e.net, (perNet.get(e.net) || 0) + e.len);
+    const perNet = criticalLengths(edges);
     for (const net of p.nets) {
       const limit = net.max_len || (net.class === 'rf' ? CONFIG.rfDefaultMaxLen : null);
       if (!limit || !perNet.has(net.name)) continue;
@@ -2220,7 +2311,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     }
     for (const [ref, r] of Object.entries(satResults || {})) {
       if (!r.considered) continue;
-      items.push({ kind: 'sat', name: `${ref} → ${r.parentRef}`, ref, value: r.dist, limit: r.limit, ok: r.ok, refs: [ref, r.parentRef], unplaced: !r.placed });
+      items.push({ kind: 'sat', name: `${ref} → ${r.parentRef}`, ref, value: r.dist, limit: r.limit, ok: r.ok, refs: [ref, r.parentRef].concat(r.blocker ? [r.blocker] : []), unplaced: !r.placed, rf: r.rf });
     }
     const bad = items.filter((x) => !x.ok);
     let st = 'good';
@@ -2391,7 +2482,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
   }
 
   LP.metrics = {
-    CONFIG, status, netNodes, mst, netEdges, obstacles,
+    CONFIG, status, netNodes, mst, netEdges, obstacles, criticalLengths,
     lengthMetric, crossingMetric, congestionMetric, criticalMetric, exitMetric, layerMetric,
     evaluate, quick, diff, orientationSuggestion, nearestPart,
   };
@@ -2778,6 +2869,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         { id: 'ne', ...this.boardToScreen(o.w, o.h), cursor: 'nesw-resize' },
       ];
       if (o.type === 'circle') return [{ id: 'd', ...this.boardToScreen(o.d, o.d / 2), cursor: 'ew-resize' }];
+      if (o.type === 'polygon') return o.points.map(([x, y], i) => ({ id: `v${i}`, ...this.boardToScreen(x, y), cursor: 'move' }));
       return [];
     }
 
@@ -4128,8 +4220,10 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       this.commit(LP.t('ui.op_board'), () => {
         const b = this.p.board;
         if (patch.outline) {
-          const old = { ...b.outline };
-          b.outline = patch.outline.type && patch.outline.type !== old.type ? { ...patch.outline } : { ...b.outline, ...patch.outline };
+          const old = JSON.parse(JSON.stringify(b.outline));
+          // 带 type 的是完整板框（形状切换），否则只改尺寸
+          b.outline = patch.outline.type ? JSON.parse(JSON.stringify(patch.outline)) : { ...b.outline, ...patch.outline };
+          if (b.outline.shape === 'stadium') b.outline.corner_r = Math.min(b.outline.w, b.outline.h) / 2;
           M.remapBoardFeatures(b, old, b.outline);
         }
         for (const k of ['layers', 'thickness', 'two_sided', 'mask']) if (patch[k] !== undefined) b[k] = patch[k];
@@ -4204,6 +4298,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     },
     exportJSON() { this.download(`${this.slug()}-layout.json`, JSON.stringify(M.exportLayout(this.p, this.ev), null, 2), 'application/json'); },
+    exportDXF() { this.download(`${this.slug()}-outline.dxf`, M.exportDXF(this.p), 'application/dxf'); },
     exportCSV() { this.download(`${this.slug()}-placement.csv`, '﻿' + M.exportCSV(this.p), 'text/csv'); },
 
     setAnim(on) {
@@ -4437,7 +4532,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       }
       const h = handleAt(sp);
       if (h && e.button === 0) {
-        gesture = { type: 'resize', handle: h.id, orig: { ...App.p.board.outline } };
+        gesture = { type: 'resize', handle: h.id, orig: JSON.parse(JSON.stringify(App.p.board.outline)) };
         return;
       }
       if (e.button === 1 || (e.button === 0 && spaceDown)) { gesture = { type: 'pan', last: sp }; return; }
@@ -4480,6 +4575,13 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         if (gesture.handle === 'e' || gesture.handle === 'ne') o.w = q(bp.x);
         if (gesture.handle === 'n' || gesture.handle === 'ne') o.h = q(bp.y);
         if (gesture.handle === 'd') o.d = q(bp.x);
+        if (gesture.handle[0] === 'v') {
+          // 拖动多边形顶点：形状变为自定义多边形
+          const i = parseInt(gesture.handle.slice(1), 10);
+          o.shape = 'custom';
+          for (const k of ['w', 'h', 'c', 'nw', 'nh']) delete o[k];
+          o.points[i] = [Math.round(bp.x * 2) / 2, Math.round(bp.y * 2) / 2];
+        }
         App.emit('boardlive');
         App.redraw();
         return;
@@ -4519,6 +4621,30 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     stage.addEventListener('pointerup', up);
     stage.addEventListener('pointercancel', (e) => { ptrs.delete(e.pointerId); if (gesture && gesture.type === 'drag') cancelDrag(); gesture = null; });
     stage.addEventListener('contextmenu', (e) => e.preventDefault());
+    // 编辑板框时：双击多边形的边添加顶点，双击顶点删除
+    stage.addEventListener('dblclick', (e) => {
+      if (!App.boardEditing || R().kind !== '2d') return;
+      const o = App.p.board.outline;
+      if (o.type !== 'polygon') return;
+      const sp = local(e);
+      const pts = o.points.map(([x, y]) => R().boardToScreen(x, y));
+      const vi = pts.findIndex((q) => Math.hypot(q.x - sp.x, q.y - sp.y) < 10);
+      if (vi >= 0) {
+        if (pts.length <= 3) { App.toast(LP.t('ui.toast_min_vertices'), 'warn'); return; }
+        App.setBoard({ outline: { type: 'polygon', shape: 'custom', points: o.points.filter((_, i) => i !== vi) } });
+        return;
+      }
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i], b = pts[(i + 1) % pts.length];
+        if (G.pointSegDist(sp, a, b) < 8) {
+          const bp = R().screenToBoard(sp.x, sp.y);
+          const np = o.points.map((q) => [...q]);
+          np.splice(i + 1, 0, [Math.round(bp.x * 2) / 2, Math.round(bp.y * 2) / 2]);
+          App.setBoard({ outline: { type: 'polygon', shape: 'custom', points: np } });
+          return;
+        }
+      }
+    });
     stage.addEventListener('wheel', (e) => {
       e.preventDefault();
       const sp = local(e);
@@ -4730,6 +4856,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         h('button', { class: 'menu-item', onclick: () => { this.closeMenus(); App.exportJSON(); } }, t('export_json')),
         h('button', { class: 'menu-item', onclick: () => { this.closeMenus(); App.exportCSV(); } }, t('export_csv')),
         h('button', { class: 'menu-item', onclick: () => { this.closeMenus(); this.exportPNG(); } }, t('export_png')),
+        h('button', { class: 'menu-item', onclick: () => { this.closeMenus(); App.exportDXF(); } }, t('export_dxf')),
         h('div', { class: 'menu-sep' }),
         h('button', { class: 'menu-item', onclick: () => { this.closeMenus(); $('#file-input').click(); } }, t('import')),
       );
@@ -4907,35 +5034,74 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       const App = this.App, b = App.p.board, o = b.outline;
       const num = (label, val, onc, step) => h('label', { class: 'field' }, h('span', {}, label), h('input', { type: 'number', step: step || 0.5, min: 1, value: val, onchange: (e) => { const v = parseFloat(e.target.value); if (v > 0) onc(v); } }));
       const wrap = h('div', { class: 'board-form', id: 'board-form' });
-      const shape = h('select', { onchange: (e) => {
-        const v = e.target.value;
-        if (v === 'rect') App.setBoard({ outline: { type: 'rect', w: o.w || o.d || 30, h: o.h || o.d || 20, corner_r: o.corner_r || 2 } });
-        if (v === 'circle') App.setBoard({ outline: { type: 'circle', d: o.d || Math.max(o.w || 20, o.h || 20) } });
-      } },
-      h('option', { value: 'rect', selected: o.type === 'rect' }, t('board_rect')),
-      h('option', { value: 'circle', selected: o.type === 'circle' }, t('board_circle')),
-      o.type === 'polygon' ? h('option', { value: 'polygon', selected: true, disabled: true }, t('board_polygon')) : null);
-      wrap.append(h('label', { class: 'field' }, h('span', {}, t('board_shape')), shape));
-      if (o.type === 'rect') wrap.append(
-        h('div', { class: 'row2' }, num(t('board_w'), o.w, (v) => App.setBoard({ outline: { w: v } })), num(t('board_h'), o.h, (v) => App.setBoard({ outline: { h: v } }))),
-        num(t('board_r'), o.corner_r || 0, (v) => App.setBoard({ outline: { corner_r: v } })));
-      if (o.type === 'circle') wrap.append(num(t('board_d'), o.d, (v) => App.setBoard({ outline: { d: v } })));
+      wrap.append(this.shapeEditor(o, (ol) => App.setBoard({ outline: ol }), { allowCustom: true }).el);
       wrap.append(h('div', { class: 'row2' },
         h('label', { class: 'field' }, h('span', {}, t('board_layers')), h('select', { onchange: (e) => App.setBoard({ layers: parseInt(e.target.value, 10) }) }, ...[2, 4, 6].map((n) => h('option', { value: n, selected: b.layers === n }, n)))),
         num(t('board_thickness'), b.thickness, (v) => App.setBoard({ thickness: v }), 0.1)));
       wrap.append(h('label', { class: 'field check' }, h('input', { type: 'checkbox', checked: b.two_sided, onchange: (e) => App.setBoard({ two_sided: e.target.checked }) }), h('span', {}, t('board_two_sided'))));
       wrap.append(h('p', { class: 'muted small' }, t('board_holes', { n: b.holes.length, m: b.keepouts.length })));
-      if (o.type !== 'polygon') wrap.append(h('p', { class: 'muted small' }, t('board_edit_hint')));
+      if (M.shapeOf(o) !== 'custom') wrap.append(h('p', { class: 'muted small' }, o.type === 'polygon' ? t('board_edit_hint_poly') : t('board_edit_hint')));
+      wrap.append(h('p', { class: 'eda-note small' }, t('eda_final_outline')));
       wrap.append(h('button', { class: 'primary', onclick: () => { App.confirmBoard(); this.openStep = null; this.renderSteps(); } }, App.boardConfirmed ? t('board_reconfirm') : t('board_confirm')));
       return wrap;
+    },
+    /**
+     * 板框形状编辑：圆角矩形、胶囊形、倒角矩形、L 形、圆形，以及可在板上逐点编辑的自定义多边形。
+     * onChange(outline) 在输入有效时调用；opts.allowCustom 控制是否提供自定义多边形。
+     */
+    shapeEditor(o, onChange, opts) {
+      const r1 = (v) => Math.round(v * 2) / 2;
+      const bb = G.outlineBBox(o);
+      const st = {
+        shape: M.shapeOf(o),
+        w: o.w ?? r1(bb.x1 - bb.x0), h: o.h ?? r1(bb.y1 - bb.y0), r: o.corner_r ?? 2, c: o.c ?? 3,
+        d: o.d ?? r1(Math.max(bb.x1 - bb.x0, bb.y1 - bb.y0)),
+      };
+      st.nw = o.nw ?? r1(st.w * 0.4); st.nh = o.nh ?? r1(st.h * 0.4);
+      if (st.shape === 'custom' && !(opts && opts.allowCustom)) st.shape = 'rect';
+      const shapes = ['rect', 'stadium', 'chamfer', 'lshape', 'circle'].concat(opts && opts.allowCustom ? ['custom'] : []);
+      const wrap = h('div', { class: 'shape-editor' });
+      const sel = h('select', { 'aria-label': t('board_shape') }, ...shapes.map((s) => h('option', { value: s, selected: s === st.shape }, t(`shape_${s}`))));
+      const fields = h('div', { class: 'shape-fields' });
+      const build = () => {
+        if (st.shape === 'custom') return o.type === 'polygon' && o.shape === 'custom' ? o : M.toEditablePolygon(o);
+        return M.outlineFromShape(st.shape, st);
+      };
+      const valid = () => {
+        const keys = { rect: ['w', 'h'], stadium: ['w', 'h'], chamfer: ['w', 'h'], lshape: ['w', 'h'], circle: ['d'], custom: [] }[st.shape];
+        return keys.every((k) => Number.isFinite(st[k]) && st[k] >= 5);
+      };
+      const num = (k, label, step) => h('label', { class: 'field' }, h('span', {}, label),
+        h('input', { type: 'number', step: step || 0.5, min: 0, value: st[k], 'data-k': k, onchange: (e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v) && v >= 0) { st[k] = v; if (valid()) onChange(build()); } } }));
+      const renderFields = () => {
+        fields.innerHTML = '';
+        const row = (...kids) => h('div', { class: 'row2' }, ...kids);
+        if (st.shape === 'circle') fields.append(num('d', t('board_d')));
+        else if (st.shape === 'custom') {
+          const n = (o.type === 'polygon' && o.shape === 'custom' ? o.points : M.toEditablePolygon(o).points).length;
+          fields.append(h('p', { class: 'muted small' }, t('shape_custom_hint', { n })));
+        } else {
+          fields.append(row(num('w', t('board_w')), num('h', t('board_h'))));
+          if (st.shape === 'rect') fields.append(num('r', t('board_r')));
+          if (st.shape === 'chamfer') fields.append(num('c', t('board_c')));
+          if (st.shape === 'lshape') fields.append(row(num('nw', t('board_nw')), num('nh', t('board_nh'))), h('p', { class: 'muted small' }, t('shape_lshape_hint')));
+        }
+      };
+      sel.addEventListener('change', () => { st.shape = sel.value; renderFields(); if (valid()) onChange(build()); });
+      renderFields();
+      wrap.append(h('label', { class: 'field' }, h('span', {}, t('board_shape')), sel), fields);
+      return { el: wrap, value: () => (valid() ? build() : null), state: st };
     },
     renderBoardForm() {
       const o = this.App.p.board.outline;
       const f = $('#board-form');
       if (!f) return;
-      const inputs = f.querySelectorAll('input[type=number]');
-      if (o.type === 'rect' && inputs.length >= 2) { inputs[0].value = o.w; inputs[1].value = o.h; }
-      if (o.type === 'circle' && inputs.length) inputs[0].value = o.d;
+      for (const inp of f.querySelectorAll('input[data-k]')) {
+        const k = inp.dataset.k;
+        if (k === 'w' && o.w !== undefined) inp.value = o.w;
+        if (k === 'h' && o.h !== undefined) inp.value = o.h;
+        if (k === 'd' && o.d !== undefined) inp.value = o.d;
+      }
     },
     checkSummary() {
       const App = this.App, ev = App.ev;
@@ -4950,8 +5116,10 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       box.append(h('div', { class: 'btn-row' },
         h('button', { class: 'primary', onclick: () => App.exportJSON() }, t('export_json_short')),
         h('button', { onclick: () => App.exportCSV() }, t('export_csv_short')),
-        h('button', { onclick: () => this.exportPNG() }, t('export_png_short'))));
+        h('button', { onclick: () => this.exportPNG() }, t('export_png_short')),
+        h('button', { onclick: () => App.exportDXF() }, t('export_dxf_short'))));
       box.append(h('p', { class: 'muted small' }, t('check_handback')));
+      box.append(h('p', { class: 'eda-note small' }, t('eda_next_step')));
       return box;
     },
 
@@ -4969,7 +5137,13 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       const box = $('#metrics');
       box.innerHTML = '';
       for (const r of rows) {
-        const sub = r.k === 'exit' && m.exit.worst ? t('m_exit_where', { ref: m.exit.worst.ref, side: LP.S.sideCN[m.exit.worst.side], need: m.exit.worst.need, ch: Math.floor(m.exit.worst.channels) })
+        const badCrit = m.critical.items.filter((x) => !x.ok);
+        const critList = () => {
+          const fmt = (x) => x.unplaced ? t('m_critical_unplaced', { name: x.name }) : t(x.kind === 'net' ? 'm_critical_net' : 'm_critical_sat', { name: x.name, v: f1(x.value), limit: x.limit });
+          return badCrit.slice(0, 2).map(fmt).join('；') + (badCrit.length > 2 ? ' ' + t('m_critical_more', { n: badCrit.length }) : '');
+        };
+        const sub = r.k === 'critical' && badCrit.length ? critList()
+          : r.k === 'exit' && m.exit.worst ? t('m_exit_where', { ref: m.exit.worst.ref, side: LP.S.sideCN[m.exit.worst.side], need: m.exit.worst.need, ch: Math.floor(m.exit.worst.channels) })
           : r.k === 'congestion' ? t('m_congestion_over', { p: pct(m.congestion.overFrac) })
           : t(`m_${r.k}_desc`);
         const row = h('button', { class: `metric ${r.st}`, onclick: r.onclick, 'aria-label': `${t(`m_${r.k}`)} ${r.value} ${t(`status_${r.st}`)}` },
@@ -5276,21 +5450,18 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       };
       const grid = h('div', { class: 'preset-grid', role: 'radiogroup', 'aria-label': t('bs_title') });
       const custom = h('div', { class: 'custom-row', hidden: true });
-      const cShape = h('select', {}, h('option', { value: 'rect' }, t('board_rect')), h('option', { value: 'circle' }, t('board_circle')));
-      const num = (label, val) => h('label', { class: 'field' }, h('span', {}, label), h('input', { type: 'number', min: 5, step: 0.5, value: val }));
-      const cW = num(t('board_w'), o.w || 36), cH = num(t('board_h'), o.h || 28), cR = num(t('board_r'), o.corner_r ?? 2), cD = num(t('board_d'), o.d || 32);
-      custom.append(h('label', { class: 'field' }, h('span', {}, t('board_shape')), cShape), cW, cH, cR, cD);
-      const syncCustom = () => { const circ = cShape.value === 'circle'; cW.hidden = cH.hidden = cR.hidden = circ; cD.hidden = !circ; updateHint(); };
-      cShape.addEventListener('change', syncCustom);
-      custom.addEventListener('input', () => updateHint());
-      const customOutline = () => {
-        const v = (el) => parseFloat(el.querySelector('input').value);
-        return cShape.value === 'circle' ? { type: 'circle', d: v(cD) } : { type: 'rect', w: v(cW), h: v(cH), corner_r: Math.max(0, v(cR) || 0) };
-      };
+      const editor = this.shapeEditor(o, () => updateHint(), { allowCustom: false });
+      custom.append(editor.el);
+      custom.addEventListener('input', () => {
+        for (const inp of custom.querySelectorAll('input[data-k]')) { const v = parseFloat(inp.value); if (Number.isFinite(v)) editor.state[inp.dataset.k] = v; }
+        updateHint();
+      });
+      const customOutline = () => editor.value();
+      const syncCustom = () => updateHint();
       const hint = h('p', { class: 'small bs-hint' });
       const updateHint = () => {
         const ol = chosen.outline || customOutline();
-        const ok = ol && Object.values(ol).every((x) => typeof x === 'string' || (Number.isFinite(x) && x >= 0));
+        const ok = !!ol;
         const A = ok ? Math.round(G.outlineArea({ corner_r: 0, ...ol })) : 0;
         hint.textContent = t('bs_area', { top: Math.round(area.top), bottom: Math.round(area.bottom), need, a: A });
         hint.classList.toggle('warn', ok && !fits(ol));
@@ -5316,13 +5487,13 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         h('div', { class: 'row2 bs-opts' },
           h('label', { class: 'field' }, h('span', {}, t('board_layers')), layers),
           h('label', { class: 'field check' }, two, h('span', {}, t('board_two_sided')))),
-        h('p', { class: 'muted small' }, t('bs_later')));
+        h('p', { class: 'muted small' }, t('bs_later')),
+        h('p', { class: 'eda-note small' }, t('eda_final_outline')));
       updateHint();
       const go = $('#board-setup-go');
       go.onclick = () => {
         const ol = chosen.outline || customOutline();
-        const bad = Object.entries(ol).some(([k, v]) => k !== 'type' && !(Number.isFinite(v) && (k === 'corner_r' ? v >= 0 : v >= 5)));
-        if (bad) { this.toast(t('bs_invalid'), 'bad'); return; }
+        if (!ol) { this.toast(t('bs_invalid'), 'bad'); return; }
         d.close();
         App.setupBoard({ outline: ol, layers: parseInt(layers.value, 10), two_sided: two.checked });
         this.openStep = null;

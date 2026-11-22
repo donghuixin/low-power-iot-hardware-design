@@ -132,6 +132,7 @@
         h('button', { class: 'menu-item', onclick: () => { this.closeMenus(); App.exportJSON(); } }, t('export_json')),
         h('button', { class: 'menu-item', onclick: () => { this.closeMenus(); App.exportCSV(); } }, t('export_csv')),
         h('button', { class: 'menu-item', onclick: () => { this.closeMenus(); this.exportPNG(); } }, t('export_png')),
+        h('button', { class: 'menu-item', onclick: () => { this.closeMenus(); App.exportDXF(); } }, t('export_dxf')),
         h('div', { class: 'menu-sep' }),
         h('button', { class: 'menu-item', onclick: () => { this.closeMenus(); $('#file-input').click(); } }, t('import')),
       );
@@ -309,35 +310,74 @@
       const App = this.App, b = App.p.board, o = b.outline;
       const num = (label, val, onc, step) => h('label', { class: 'field' }, h('span', {}, label), h('input', { type: 'number', step: step || 0.5, min: 1, value: val, onchange: (e) => { const v = parseFloat(e.target.value); if (v > 0) onc(v); } }));
       const wrap = h('div', { class: 'board-form', id: 'board-form' });
-      const shape = h('select', { onchange: (e) => {
-        const v = e.target.value;
-        if (v === 'rect') App.setBoard({ outline: { type: 'rect', w: o.w || o.d || 30, h: o.h || o.d || 20, corner_r: o.corner_r || 2 } });
-        if (v === 'circle') App.setBoard({ outline: { type: 'circle', d: o.d || Math.max(o.w || 20, o.h || 20) } });
-      } },
-      h('option', { value: 'rect', selected: o.type === 'rect' }, t('board_rect')),
-      h('option', { value: 'circle', selected: o.type === 'circle' }, t('board_circle')),
-      o.type === 'polygon' ? h('option', { value: 'polygon', selected: true, disabled: true }, t('board_polygon')) : null);
-      wrap.append(h('label', { class: 'field' }, h('span', {}, t('board_shape')), shape));
-      if (o.type === 'rect') wrap.append(
-        h('div', { class: 'row2' }, num(t('board_w'), o.w, (v) => App.setBoard({ outline: { w: v } })), num(t('board_h'), o.h, (v) => App.setBoard({ outline: { h: v } }))),
-        num(t('board_r'), o.corner_r || 0, (v) => App.setBoard({ outline: { corner_r: v } })));
-      if (o.type === 'circle') wrap.append(num(t('board_d'), o.d, (v) => App.setBoard({ outline: { d: v } })));
+      wrap.append(this.shapeEditor(o, (ol) => App.setBoard({ outline: ol }), { allowCustom: true }).el);
       wrap.append(h('div', { class: 'row2' },
         h('label', { class: 'field' }, h('span', {}, t('board_layers')), h('select', { onchange: (e) => App.setBoard({ layers: parseInt(e.target.value, 10) }) }, ...[2, 4, 6].map((n) => h('option', { value: n, selected: b.layers === n }, n)))),
         num(t('board_thickness'), b.thickness, (v) => App.setBoard({ thickness: v }), 0.1)));
       wrap.append(h('label', { class: 'field check' }, h('input', { type: 'checkbox', checked: b.two_sided, onchange: (e) => App.setBoard({ two_sided: e.target.checked }) }), h('span', {}, t('board_two_sided'))));
       wrap.append(h('p', { class: 'muted small' }, t('board_holes', { n: b.holes.length, m: b.keepouts.length })));
-      if (o.type !== 'polygon') wrap.append(h('p', { class: 'muted small' }, t('board_edit_hint')));
+      if (M.shapeOf(o) !== 'custom') wrap.append(h('p', { class: 'muted small' }, o.type === 'polygon' ? t('board_edit_hint_poly') : t('board_edit_hint')));
+      wrap.append(h('p', { class: 'eda-note small' }, t('eda_final_outline')));
       wrap.append(h('button', { class: 'primary', onclick: () => { App.confirmBoard(); this.openStep = null; this.renderSteps(); } }, App.boardConfirmed ? t('board_reconfirm') : t('board_confirm')));
       return wrap;
+    },
+    /**
+     * 板框形状编辑：圆角矩形、胶囊形、倒角矩形、L 形、圆形，以及可在板上逐点编辑的自定义多边形。
+     * onChange(outline) 在输入有效时调用；opts.allowCustom 控制是否提供自定义多边形。
+     */
+    shapeEditor(o, onChange, opts) {
+      const r1 = (v) => Math.round(v * 2) / 2;
+      const bb = G.outlineBBox(o);
+      const st = {
+        shape: M.shapeOf(o),
+        w: o.w ?? r1(bb.x1 - bb.x0), h: o.h ?? r1(bb.y1 - bb.y0), r: o.corner_r ?? 2, c: o.c ?? 3,
+        d: o.d ?? r1(Math.max(bb.x1 - bb.x0, bb.y1 - bb.y0)),
+      };
+      st.nw = o.nw ?? r1(st.w * 0.4); st.nh = o.nh ?? r1(st.h * 0.4);
+      if (st.shape === 'custom' && !(opts && opts.allowCustom)) st.shape = 'rect';
+      const shapes = ['rect', 'stadium', 'chamfer', 'lshape', 'circle'].concat(opts && opts.allowCustom ? ['custom'] : []);
+      const wrap = h('div', { class: 'shape-editor' });
+      const sel = h('select', { 'aria-label': t('board_shape') }, ...shapes.map((s) => h('option', { value: s, selected: s === st.shape }, t(`shape_${s}`))));
+      const fields = h('div', { class: 'shape-fields' });
+      const build = () => {
+        if (st.shape === 'custom') return o.type === 'polygon' && o.shape === 'custom' ? o : M.toEditablePolygon(o);
+        return M.outlineFromShape(st.shape, st);
+      };
+      const valid = () => {
+        const keys = { rect: ['w', 'h'], stadium: ['w', 'h'], chamfer: ['w', 'h'], lshape: ['w', 'h'], circle: ['d'], custom: [] }[st.shape];
+        return keys.every((k) => Number.isFinite(st[k]) && st[k] >= 5);
+      };
+      const num = (k, label, step) => h('label', { class: 'field' }, h('span', {}, label),
+        h('input', { type: 'number', step: step || 0.5, min: 0, value: st[k], 'data-k': k, onchange: (e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v) && v >= 0) { st[k] = v; if (valid()) onChange(build()); } } }));
+      const renderFields = () => {
+        fields.innerHTML = '';
+        const row = (...kids) => h('div', { class: 'row2' }, ...kids);
+        if (st.shape === 'circle') fields.append(num('d', t('board_d')));
+        else if (st.shape === 'custom') {
+          const n = (o.type === 'polygon' && o.shape === 'custom' ? o.points : M.toEditablePolygon(o).points).length;
+          fields.append(h('p', { class: 'muted small' }, t('shape_custom_hint', { n })));
+        } else {
+          fields.append(row(num('w', t('board_w')), num('h', t('board_h'))));
+          if (st.shape === 'rect') fields.append(num('r', t('board_r')));
+          if (st.shape === 'chamfer') fields.append(num('c', t('board_c')));
+          if (st.shape === 'lshape') fields.append(row(num('nw', t('board_nw')), num('nh', t('board_nh'))), h('p', { class: 'muted small' }, t('shape_lshape_hint')));
+        }
+      };
+      sel.addEventListener('change', () => { st.shape = sel.value; renderFields(); if (valid()) onChange(build()); });
+      renderFields();
+      wrap.append(h('label', { class: 'field' }, h('span', {}, t('board_shape')), sel), fields);
+      return { el: wrap, value: () => (valid() ? build() : null), state: st };
     },
     renderBoardForm() {
       const o = this.App.p.board.outline;
       const f = $('#board-form');
       if (!f) return;
-      const inputs = f.querySelectorAll('input[type=number]');
-      if (o.type === 'rect' && inputs.length >= 2) { inputs[0].value = o.w; inputs[1].value = o.h; }
-      if (o.type === 'circle' && inputs.length) inputs[0].value = o.d;
+      for (const inp of f.querySelectorAll('input[data-k]')) {
+        const k = inp.dataset.k;
+        if (k === 'w' && o.w !== undefined) inp.value = o.w;
+        if (k === 'h' && o.h !== undefined) inp.value = o.h;
+        if (k === 'd' && o.d !== undefined) inp.value = o.d;
+      }
     },
     checkSummary() {
       const App = this.App, ev = App.ev;
@@ -352,8 +392,10 @@
       box.append(h('div', { class: 'btn-row' },
         h('button', { class: 'primary', onclick: () => App.exportJSON() }, t('export_json_short')),
         h('button', { onclick: () => App.exportCSV() }, t('export_csv_short')),
-        h('button', { onclick: () => this.exportPNG() }, t('export_png_short'))));
+        h('button', { onclick: () => this.exportPNG() }, t('export_png_short')),
+        h('button', { onclick: () => App.exportDXF() }, t('export_dxf_short'))));
       box.append(h('p', { class: 'muted small' }, t('check_handback')));
+      box.append(h('p', { class: 'eda-note small' }, t('eda_next_step')));
       return box;
     },
 
@@ -371,7 +413,13 @@
       const box = $('#metrics');
       box.innerHTML = '';
       for (const r of rows) {
-        const sub = r.k === 'exit' && m.exit.worst ? t('m_exit_where', { ref: m.exit.worst.ref, side: LP.S.sideCN[m.exit.worst.side], need: m.exit.worst.need, ch: Math.floor(m.exit.worst.channels) })
+        const badCrit = m.critical.items.filter((x) => !x.ok);
+        const critList = () => {
+          const fmt = (x) => x.unplaced ? t('m_critical_unplaced', { name: x.name }) : t(x.kind === 'net' ? 'm_critical_net' : 'm_critical_sat', { name: x.name, v: f1(x.value), limit: x.limit });
+          return badCrit.slice(0, 2).map(fmt).join('；') + (badCrit.length > 2 ? ' ' + t('m_critical_more', { n: badCrit.length }) : '');
+        };
+        const sub = r.k === 'critical' && badCrit.length ? critList()
+          : r.k === 'exit' && m.exit.worst ? t('m_exit_where', { ref: m.exit.worst.ref, side: LP.S.sideCN[m.exit.worst.side], need: m.exit.worst.need, ch: Math.floor(m.exit.worst.channels) })
           : r.k === 'congestion' ? t('m_congestion_over', { p: pct(m.congestion.overFrac) })
           : t(`m_${r.k}_desc`);
         const row = h('button', { class: `metric ${r.st}`, onclick: r.onclick, 'aria-label': `${t(`m_${r.k}`)} ${r.value} ${t(`status_${r.st}`)}` },
@@ -678,21 +726,18 @@
       };
       const grid = h('div', { class: 'preset-grid', role: 'radiogroup', 'aria-label': t('bs_title') });
       const custom = h('div', { class: 'custom-row', hidden: true });
-      const cShape = h('select', {}, h('option', { value: 'rect' }, t('board_rect')), h('option', { value: 'circle' }, t('board_circle')));
-      const num = (label, val) => h('label', { class: 'field' }, h('span', {}, label), h('input', { type: 'number', min: 5, step: 0.5, value: val }));
-      const cW = num(t('board_w'), o.w || 36), cH = num(t('board_h'), o.h || 28), cR = num(t('board_r'), o.corner_r ?? 2), cD = num(t('board_d'), o.d || 32);
-      custom.append(h('label', { class: 'field' }, h('span', {}, t('board_shape')), cShape), cW, cH, cR, cD);
-      const syncCustom = () => { const circ = cShape.value === 'circle'; cW.hidden = cH.hidden = cR.hidden = circ; cD.hidden = !circ; updateHint(); };
-      cShape.addEventListener('change', syncCustom);
-      custom.addEventListener('input', () => updateHint());
-      const customOutline = () => {
-        const v = (el) => parseFloat(el.querySelector('input').value);
-        return cShape.value === 'circle' ? { type: 'circle', d: v(cD) } : { type: 'rect', w: v(cW), h: v(cH), corner_r: Math.max(0, v(cR) || 0) };
-      };
+      const editor = this.shapeEditor(o, () => updateHint(), { allowCustom: false });
+      custom.append(editor.el);
+      custom.addEventListener('input', () => {
+        for (const inp of custom.querySelectorAll('input[data-k]')) { const v = parseFloat(inp.value); if (Number.isFinite(v)) editor.state[inp.dataset.k] = v; }
+        updateHint();
+      });
+      const customOutline = () => editor.value();
+      const syncCustom = () => updateHint();
       const hint = h('p', { class: 'small bs-hint' });
       const updateHint = () => {
         const ol = chosen.outline || customOutline();
-        const ok = ol && Object.values(ol).every((x) => typeof x === 'string' || (Number.isFinite(x) && x >= 0));
+        const ok = !!ol;
         const A = ok ? Math.round(G.outlineArea({ corner_r: 0, ...ol })) : 0;
         hint.textContent = t('bs_area', { top: Math.round(area.top), bottom: Math.round(area.bottom), need, a: A });
         hint.classList.toggle('warn', ok && !fits(ol));
@@ -718,13 +763,13 @@
         h('div', { class: 'row2 bs-opts' },
           h('label', { class: 'field' }, h('span', {}, t('board_layers')), layers),
           h('label', { class: 'field check' }, two, h('span', {}, t('board_two_sided')))),
-        h('p', { class: 'muted small' }, t('bs_later')));
+        h('p', { class: 'muted small' }, t('bs_later')),
+        h('p', { class: 'eda-note small' }, t('eda_final_outline')));
       updateHint();
       const go = $('#board-setup-go');
       go.onclick = () => {
         const ol = chosen.outline || customOutline();
-        const bad = Object.entries(ol).some(([k, v]) => k !== 'type' && !(Number.isFinite(v) && (k === 'corner_r' ? v >= 0 : v >= 5)));
-        if (bad) { this.toast(t('bs_invalid'), 'bad'); return; }
+        if (!ol) { this.toast(t('bs_invalid'), 'bad'); return; }
         d.close();
         App.setupBoard({ outline: ol, layers: parseInt(layers.value, 10), two_sided: two.checked });
         this.openStep = null;

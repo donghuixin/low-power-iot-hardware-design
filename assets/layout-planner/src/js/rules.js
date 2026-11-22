@@ -14,6 +14,7 @@
     { id: 'antenna_edge', type: 'edge_required', select: { roles: ['antenna', 'rf_module'] }, tol: 0.5, severity: 'P1', check: 'RF-01' },
     { id: 'connector_edge', type: 'edge_required', select: { roles: ['connector', 'button'] }, onlyEdgeFlag: true, tol: 0.5, severity: 'P0', check: 'ASM-02' },
     { id: 'temp_edge', type: 'edge_required', select: { roles: ['temp_humidity'] }, tol: 3, severity: 'P3', check: 'SEN-02' },
+    { id: 'antenna_feed', type: 'feed_facing', select: { roles: ['antenna'] }, tol: 0.5, severity: 'P2', check: 'RF-05' },
     { id: 'antenna_keepout', type: 'keepout_zone', select: { roles: ['antenna'] }, clearance: 3, severity: 'P1', check: 'RF-01' },
     { id: 'antenna_metal', type: 'min_distance', a: { roles: ['antenna', 'rf_module'] }, b: { roles: ['battery', 'connector'], tags: ['shield'] }, min: 5, severity: 'P1', check: 'RF-03' },
     { id: 'rf_feed_len', type: 'max_net_length', classes: ['rf'], def: 10, severity: 'P2', check: 'RF-04' },
@@ -169,6 +170,10 @@
           break;
         }
         case 'inside_board': {
+          // 固定孔（含 0.5 mm 余量）须在板内：改板框形状后孔可能压到板边
+          (p.board.holes || []).forEach((h, i) => {
+            if (!G.rectInBoard(o, G.expand(holeRect(h), 0.5))) issues.push(issue({ ...rule, severity: 'P1' }, 'hole_edge', [`孔${i + 1}`], { a: `固定孔 ${i + 1}`, x: h.x, y: h.y }));
+          });
           for (const e of parts) {
             if (!G.rectInBoard(o, e.rect)) { issues.push(issue(rule, 'outside_board', [e.ref], { a: e.ref })); continue; }
             for (const k of p.board.keepouts || []) if (G.overlaps(e.rect, { x0: k.x, y0: k.y, x1: k.x + k.w, y1: k.y + k.h })) issues.push(issue(rule, 'in_keepout', [e.ref], { a: e.ref, reason: k.reason || '禁布区' }));
@@ -195,6 +200,17 @@
             let ok = d <= rule.tol + 1e-6;
             if (ok && e.item.edge_face) ok = G.faceOutside(o, e.rect, M.worldSide(e.item.edge_face, e.item.placed), rule.tol + 0.3);
             if (!ok) issues.push(issue(rule, rule.id, [e.ref], { a: e.ref, d: f1(d), tol: rule.tol }));
+          }
+          break;
+        }
+        case 'feed_facing': {
+          // 馈点一侧贴着板边（朝向板外）：馈线要绕到天线最远端，净空区也被挤进板内
+          for (const e of parts) {
+            if (!matches(e, rule.select)) continue;
+            const feed = e.item.pins.find((q) => /feed/i.test(q.id)) || e.item.pins[0];
+            if (!feed || feed.side === 'C' || !G.rectInBoard(o, e.rect)) continue;
+            const side = M.worldSide(feed.side, e.item.placed);
+            if (G.faceOutside(o, e.rect, side, rule.tol + 0.3)) issues.push(issue(rule, 'antenna_feed', [e.ref], { a: e.ref }));
           }
           break;
         }
@@ -229,8 +245,7 @@
           break;
         }
         case 'max_net_length': {
-          const per = new Map();
-          for (const e of LP.metrics.netEdges(p)) per.set(e.net, (per.get(e.net) || 0) + e.len);
+          const per = LP.metrics.criticalLengths(LP.metrics.netEdges(p));
           for (const net of p.nets) {
             const isClass = (rule.classes || []).includes(net.class);
             const limit = net.max_len || (isClass ? rule.def : null);

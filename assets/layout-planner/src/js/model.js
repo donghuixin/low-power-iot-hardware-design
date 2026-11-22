@@ -315,13 +315,66 @@
     return parseFloat(m[1]) * mul;
   }
 
+  // ---------- 板框形状 ----------
+  /** 可选的板框形状。rect/stadium/circle 用解析形状；chamfer/lshape/custom 存为多边形，并记下 shape 与参数以便再次编辑。 */
+  const BOARD_SHAPES = ['rect', 'stadium', 'chamfer', 'lshape', 'circle', 'custom'];
+  /** 由形状和参数生成板框。参数：w、h、r（圆角）、c（倒角）、nw/nh（L 形右上角缺口）、d（直径）、points（自定义）。 */
+  function outlineFromShape(shape, q) {
+    const w = q.w, h = q.h;
+    switch (shape) {
+      case 'circle': return { type: 'circle', d: q.d };
+      case 'stadium': return { type: 'rect', w, h, corner_r: Math.min(w, h) / 2, shape: 'stadium' };
+      case 'chamfer': {
+        const c = Math.max(0.5, Math.min(q.c ?? 3, w / 2 - 0.5, h / 2 - 0.5));
+        return { type: 'polygon', shape: 'chamfer', w, h, c, points: [[c, 0], [w - c, 0], [w, c], [w, h - c], [w - c, h], [c, h], [0, h - c], [0, c]] };
+      }
+      case 'lshape': {
+        const nw = Math.max(1, Math.min(q.nw ?? w * 0.4, w - 2)), nh = Math.max(1, Math.min(q.nh ?? h * 0.4, h - 2));
+        return { type: 'polygon', shape: 'lshape', w, h, nw, nh, points: [[0, 0], [w, 0], [w, h - nh], [w - nw, h - nh], [w - nw, h], [0, h]] };
+      }
+      case 'custom': return { type: 'polygon', shape: 'custom', points: q.points.map((pt) => [r2(pt[0]), r2(pt[1])]) };
+      case 'rect': default: return { type: 'rect', w, h, corner_r: Math.max(0, q.r ?? 0) };
+    }
+  }
+  /** 当前板框属于哪种形状（供界面回显）。 */
+  function shapeOf(o) {
+    if (o.type === 'circle') return 'circle';
+    if (o.type === 'rect') return o.shape === 'stadium' ? 'stadium' : 'rect';
+    return ['chamfer', 'lshape'].includes(o.shape) ? o.shape : 'custom';
+  }
+  /** 转为可逐点编辑的多边形：只保留形状的特征顶点（圆角忽略，圆形取 16 边形）。 */
+  function toEditablePolygon(o) {
+    if (o.type === 'polygon') return { type: 'polygon', shape: 'custom', points: o.points.map((pt) => [...pt]) };
+    if (o.type === 'circle') {
+      const r = o.d / 2;
+      return { type: 'polygon', shape: 'custom', points: Array.from({ length: 16 }, (_, i) => { const a = (i / 16) * Math.PI * 2; return [r2(r + r * Math.cos(a)), r2(r + r * Math.sin(a))]; }) };
+    }
+    return { type: 'polygon', shape: 'custom', points: [[0, 0], [o.w, 0], [o.w, o.h], [0, o.h]] };
+  }
+  /** 板框 DXF（R12，毫米）：外框为 BOARD 层线段，固定孔为 HOLES 层圆。可导入嘉立创 EDA 作为初始板框。 */
+  function exportDXF(p) {
+    const out = ['0', 'SECTION', '2', 'HEADER', '9', '$INSUNITS', '70', '4', '0', 'ENDSEC', '0', 'SECTION', '2', 'ENTITIES'];
+    const f = (v) => (Math.round(v * 1000) / 1000).toFixed(3);
+    const o = p.board.outline;
+    if (o.type === 'circle') out.push('0', 'CIRCLE', '8', 'BOARD', '10', f(o.d / 2), '20', f(o.d / 2), '30', '0', '40', f(o.d / 2));
+    else {
+      const pts = G.outlinePolygon(o);
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i], b = pts[(i + 1) % pts.length];
+        out.push('0', 'LINE', '8', 'BOARD', '10', f(a.x), '20', f(a.y), '30', '0', '11', f(b.x), '21', f(b.y), '31', '0');
+      }
+    }
+    for (const h of p.board.holes || []) out.push('0', 'CIRCLE', '8', 'HOLES', '10', f(h.x), '20', f(h.y), '30', '0', '40', f(h.d / 2));
+    out.push('0', 'ENDSEC', '0', 'EOF');
+    return out.join('\r\n') + '\r\n';
+  }
+
   // ---------- 改板框时同步固定孔与禁布区 ----------
   /**
-   * 板框尺寸改变后，固定孔和禁布区保持到最近板角（矩形）或板边（圆形）的相对位置，
-   * 避免缩小板子后它们落到板外。多边形板框不做调整。
+   * 板框尺寸改变后，固定孔和禁布区保持到最近板角（按外包矩形）或板边（圆形之间）的相对位置，
+   * 避免缩小板子后它们落到板外。
    */
   function remapBoardFeatures(board, oldO, newO) {
-    if (oldO.type === 'polygon' || newO.type === 'polygon') return;
     const ob = G.outlineBBox(oldO), nb = G.outlineBBox(newO);
     const mapPoint = (x, y) => {
       if (oldO.type === 'circle' && newO.type === 'circle') {
@@ -442,6 +495,6 @@
     TOOL_VERSION, ROLES, SAT_KINDS, NET_CLASSES, SIDES, ROTS, SENSOR_ROLES,
     validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint,
     partByRef, satByRef, itemByRef, placedParts, partTags, satTags, connectedParts, parseCap,
-    snapshot, restore, definitionHash, exportLayout, resultObject, exportCSV, r2, remapBoardFeatures, partsArea,
+    snapshot, restore, definitionHash, exportLayout, resultObject, exportCSV, r2, remapBoardFeatures, partsArea, BOARD_SHAPES, outlineFromShape, shapeOf, toEditablePolygon, exportDXF,
   };
 })(globalThis.LP = globalThis.LP || {});

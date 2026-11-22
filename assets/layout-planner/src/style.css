@@ -229,7 +229,11 @@ button.primary:hover { opacity: 0.88; }
 .preset-label { font-weight: 650; font-size: 13px; }
 .preset-dim { font: 12px var(--mono); color: var(--muted); }
 .preset-warn { position: absolute; top: 6px; right: 6px; font-size: 10.5px; color: var(--warn); font-weight: 600; }
-.custom-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 6px; }
+.custom-row { margin-bottom: 6px; }
+.shape-editor { display: flex; flex-direction: column; gap: 8px; }
+.shape-fields { display: flex; flex-direction: column; gap: 8px; }
+.shape-fields p { margin: 0; }
+.eda-note { margin: 4px 0 0; padding: 7px 9px; border-radius: 8px; background: color-mix(in srgb, var(--sel) 9%, transparent); color: var(--text); }
 .bs-hint { margin: 6px 0; }
 .bs-hint.warn { color: var(--warn); }
 .bs-opts { margin: 8px 0 4px; align-items: end; }

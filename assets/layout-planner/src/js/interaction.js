@@ -212,7 +212,7 @@
       }
       const h = handleAt(sp);
       if (h && e.button === 0) {
-        gesture = { type: 'resize', handle: h.id, orig: { ...App.p.board.outline } };
+        gesture = { type: 'resize', handle: h.id, orig: JSON.parse(JSON.stringify(App.p.board.outline)) };
         return;
       }
       if (e.button === 1 || (e.button === 0 && spaceDown)) { gesture = { type: 'pan', last: sp }; return; }
@@ -255,6 +255,13 @@
         if (gesture.handle === 'e' || gesture.handle === 'ne') o.w = q(bp.x);
         if (gesture.handle === 'n' || gesture.handle === 'ne') o.h = q(bp.y);
         if (gesture.handle === 'd') o.d = q(bp.x);
+        if (gesture.handle[0] === 'v') {
+          // 拖动多边形顶点：形状变为自定义多边形
+          const i = parseInt(gesture.handle.slice(1), 10);
+          o.shape = 'custom';
+          for (const k of ['w', 'h', 'c', 'nw', 'nh']) delete o[k];
+          o.points[i] = [Math.round(bp.x * 2) / 2, Math.round(bp.y * 2) / 2];
+        }
         App.emit('boardlive');
         App.redraw();
         return;
@@ -294,6 +301,30 @@
     stage.addEventListener('pointerup', up);
     stage.addEventListener('pointercancel', (e) => { ptrs.delete(e.pointerId); if (gesture && gesture.type === 'drag') cancelDrag(); gesture = null; });
     stage.addEventListener('contextmenu', (e) => e.preventDefault());
+    // 编辑板框时：双击多边形的边添加顶点，双击顶点删除
+    stage.addEventListener('dblclick', (e) => {
+      if (!App.boardEditing || R().kind !== '2d') return;
+      const o = App.p.board.outline;
+      if (o.type !== 'polygon') return;
+      const sp = local(e);
+      const pts = o.points.map(([x, y]) => R().boardToScreen(x, y));
+      const vi = pts.findIndex((q) => Math.hypot(q.x - sp.x, q.y - sp.y) < 10);
+      if (vi >= 0) {
+        if (pts.length <= 3) { App.toast(LP.t('ui.toast_min_vertices'), 'warn'); return; }
+        App.setBoard({ outline: { type: 'polygon', shape: 'custom', points: o.points.filter((_, i) => i !== vi) } });
+        return;
+      }
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i], b = pts[(i + 1) % pts.length];
+        if (G.pointSegDist(sp, a, b) < 8) {
+          const bp = R().screenToBoard(sp.x, sp.y);
+          const np = o.points.map((q) => [...q]);
+          np.splice(i + 1, 0, [Math.round(bp.x * 2) / 2, Math.round(bp.y * 2) / 2]);
+          App.setBoard({ outline: { type: 'polygon', shape: 'custom', points: np } });
+          return;
+        }
+      }
+    });
     stage.addEventListener('wheel', (e) => {
       e.preventDefault();
       const sp = local(e);

@@ -319,6 +319,7 @@
         { id: 'ne', ...this.boardToScreen(o.w, o.h), cursor: 'nesw-resize' },
       ];
       if (o.type === 'circle') return [{ id: 'd', ...this.boardToScreen(o.d, o.d / 2), cursor: 'ew-resize' }];
+      if (o.type === 'polygon') return o.points.map(([x, y], i) => ({ id: `v${i}`, ...this.boardToScreen(x, y), cursor: 'move' }));
       return [];
     }
 
