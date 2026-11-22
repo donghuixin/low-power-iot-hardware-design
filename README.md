@@ -80,3 +80,7 @@ python scripts/hw_calc.py xtal --cl-pf 9 --cstray-pf 3
 ## 说明
 
 文档中的数值均为典型量级，用于判断方向和发现问题；具体设计请以所选器件的 datasheet、参考设计和硬件设计指南为准，并以实测验证。
+
+## License
+
+[MIT](LICENSE)
