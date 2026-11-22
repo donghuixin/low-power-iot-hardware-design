@@ -14,6 +14,7 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 | 4. Bring-up 与量产 | 上电顺序、功耗实测、常见故障排查（睡眠电流大、射频距离短、偶发复位）、认证与产测 |
 | 5. 交互式引导 | 根据使用场景分轮追问，把用户确认的目标转成带单位、工况和验收方法的电路指标，并随反馈更新预算。 |
 | 6. 设计资料管理 | 按设计问题请用户提供对应型号的数据手册、参考设计或原理图，记录版本与页码，让关键参数可追溯。 |
+| 7. EDA 工具接入 | [安装并验证嘉立创 EDA 或 KiCad 的 MCP](references/11-eda-mcp-setup.md)，在 Codex 或 Claude Code 中读取当前工程。 |
 
 每个阶段输出带严重度分级（P0–P3）的问题列表，每条包含位置、后果和修改建议。
 
@@ -32,6 +33,7 @@ references/
   08-bringup-production.md       可测试性、调试、认证、量产
   09-schematic-readability.md    原理图绘制流程与可读性规范
   10-easyeda-execution.md        嘉立创EDA 实施、器件标准化、资料归档与保存验收
+  11-eda-mcp-setup.md            嘉立创 EDA 与 KiCad 的 MCP 安装、连接与排错
   checklists.md                  各阶段逐项核对清单
 scripts/
   power_budget.py                功耗预算与峰值压降检查

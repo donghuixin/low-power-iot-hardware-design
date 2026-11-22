@@ -1,6 +1,6 @@
 ---
 name: low-power-iot-hardware-design
-description: 低功耗物联网(IoT)硬件设计与评审的完整流程：交互式需求澄清、设计资料收集与核验、需求挖掘(含用户没想到的隐性需求及其对应的硬件形态)、器件与无线选型(BLE/WiFi/Thread/LoRa/蜂窝)、传感器放置(如IMU是否需要居中)、原理图可靠性审查(上拉下拉、三态、开漏/推挽、电平匹配、驱动电压电流、峰值/静态电流、电源树与去耦)、PCB布局布线(射频与天线、信号完整性、电源完整性、EMC、DFM、测试点)以及打样后的bring-up。只要用户提到电池供电设备、可穿戴、传感器节点、nRF52/nRF53/nRF54/ESP32/STM32L/STM32WB 等低功耗SoC的硬件、原理图或PCB评审、续航/功耗预算、睡眠电流偏大、天线或射频布局、"帮我看看这个板子/这张原理图"等，都应使用本skill，即使用户没有明确说"硬件设计"。Low-power IoT hardware design and review skill covering requirements elicitation, wireless/part selection, sensor placement, schematic reliability review, power budgeting, and PCB layout review for battery-powered devices.
+description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉立创 EDA 与 KiCad 的 MCP 接入、交互式需求澄清、设计资料收集与核验、需求挖掘(含用户没想到的隐性需求及其对应的硬件形态)、器件与无线选型(BLE/WiFi/Thread/LoRa/蜂窝)、传感器放置(如IMU是否需要居中)、原理图可靠性审查(上拉下拉、三态、开漏/推挽、电平匹配、驱动电压电流、峰值/静态电流、电源树与去耦)、PCB布局布线(射频与天线、信号完整性、电源完整性、EMC、DFM、测试点)以及打样后的bring-up。只要用户提到电池供电设备、可穿戴、传感器节点、nRF52/nRF53/nRF54/ESP32/STM32L/STM32WB 等低功耗SoC的硬件、原理图或PCB评审、续航/功耗预算、睡眠电流偏大、天线或射频布局、"帮我看看这个板子/这张原理图"等，都应使用本skill，即使用户没有明确说"硬件设计"。Low-power IoT hardware design and review skill covering requirements elicitation, wireless/part selection, sensor placement, schematic reliability review, power budgeting, and PCB layout review for battery-powered devices.
 ---
 
 # 低功耗 IoT 硬件设计
@@ -34,6 +34,8 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：交�
 | 给了原理图要求评审 | 阶段二 | 先用 3–5 个问题补齐关键需求（电池、续航目标、无线、环境），否则无法判断对错 |
 | 给了 PCB / layout 要求评审 | 阶段三 | 确认叠层、板厂能力、外壳材料 |
 | 板子回来了有问题（睡眠电流大、射频距离短、偶发复位） | 阶段四的调试流程 | 回查阶段二、三相关条目 |
+
+用户询问 MCP 安装，或希望操作本机编辑器而当前会话缺少对应工具时，使用[EDA MCP 接入教程](references/11-eda-mcp-setup.md)。根据用户的操作系统、EDA 版本和 AI 客户端给出对应步骤。先通过只读调用核对目标工程，再继续原来的设计任务。仅提供文件进行评审时可以直接读取文件。
 
 用户给的材料可能是：文字描述、原理图 PDF/截图、KiCad 文件（`.kicad_sch` / `.kicad_pcb` 是文本 S 表达式，可直接读取网络与器件）、网表、BOM 表、Gerber、layout 截图。先把材料读完整，再开始评审；图片看不清的地方请用户补充局部截图。
 
