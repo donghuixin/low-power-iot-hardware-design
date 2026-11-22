@@ -1,8 +1,8 @@
 # low-power-iot-hardware-design
 
-一个面向**低功耗物联网硬件**的 Claude Skill：从需求挖掘到原理图、Layout、bring-up 的完整设计与评审流程。
+一个面向**低功耗物联网硬件**的 Skill：从需求挖掘到原理图、Layout、bring-up 的完整设计与评审流程。
 
-A Claude skill for designing and reviewing low-power IoT hardware: requirements elicitation, wireless and part selection, sensor placement, schematic reliability review, power budgeting, PCB layout review, and bring-up.
+A Claude and Codex skill for designing and reviewing low-power IoT hardware: requirements elicitation, wireless and part selection, sensor placement, schematic reliability review, power budgeting, PCB layout review, and bring-up.
 
 ## 它做什么
 
@@ -12,6 +12,8 @@ A Claude skill for designing and reviewing low-power IoT hardware: requirements 
 | 2. 原理图可靠性 | 逐状态检查每个网络：上拉下拉、开漏/推挽/三态、电平域匹配、断电域反灌；驱动电压与驱动电流；睡眠电流逐项清点与峰值电流压降；电源树、充电、保护、去耦与储能；绘制流程与可读性规范（同页直连、跨页与标准接口用标号/端口、网络命名、文字不重叠、设计意图注释） |
 | 3. Layout | 叠层与阻抗、布局顺序、天线与射频、电源完整性、信号完整性、晶体、高阻节点、传感器应力与热隔离、EMC/ESD、热、DFM/DFA/DFT |
 | 4. Bring-up 与量产 | 上电顺序、功耗实测、常见故障排查（睡眠电流大、射频距离短、偶发复位）、认证与产测 |
+| 5. 交互式引导，通过与使用者进行双向沟通，了解明确真实需求，并将这些需求转化成为电路设计时需要考虑的指标和参数。|
+| 6. 设计资料管理，要求用户发送出相关的数据手册等文档，用来辅助设计完成相关的设计|
 
 每个阶段输出带严重度分级（P0–P3）的问题列表，每条包含位置、后果和修改建议。
 
