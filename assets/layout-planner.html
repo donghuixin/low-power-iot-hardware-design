@@ -250,6 +250,9 @@ button.primary:hover { opacity: 0.88; }
   .tb-btn.star span { display: none; }
 }
 
+#app.no-anim *, #app.no-anim *::before, #app.no-anim *::after { animation: none !important; transition: none !important; }
+#btn-anim.on { color: var(--sel); }
+#app.narrow #btn-anim span { display: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
@@ -278,6 +281,7 @@ button.primary:hover { opacity: 0.88; }
       </div>
     </div>
     <div class="tb-group tb-right">
+      <button id="btn-anim" class="tb-btn" aria-pressed="false" title="开启动画效果"><span>动效</span></button>
       <button id="btn-flip" class="tb-btn" title="翻板查看背面（B）"><span>翻板</span></button>
       <button class="tb-btn" data-menu="layers" aria-haspopup="true" aria-expanded="false">图层</button>
       <button id="btn-undo" class="tb-btn icon" title="撤销（Ctrl/⌘ + Z）" aria-label="撤销"></button>
@@ -331,7 +335,7 @@ button.primary:hover { opacity: 0.88; }
   <dialog id="intro" class="modal" data-ui>
     <h2>布局规划器</h2>
     <ol class="intro-steps">
-      <li><strong>拾取主器件。</strong>单击托盘或板上的器件把它拿起来，它的去耦电容、晶体等卫星器件会跟着悬浮环绕；再单击放下，卫星自动落到最近的合适位置。</li>
+      <li><strong>拾取主器件。</strong>单击托盘或板上的器件把它拿起来，它的去耦电容、晶体等卫星器件会跟着悬浮；再单击放下，卫星自动落到最近的合适位置。想看卫星环绕、落地飞落等动画，点工具条上的"动效"打开。</li>
       <li><strong>看反馈。</strong>右侧实时显示布线难易和规则问题，每次移动都会说明指标为什么变了。</li>
       <li><strong>导出。</strong>摆好后导出布局 JSON，交回给 Claude 做正式的 Layout 评审。</li>
     </ol>
@@ -355,6 +359,7 @@ button.primary:hover { opacity: 0.88; }
         <tr><td>旋转视角（仅 3D）</td><td><kbd>右键</kbd>拖动</td></tr>
         <tr><td>2D / 3D 切换</td><td><kbd>T</kbd></td></tr>
         <tr><td>翻板</td><td><kbd>B</kbd></td></tr>
+        <tr><td>动画效果</td><td>工具条"动效"按钮开关，默认关闭；关闭时卫星静止排在被拾取器件周围</td></tr>
         <tr><td>撤销 / 重做</td><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Z</kbd> / <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></td></tr>
         <tr><td>采纳朝向建议</td><td><kbd>Enter</kbd></td></tr>
         <tr><td>取消选择</td><td><kbd>Esc</kbd></td></tr>
@@ -619,6 +624,10 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       reset: '重置布局', reset_confirm: '清空所有摆放？可以用撤销恢复。',
       theme: '主题', theme_light: '浅色', theme_dark: '深色',
       help: '帮助', star: 'Star', star_title: '在 GitHub 上 Star 或 Fork 这个 skill，获取后续更新',
+      anim_off: '动效', anim_on: '动效开',
+      anim_title_off: '开启动画效果：拾取时卫星环绕、落地回弹与飞落、波纹等',
+      anim_title_on: '关闭动画效果（卫星仍静止排在器件周围）',
+      anim_title_system: '系统已开启"减少动态效果"，动画不会播放',
       storage_off: '未自动保存，请手动导出', restored: '已恢复上次的摆放',
       panel_steps: '步骤', panel_eval: '评估',
 
@@ -3852,7 +3861,10 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     layers: { keepout: true, edge: false, heat: false, magnetic: false, congestion: false, sats: true, halo: true, grid: true },
     editSats: false,
     theme: 'light',
-    reducedMotion: false,
+    animOn: false,          // 动效开关，默认关闭
+    systemReduced: false,   // 系统"减少动态效果"
+    /** 动效关闭或系统要求减少动态效果时，不播放动画（卫星仍静止排在器件周围）。 */
+    get reducedMotion() { return this.systemReduced || !this.animOn; },
     undoStack: [], redoStack: [],
     drag: null, suggestion: null, delta: null, focusIssue: null,
     storageOk: true,
@@ -4097,6 +4109,14 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     },
     exportJSON() { this.download(`${this.slug()}-layout.json`, JSON.stringify(M.exportLayout(this.p, this.ev), null, 2), 'application/json'); },
     exportCSV() { this.download(`${this.slug()}-placement.csv`, '﻿' + M.exportCSV(this.p), 'text/csv'); },
+
+    setAnim(on) {
+      this.animOn = !!on;
+      try { localStorage.setItem('lp:anim', on ? '1' : '0'); } catch (e) { /* 存储不可用 */ }
+      if (!on && this.renderer) this.renderer.anims = this.renderer.anims.filter((x) => x.type === 'view' || x.type === 'flip');
+      this.emit('anim');
+      this.redraw();
+    },
 
     toast(msg, level) { this.emit('toast', { msg, level: level || 'info' }); },
   };
@@ -4513,6 +4533,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     undo: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>',
     redo: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg>',
     flipboard: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="10" rx="2"/><path d="M12 3v4M12 17v4M9 5l3-2 3 2M9 19l3 2 3-2"/></svg>',
+    sparkle: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>',
     star: '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/></svg>',
   };
 
@@ -4541,8 +4562,10 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       App.on('shake', () => {});
       window.addEventListener('resize', () => this.onResize());
       const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-      App.reducedMotion = mq.matches;
-      mq.addEventListener && mq.addEventListener('change', (e) => { App.reducedMotion = e.matches; });
+      App.systemReduced = mq.matches;
+      mq.addEventListener && mq.addEventListener('change', (e) => { App.systemReduced = e.matches; this.renderToolbar(); });
+      try { App.animOn = localStorage.getItem('lp:anim') === '1'; } catch (e) { App.animOn = false; }
+      App.on('anim', () => this.renderToolbar());
       this.onResize(true);
     },
 
@@ -4587,6 +4610,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       $('#btn-redo').addEventListener('click', () => App.redo());
       $('#btn-star').insertAdjacentHTML('afterbegin', ICONS.star);
       $('#btn-help').addEventListener('click', () => this.openHelp());
+      $('#btn-anim').insertAdjacentHTML('afterbegin', ICONS.sparkle);
+      $('#btn-anim').addEventListener('click', () => App.setAnim(!App.animOn));
       $('#btn-steps').addEventListener('click', () => { this.root.classList.toggle('show-left'); this.root.classList.remove('show-right'); });
       $('#btn-eval').addEventListener('click', () => { this.root.classList.toggle('show-right'); this.root.classList.remove('show-left'); });
       $('#file-input').addEventListener('change', (e) => this.importFile(e.target.files[0]));
@@ -4663,6 +4688,12 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       $('#v2d').classList.toggle('active', App.view === '2d'); $('#v2d').setAttribute('aria-selected', String(App.view === '2d'));
       $('#v3d').classList.toggle('active', App.view === '3d'); $('#v3d').setAttribute('aria-selected', String(App.view === '3d'));
       $('#storage-note').hidden = App.storageOk;
+      const an = $('#btn-anim');
+      an.classList.toggle('on', App.animOn);
+      an.setAttribute('aria-pressed', String(App.animOn));
+      an.querySelector('span').textContent = App.animOn ? t('anim_on') : t('anim_off');
+      an.title = App.systemReduced ? t('anim_title_system') : App.animOn ? t('anim_title_on') : t('anim_title_off');
+      this.root.classList.toggle('no-anim', App.reducedMotion);
       for (const [k, v] of Object.entries(App.layers)) { const el = $(`#layer-${k}`); if (el) el.checked = v; }
       const es = $('#opt-editsats'); if (es) es.checked = App.editSats;
     },

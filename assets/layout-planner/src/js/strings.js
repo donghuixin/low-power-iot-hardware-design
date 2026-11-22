@@ -119,6 +119,10 @@
       reset: '重置布局', reset_confirm: '清空所有摆放？可以用撤销恢复。',
       theme: '主题', theme_light: '浅色', theme_dark: '深色',
       help: '帮助', star: 'Star', star_title: '在 GitHub 上 Star 或 Fork 这个 skill，获取后续更新',
+      anim_off: '动效', anim_on: '动效开',
+      anim_title_off: '开启动画效果：拾取时卫星环绕、落地回弹与飞落、波纹等',
+      anim_title_on: '关闭动画效果（卫星仍静止排在器件周围）',
+      anim_title_system: '系统已开启"减少动态效果"，动画不会播放',
       storage_off: '未自动保存，请手动导出', restored: '已恢复上次的摆放',
       panel_steps: '步骤', panel_eval: '评估',
 

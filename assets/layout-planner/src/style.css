@@ -242,6 +242,9 @@ button.primary:hover { opacity: 0.88; }
   .tb-btn.star span { display: none; }
 }
 
+#app.no-anim *, #app.no-anim *::before, #app.no-anim *::after { animation: none !important; transition: none !important; }
+#btn-anim.on { color: var(--sel); }
+#app.narrow #btn-anim span { display: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }

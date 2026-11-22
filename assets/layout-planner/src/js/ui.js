@@ -31,6 +31,7 @@
     undo: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>',
     redo: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg>',
     flipboard: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="10" rx="2"/><path d="M12 3v4M12 17v4M9 5l3-2 3 2M9 19l3 2 3-2"/></svg>',
+    sparkle: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>',
     star: '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/></svg>',
   };
 
@@ -59,8 +60,10 @@
       App.on('shake', () => {});
       window.addEventListener('resize', () => this.onResize());
       const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-      App.reducedMotion = mq.matches;
-      mq.addEventListener && mq.addEventListener('change', (e) => { App.reducedMotion = e.matches; });
+      App.systemReduced = mq.matches;
+      mq.addEventListener && mq.addEventListener('change', (e) => { App.systemReduced = e.matches; this.renderToolbar(); });
+      try { App.animOn = localStorage.getItem('lp:anim') === '1'; } catch (e) { App.animOn = false; }
+      App.on('anim', () => this.renderToolbar());
       this.onResize(true);
     },
 
@@ -105,6 +108,8 @@
       $('#btn-redo').addEventListener('click', () => App.redo());
       $('#btn-star').insertAdjacentHTML('afterbegin', ICONS.star);
       $('#btn-help').addEventListener('click', () => this.openHelp());
+      $('#btn-anim').insertAdjacentHTML('afterbegin', ICONS.sparkle);
+      $('#btn-anim').addEventListener('click', () => App.setAnim(!App.animOn));
       $('#btn-steps').addEventListener('click', () => { this.root.classList.toggle('show-left'); this.root.classList.remove('show-right'); });
       $('#btn-eval').addEventListener('click', () => { this.root.classList.toggle('show-right'); this.root.classList.remove('show-left'); });
       $('#file-input').addEventListener('change', (e) => this.importFile(e.target.files[0]));
@@ -181,6 +186,12 @@
       $('#v2d').classList.toggle('active', App.view === '2d'); $('#v2d').setAttribute('aria-selected', String(App.view === '2d'));
       $('#v3d').classList.toggle('active', App.view === '3d'); $('#v3d').setAttribute('aria-selected', String(App.view === '3d'));
       $('#storage-note').hidden = App.storageOk;
+      const an = $('#btn-anim');
+      an.classList.toggle('on', App.animOn);
+      an.setAttribute('aria-pressed', String(App.animOn));
+      an.querySelector('span').textContent = App.animOn ? t('anim_on') : t('anim_off');
+      an.title = App.systemReduced ? t('anim_title_system') : App.animOn ? t('anim_title_on') : t('anim_title_off');
+      this.root.classList.toggle('no-anim', App.reducedMotion);
       for (const [k, v] of Object.entries(App.layers)) { const el = $(`#layer-${k}`); if (el) el.checked = v; }
       const es = $('#opt-editsats'); if (es) es.checked = App.editSats;
     },

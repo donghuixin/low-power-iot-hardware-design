@@ -17,7 +17,10 @@
     layers: { keepout: true, edge: false, heat: false, magnetic: false, congestion: false, sats: true, halo: true, grid: true },
     editSats: false,
     theme: 'light',
-    reducedMotion: false,
+    animOn: false,          // 动效开关，默认关闭
+    systemReduced: false,   // 系统"减少动态效果"
+    /** 动效关闭或系统要求减少动态效果时，不播放动画（卫星仍静止排在器件周围）。 */
+    get reducedMotion() { return this.systemReduced || !this.animOn; },
     undoStack: [], redoStack: [],
     drag: null, suggestion: null, delta: null, focusIssue: null,
     storageOk: true,
@@ -262,6 +265,14 @@
     },
     exportJSON() { this.download(`${this.slug()}-layout.json`, JSON.stringify(M.exportLayout(this.p, this.ev), null, 2), 'application/json'); },
     exportCSV() { this.download(`${this.slug()}-placement.csv`, '﻿' + M.exportCSV(this.p), 'text/csv'); },
+
+    setAnim(on) {
+      this.animOn = !!on;
+      try { localStorage.setItem('lp:anim', on ? '1' : '0'); } catch (e) { /* 存储不可用 */ }
+      if (!on && this.renderer) this.renderer.anims = this.renderer.anims.filter((x) => x.type === 'view' || x.type === 'flip');
+      this.emit('anim');
+      this.redraw();
+    },
 
     toast(msg, level) { this.emit('toast', { msg, level: level || 'info' }); },
   };

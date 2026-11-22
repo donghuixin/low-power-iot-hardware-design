@@ -29,6 +29,7 @@
       </div>
     </div>
     <div class="tb-group tb-right">
+      <button id="btn-anim" class="tb-btn" aria-pressed="false" title="开启动画效果"><span>动效</span></button>
       <button id="btn-flip" class="tb-btn" title="翻板查看背面（B）"><span>翻板</span></button>
       <button class="tb-btn" data-menu="layers" aria-haspopup="true" aria-expanded="false">图层</button>
       <button id="btn-undo" class="tb-btn icon" title="撤销（Ctrl/⌘ + Z）" aria-label="撤销"></button>
@@ -82,7 +83,7 @@
   <dialog id="intro" class="modal" data-ui>
     <h2>布局规划器</h2>
     <ol class="intro-steps">
-      <li><strong>拾取主器件。</strong>单击托盘或板上的器件把它拿起来，它的去耦电容、晶体等卫星器件会跟着悬浮环绕；再单击放下，卫星自动落到最近的合适位置。</li>
+      <li><strong>拾取主器件。</strong>单击托盘或板上的器件把它拿起来，它的去耦电容、晶体等卫星器件会跟着悬浮；再单击放下，卫星自动落到最近的合适位置。想看卫星环绕、落地飞落等动画，点工具条上的"动效"打开。</li>
       <li><strong>看反馈。</strong>右侧实时显示布线难易和规则问题，每次移动都会说明指标为什么变了。</li>
       <li><strong>导出。</strong>摆好后导出布局 JSON，交回给 Claude 做正式的 Layout 评审。</li>
     </ol>
@@ -106,6 +107,7 @@
         <tr><td>旋转视角（仅 3D）</td><td><kbd>右键</kbd>拖动</td></tr>
         <tr><td>2D / 3D 切换</td><td><kbd>T</kbd></td></tr>
         <tr><td>翻板</td><td><kbd>B</kbd></td></tr>
+        <tr><td>动画效果</td><td>工具条"动效"按钮开关，默认关闭；关闭时卫星静止排在被拾取器件周围</td></tr>
         <tr><td>撤销 / 重做</td><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Z</kbd> / <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></td></tr>
         <tr><td>采纳朝向建议</td><td><kbd>Enter</kbd></td></tr>
         <tr><td>取消选择</td><td><kbd>Esc</kbd></td></tr>
