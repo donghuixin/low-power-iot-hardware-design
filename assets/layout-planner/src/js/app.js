@@ -214,12 +214,34 @@
       }, { noAnim: true, noDelta: true });
       if (this.renderer) this.renderer.requestDraw();
     },
+    // ---------- 固定孔 ----------
+    addHole(d) {
+      const q = M.suggestHole(this.p, d);
+      if (!q) { this.toast(LP.t('ui.toast_hole_nospace', { d }), 'warn'); return false; }
+      const ok = this.commit(LP.t('ui.op_hole_add'), () => { this.p.board.holes.push({ x: q.x, y: q.y, d }); }, { noAnim: true, noDelta: true });
+      if (ok) this.toast(LP.t('ui.toast_hole_added', { x: q.x, y: q.y }), 'ok');
+      return ok;
+    },
+    removeHole(i) {
+      if (!this.p.board.holes[i]) return false;
+      return this.commit(LP.t('ui.op_hole_del'), () => { this.p.board.holes.splice(i, 1); }, { noAnim: true, noDelta: true });
+    },
+    setHole(i, patch) {
+      const h = this.p.board.holes[i];
+      if (!h) return false;
+      return this.commit(LP.t('ui.op_hole_move'), () => {
+        for (const k of ['x', 'y', 'd']) if (Number.isFinite(patch[k])) h[k] = M.r2(patch[k]);
+        if (!(h.d > 0)) h.d = 2.2;
+      }, { noAnim: true, noDelta: true });
+    },
     /** 开场选定的板框：直接写入（不进撤销栈），然后确认。 */
     setupBoard(patch) {
       const b = this.p.board;
       const old = { ...b.outline };
       b.outline = { corner_r: 0, ...patch.outline };
       M.remapBoardFeatures(b, old, b.outline);
+      if (patch.holes === 'none') b.holes = [];
+      else if (patch.holes === 'corners') b.holes = M.cornerHoles(b.outline, 2.2);
       if (patch.layers) b.layers = patch.layers;
       if (patch.two_sided !== undefined) b.two_sided = patch.two_sided;
       this.confirmBoard();

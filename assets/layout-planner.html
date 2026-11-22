@@ -275,6 +275,23 @@ button.primary:hover { opacity: 0.88; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
+/* 固定孔编辑 */
+.holes-editor { display: flex; flex-direction: column; gap: 6px; }
+.holes-editor .step-sub { margin: 4px 0 0; }
+.hole-row { display: grid; grid-template-columns: 30px 1fr 1fr 1fr 26px; gap: 4px; align-items: center; }
+.hole-head span { font-size: 10.5px; color: var(--muted); padding-left: 2px; }
+.hole-id { font-size: 12px; font-weight: 600; }
+.hole-f { display: block; min-width: 0; }
+.hole-f input { width: 100%; min-width: 0; height: 26px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-solid); padding: 0 4px; -moz-appearance: textfield; color: var(--text); font-size: 12px; }
+.hole-del { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-solid); font-size: 15px; line-height: 1; padding: 0; color: var(--muted); }
+.hole-del:hover { color: var(--bad, #c0392b); border-color: currentColor; }
+.hole-add { display: flex; gap: 6px; }
+.hole-add select { flex: 1; min-width: 0; height: 30px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel-solid); padding: 0 8px; color: var(--text); }
+.hole-add button { height: 30px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel-solid); padding: 0 12px; white-space: nowrap; }
+.hole-add button:hover { border-color: var(--text); }
+.hole-f input::-webkit-inner-spin-button { display: none; }
+.step-sub .unit { font-weight: 400; }
+
 </style>
 </head>
 <body>
@@ -640,12 +657,19 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       board_layers: '层数', board_thickness: '板厚 (mm)', board_two_sided: '允许双面贴装', board_mask: '阻焊颜色',
       board_confirm: '确认板框，开始摆放', board_reconfirm: '完成修改',
       board_edit_hint: '也可以拖动板子右边、上边或右上角的圆点直接改尺寸。',
-      board_holes: '固定孔 {n} 个、禁布区 {m} 个（在项目数据中编辑）',
+      board_keepouts: '禁布区 {m} 个（在项目数据中编辑）',
+      holes_title: '固定孔', hole_add: '添加', hole_none: '没有固定孔。', hole_del: '删除孔 {i}',
+      holes_hint: '展开这一步时，可在板上拖动固定孔调整位置，双击孔删除。',
+      op_hole_add: '添加固定孔', op_hole_del: '删除固定孔', op_hole_move: '修改固定孔',
+      toast_hole_added: '已在 ({x}, {y}) 放置固定孔，可在板上拖动调整',
+      toast_hole_nospace: '板上没有放得下 Ø{d} mm 固定孔的空位：先挪开器件、改小孔径或加大板子',
+      toast_hole_tight: '孔{i} 离板边、器件或其它孔太近，规则面板会给出提示',
+      bs_holes: '固定孔', bs_holes_keep: '保留项目中的 {n} 个', bs_holes_corners: '四角各一个 M2', bs_holes_none: '暂不放置',
       bs_title: '先选定板子尺寸', bs_project: '项目原始尺寸', bs_compact: '紧凑', bs_standard: '常用', bs_roomy: '宽松', bs_round: '圆形',
       bs_custom: '自定义', bs_custom_dim: '输入尺寸', bs_tight: '可能放不下',
       bs_area: '主器件与卫星正面合计约 {top} mm²、背面 {bottom} mm²，建议板面积不小于 {need} mm²；当前选择 {a} mm²。',
       bs_too_small: '偏小，摆放会很紧。',
-      bs_later: '固定孔和禁布区会跟着最近的板角移动。之后仍可在左侧第 1 步修改尺寸，或拖动板子边上的圆点。',
+      bs_later: '保留的固定孔和禁布区会跟着最近的板角移动。之后仍可在左侧第 1 步修改尺寸、增删和拖动固定孔，或拖动板子边上的圆点。',
       bs_invalid: '请输入有效的尺寸（不小于 5 mm）',
       mask_green: '墨绿', mask_blue: '深蓝', mask_black: '哑黑', mask_white: '白色',
       check_unplaced: '还有 {n} 个主器件未摆放：{refs}',
@@ -1343,7 +1367,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
   }
   function stableStringify(v) {
     if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
-    if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}';
+    if (v && typeof v === 'object') return '{' + Object.keys(v).filter((k) => k[0] !== '_').sort().map((k) => JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}';
     return JSON.stringify(v);
   }
   /** 项目定义（不含摆放结果）的指纹，用于判断本地自动保存的状态是否属于同一个项目。 */
@@ -1352,7 +1376,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     delete d.result;
     for (const x of d.parts || []) { delete x.placed; delete x.locked; }
     for (const x of d.satellites || []) { delete x.placed; delete x.pinned; }
-    if (d.board) { delete d.board.outline; delete d.board.mask; }
+    if (d.board) { delete d.board.outline; delete d.board.mask; delete d.board.holes; }
     const s = stableStringify(d);
     let h = 5381;
     for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
@@ -1403,11 +1427,62 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     return lines.join('\n') + '\n';
   }
 
+
+  // ---------- 固定孔 ----------
+  /** 常用固定孔：孔径取螺丝的常用过孔尺寸。 */
+  const HOLE_SIZES = [{ id: 'M2', d: 2.2 }, { id: 'M2.5', d: 2.7 }, { id: 'M3', d: 3.2 }];
+  const HOLE_EDGE = 1.5;   // 孔边到板边的推荐最小距离（留出焊环和铣边公差）
+  const holeRectOf = (x, y, d) => G.rectFromCenter(x, y, d, d);
+  /** 孔放在 (x, y) 是否合适：在板内且离边足够、不与其它孔、禁布区、已摆放器件冲突。ignore 为要跳过的孔序号。 */
+  function holeFits(p, x, y, d, ignore) {
+    const b = p.board, r = holeRectOf(x, y, d);
+    if (!G.rectInBoard(b.outline, G.expand(r, HOLE_EDGE))) return false;
+    for (let i = 0; i < (b.holes || []).length; i++) {
+      if (i === ignore) continue;
+      const h = b.holes[i];
+      if (Math.hypot(h.x - x, h.y - y) < (h.d + d) / 2 + 2) return false;
+    }
+    for (const k of b.keepouts || []) if (G.overlaps(r, { x0: k.x, y0: k.y, x1: k.x + k.w, y1: k.y + k.h })) return false;
+    const rr = G.expand(r, 0.8);
+    for (const x2 of p.parts) if (x2.placed && G.overlaps(rr, footprint(x2))) return false;
+    for (const s of p.satellites) if (s.placed && s._active && G.overlaps(rr, satFootprint(s))) return false;
+    return true;
+  }
+  /** 从板框外接矩形的四个角沿对角线向中心找第一个合适的孔位（适用于各种板框形状）。 */
+  function cornerHolePositions(outline, d) {
+    const bb = G.outlineBBox(outline);
+    const cx = (bb.x0 + bb.x1) / 2, cy = (bb.y0 + bb.y1) / 2;
+    const out = [];
+    for (const [x0, y0] of [[bb.x0, bb.y0], [bb.x1, bb.y0], [bb.x1, bb.y1], [bb.x0, bb.y1]]) {
+      const L = Math.hypot(cx - x0, cy - y0), ux = (cx - x0) / L, uy = (cy - y0) / L;
+      for (let t = 0; t < L; t += 0.25) {
+        const x = Math.round((x0 + ux * t) * 2) / 2, y = Math.round((y0 + uy * t) * 2) / 2;
+        if (G.rectInBoard(outline, G.expand(holeRectOf(x, y, d), HOLE_EDGE))) { out.push({ x, y }); break; }
+      }
+    }
+    return out;
+  }
+  /** 四角各放一个孔（开场选尺寸时用）。 */
+  function cornerHoles(outline, d) { return cornerHolePositions(outline, d).map((q) => ({ x: q.x, y: q.y, d })); }
+  /** 为新孔找空位：先试四角，再按离板边由近到远扫描整板。找不到返回 null。 */
+  function suggestHole(p, d) {
+    for (const q of cornerHolePositions(p.board.outline, d)) if (holeFits(p, q.x, q.y, d)) return q;
+    const bb = G.outlineBBox(p.board.outline), cand = [];
+    for (let x = bb.x0; x <= bb.x1; x += 0.5) for (let y = bb.y0; y <= bb.y1; y += 0.5) {
+      if (!G.pointInPolygon({ x, y }, G.outlinePolygon(p.board.outline))) continue;
+      cand.push({ x, y, e: G.distToBoardEdge(p.board.outline, { x, y }) });
+    }
+    cand.sort((a, b) => a.e - b.e);
+    for (const q of cand) if (holeFits(p, q.x, q.y, d)) return { x: q.x, y: q.y };
+    return null;
+  }
+
   LP.model = {
     TOOL_VERSION, ROLES, SAT_KINDS, NET_CLASSES, SIDES, ROTS, SENSOR_ROLES,
     validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint,
     partByRef, satByRef, itemByRef, placedParts, partTags, satTags, connectedParts, parseCap,
     snapshot, restore, definitionHash, exportLayout, resultObject, exportCSV, r2, remapBoardFeatures, partsArea, BOARD_SHAPES, outlineFromShape, shapeOf, toEditablePolygon, exportDXF,
+    HOLE_SIZES, HOLE_EDGE, holeFits, cornerHoles, suggestHole,
   };
 })(globalThis.LP = globalThis.LP || {});
 
@@ -2929,6 +3004,16 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         ctx.beginPath(); ctx.arc(c.x, c.y, r + 0.45 * this.s, 0, Math.PI * 2); ctx.fillStyle = COPPER; ctx.fill();
         ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, Math.PI * 2); ctx.fillStyle = app.theme === 'dark' ? '#121315' : '#3a3833'; ctx.fill();
       }
+      // 编辑板框时标出孔号，提示可以拖动
+      if (app.boardEditing) p.board.holes.forEach((h, i) => {
+        const c = this.boardToScreen(h.x, h.y), r = (h.d / 2 + 0.45) * this.s + 3;
+        ctx.save(); ctx.setLineDash([3, 3]); ctx.strokeStyle = ACCENT.sel; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+        ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.fillStyle = app.theme === 'dark' ? '#e8e6e1' : '#1f1e1b';
+        ctx.fillText(`孔${i + 1}`, c.x, c.y - r - 2);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      });
       this.drawRulers(bb);
 
       const side = this.viewSide();
@@ -4231,12 +4316,34 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       }, { noAnim: true, noDelta: true });
       if (this.renderer) this.renderer.requestDraw();
     },
+    // ---------- 固定孔 ----------
+    addHole(d) {
+      const q = M.suggestHole(this.p, d);
+      if (!q) { this.toast(LP.t('ui.toast_hole_nospace', { d }), 'warn'); return false; }
+      const ok = this.commit(LP.t('ui.op_hole_add'), () => { this.p.board.holes.push({ x: q.x, y: q.y, d }); }, { noAnim: true, noDelta: true });
+      if (ok) this.toast(LP.t('ui.toast_hole_added', { x: q.x, y: q.y }), 'ok');
+      return ok;
+    },
+    removeHole(i) {
+      if (!this.p.board.holes[i]) return false;
+      return this.commit(LP.t('ui.op_hole_del'), () => { this.p.board.holes.splice(i, 1); }, { noAnim: true, noDelta: true });
+    },
+    setHole(i, patch) {
+      const h = this.p.board.holes[i];
+      if (!h) return false;
+      return this.commit(LP.t('ui.op_hole_move'), () => {
+        for (const k of ['x', 'y', 'd']) if (Number.isFinite(patch[k])) h[k] = M.r2(patch[k]);
+        if (!(h.d > 0)) h.d = 2.2;
+      }, { noAnim: true, noDelta: true });
+    },
     /** 开场选定的板框：直接写入（不进撤销栈），然后确认。 */
     setupBoard(patch) {
       const b = this.p.board;
       const old = { ...b.outline };
       b.outline = { corner_r: 0, ...patch.outline };
       M.remapBoardFeatures(b, old, b.outline);
+      if (patch.holes === 'none') b.holes = [];
+      else if (patch.holes === 'corners') b.holes = M.cornerHoles(b.outline, 2.2);
       if (patch.layers) b.layers = patch.layers;
       if (patch.two_sided !== undefined) b.two_sided = patch.two_sided;
       this.confirmBoard();
@@ -4517,6 +4624,17 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       return null;
     }
 
+    /** 编辑板框时可拖动的固定孔：返回孔序号或 -1。 */
+    function holeAt(sp) {
+      if (!App.boardEditing || R().kind !== '2d') return -1;
+      const hs = App.p.board.holes || [];
+      for (let i = hs.length - 1; i >= 0; i--) {
+        const c = R().boardToScreen(hs[i].x, hs[i].y);
+        if (Math.hypot(c.x - sp.x, c.y - sp.y) < (hs[i].d / 2) * R().s + 6) return i;
+      }
+      return -1;
+    }
+
     // ---------- 指针事件 ----------
     stage.addEventListener('pointerdown', (e) => {
       if (LP.ui.isOverPanel(e.clientX, e.clientY)) return;
@@ -4535,6 +4653,12 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         gesture = { type: 'resize', handle: h.id, orig: JSON.parse(JSON.stringify(App.p.board.outline)) };
         return;
       }
+      const hi = e.button === 0 ? holeAt(sp) : -1;
+      if (hi >= 0) {
+        const ho = App.p.board.holes[hi];
+        gesture = { type: 'hole', i: hi, start: sp, orig: { x: ho.x, y: ho.y }, moved: false };
+        return;
+      }
       if (e.button === 1 || (e.button === 0 && spaceDown)) { gesture = { type: 'pan', last: sp }; return; }
       if (e.button === 2) { gesture = { type: R().kind === '3d' ? 'orbit' : 'pan', last: sp }; return; }
       const hit = R().pick(sp.x, sp.y);
@@ -4551,6 +4675,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         if (App.drag) return;
         const h = handleAt(sp);
         if (h) { stage.style.cursor = h.cursor; App.emit('hover', null); return; }
+        if (holeAt(sp) >= 0) { stage.style.cursor = 'move'; App.emit('hover', null); return; }
         const hit = R().pick(sp.x, sp.y);
         stage.style.cursor = hit ? (hit.type === 'part' && !M.partByRef(App.p, hit.ref).locked ? 'grab' : 'pointer') : 'default';
         const key = hit ? hit.ref : null;
@@ -4586,6 +4711,14 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         App.redraw();
         return;
       }
+      if (gesture.type === 'hole') {
+        if (!gesture.moved && Math.hypot(sp.x - gesture.start.x, sp.y - gesture.start.y) <= CLICK_PX) return;
+        gesture.moved = true;
+        const bp = R().screenToBoard(sp.x, sp.y), ho = App.p.board.holes[gesture.i];
+        ho.x = Math.round(bp.x * 2) / 2; ho.y = Math.round(bp.y * 2) / 2;
+        App.redraw();
+        return;
+      }
       if (gesture.type === 'press') {
         const moved = Math.hypot(sp.x - gesture.start.x, sp.y - gesture.start.y) > CLICK_PX;
         if (!moved) return;
@@ -4605,6 +4738,14 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       gesture = null;
       stage.style.cursor = 'default';
       if (g.type === 'drag') { endDrag(true); return; }
+      if (g.type === 'hole') {
+        if (!g.moved) return;
+        const ho = App.p.board.holes[g.i], now = { x: ho.x, y: ho.y };
+        ho.x = g.orig.x; ho.y = g.orig.y;
+        App.setHole(g.i, now);
+        if (!M.holeFits(App.p, now.x, now.y, ho.d, g.i)) App.toast(LP.t('ui.toast_hole_tight', { i: g.i + 1 }), 'warn');
+        return;
+      }
       if (g.type === 'resize') {
         const now = { ...App.p.board.outline };
         App.p.board.outline = g.orig;
@@ -4624,9 +4765,11 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     // 编辑板框时：双击多边形的边添加顶点，双击顶点删除
     stage.addEventListener('dblclick', (e) => {
       if (!App.boardEditing || R().kind !== '2d') return;
+      const sp = local(e);
+      const hi = holeAt(sp);
+      if (hi >= 0) { App.removeHole(hi); return; }
       const o = App.p.board.outline;
       if (o.type !== 'polygon') return;
-      const sp = local(e);
       const pts = o.points.map(([x, y]) => R().boardToScreen(x, y));
       const vi = pts.findIndex((q) => Math.hypot(q.x - sp.x, q.y - sp.y) < 10);
       if (vi >= 0) {
@@ -5039,11 +5182,31 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         h('label', { class: 'field' }, h('span', {}, t('board_layers')), h('select', { onchange: (e) => App.setBoard({ layers: parseInt(e.target.value, 10) }) }, ...[2, 4, 6].map((n) => h('option', { value: n, selected: b.layers === n }, n)))),
         num(t('board_thickness'), b.thickness, (v) => App.setBoard({ thickness: v }), 0.1)));
       wrap.append(h('label', { class: 'field check' }, h('input', { type: 'checkbox', checked: b.two_sided, onchange: (e) => App.setBoard({ two_sided: e.target.checked }) }), h('span', {}, t('board_two_sided'))));
-      wrap.append(h('p', { class: 'muted small' }, t('board_holes', { n: b.holes.length, m: b.keepouts.length })));
+      wrap.append(this.holesEditor());
+      if (b.keepouts.length) wrap.append(h('p', { class: 'muted small' }, t('board_keepouts', { m: b.keepouts.length })));
       if (M.shapeOf(o) !== 'custom') wrap.append(h('p', { class: 'muted small' }, o.type === 'polygon' ? t('board_edit_hint_poly') : t('board_edit_hint')));
       wrap.append(h('p', { class: 'eda-note small' }, t('eda_final_outline')));
       wrap.append(h('button', { class: 'primary', onclick: () => { App.confirmBoard(); this.openStep = null; this.renderSteps(); } }, App.boardConfirmed ? t('board_reconfirm') : t('board_confirm')));
       return wrap;
+    },
+    /** 固定孔列表：逐个改坐标和孔径、删除，或按常用规格添加。 */
+    holesEditor() {
+      const App = this.App, holes = App.p.board.holes;
+      const box = h('div', { class: 'holes-editor', id: 'holes-editor' });
+      box.append(h('div', { class: 'step-sub' }, `${t('holes_title')}（${holes.length}）`, h('span', { class: 'unit' }, ' 单位 mm')));
+      if (!holes.length) box.append(h('p', { class: 'muted small' }, t('hole_none')));
+      if (holes.length) box.append(h('div', { class: 'hole-row hole-head', 'aria-hidden': 'true' }, h('span'), h('span', {}, 'x'), h('span', {}, 'y'), h('span', {}, '孔径'), h('span')));
+      const numIn = (i, k, v, label) => h('label', { class: 'hole-f' }, h('span', { class: 'sr-only' }, `孔${i + 1} ${label}`),
+        h('input', { type: 'number', step: k === 'd' ? 0.1 : 0.5, min: k === 'd' ? 0.5 : undefined, value: v, 'data-hole': i, 'data-k': k,
+          onchange: (e) => { const x = parseFloat(e.target.value); if (Number.isFinite(x) && (k !== 'd' || x > 0)) App.setHole(i, { [k]: x }); } }));
+      holes.forEach((ho, i) => box.append(h('div', { class: 'hole-row' },
+        h('span', { class: 'hole-id' }, `孔${i + 1}`),
+        numIn(i, 'x', ho.x, 'x'), numIn(i, 'y', ho.y, 'y'), numIn(i, 'd', ho.d, 'Ø'),
+        h('button', { class: 'icon-btn hole-del', title: t('hole_del', { i: i + 1 }), 'aria-label': t('hole_del', { i: i + 1 }), onclick: () => App.removeHole(i) }, '×'))));
+      const size = h('select', { class: 'hole-size', 'aria-label': t('holes_title') }, ...M.HOLE_SIZES.map((z) => h('option', { value: z.d }, `${z.id}（Ø${z.d}）`)));
+      box.append(h('div', { class: 'hole-add' }, size, h('button', { class: 'ghost', id: 'hole-add', onclick: () => App.addHole(parseFloat(size.value)) }, '+ ', t('hole_add'))));
+      box.append(h('p', { class: 'muted small' }, t('holes_hint')));
+      return box;
     },
     /**
      * 板框形状编辑：圆角矩形、胶囊形、倒角矩形、L 形、圆形，以及可在板上逐点编辑的自定义多边形。
@@ -5482,11 +5645,15 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         grid.append(btn);
       }
       const layers = h('select', {}, ...[2, 4, 6].map((n) => h('option', { value: n, selected: p.board.layers === n }, n)));
+      const nh = p.board.holes.length;
+      const holeOpts = [...(nh ? [['keep', t('bs_holes_keep', { n: nh })]] : []), ['corners', t('bs_holes_corners')], ['none', t('bs_holes_none')]];
+      const holeSel = h('select', { id: 'bs-holes' }, ...holeOpts.map(([v, l], i) => h('option', { value: v, selected: i === 0 }, l)));
       const two = h('input', { type: 'checkbox', checked: p.board.two_sided });
       body.append(grid, custom, hint,
         h('div', { class: 'row2 bs-opts' },
           h('label', { class: 'field' }, h('span', {}, t('board_layers')), layers),
           h('label', { class: 'field check' }, two, h('span', {}, t('board_two_sided')))),
+        h('label', { class: 'field bs-holes' }, h('span', {}, t('bs_holes')), holeSel),
         h('p', { class: 'muted small' }, t('bs_later')),
         h('p', { class: 'eda-note small' }, t('eda_final_outline')));
       updateHint();
@@ -5495,7 +5662,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         const ol = chosen.outline || customOutline();
         if (!ol) { this.toast(t('bs_invalid'), 'bad'); return; }
         d.close();
-        App.setupBoard({ outline: ol, layers: parseInt(layers.value, 10), two_sided: two.checked });
+        App.setupBoard({ outline: ol, layers: parseInt(layers.value, 10), two_sided: two.checked, holes: holeSel.value });
         this.openStep = null;
         this.renderAll();
       };

@@ -379,6 +379,16 @@
         ctx.beginPath(); ctx.arc(c.x, c.y, r + 0.45 * this.s, 0, Math.PI * 2); ctx.fillStyle = COPPER; ctx.fill();
         ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, Math.PI * 2); ctx.fillStyle = app.theme === 'dark' ? '#121315' : '#3a3833'; ctx.fill();
       }
+      // 编辑板框时标出孔号，提示可以拖动
+      if (app.boardEditing) p.board.holes.forEach((h, i) => {
+        const c = this.boardToScreen(h.x, h.y), r = (h.d / 2 + 0.45) * this.s + 3;
+        ctx.save(); ctx.setLineDash([3, 3]); ctx.strokeStyle = ACCENT.sel; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+        ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.fillStyle = app.theme === 'dark' ? '#e8e6e1' : '#1f1e1b';
+        ctx.fillText(`孔${i + 1}`, c.x, c.y - r - 2);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      });
       this.drawRulers(bb);
 
       const side = this.viewSide();

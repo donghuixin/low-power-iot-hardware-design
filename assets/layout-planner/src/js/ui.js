@@ -315,11 +315,31 @@
         h('label', { class: 'field' }, h('span', {}, t('board_layers')), h('select', { onchange: (e) => App.setBoard({ layers: parseInt(e.target.value, 10) }) }, ...[2, 4, 6].map((n) => h('option', { value: n, selected: b.layers === n }, n)))),
         num(t('board_thickness'), b.thickness, (v) => App.setBoard({ thickness: v }), 0.1)));
       wrap.append(h('label', { class: 'field check' }, h('input', { type: 'checkbox', checked: b.two_sided, onchange: (e) => App.setBoard({ two_sided: e.target.checked }) }), h('span', {}, t('board_two_sided'))));
-      wrap.append(h('p', { class: 'muted small' }, t('board_holes', { n: b.holes.length, m: b.keepouts.length })));
+      wrap.append(this.holesEditor());
+      if (b.keepouts.length) wrap.append(h('p', { class: 'muted small' }, t('board_keepouts', { m: b.keepouts.length })));
       if (M.shapeOf(o) !== 'custom') wrap.append(h('p', { class: 'muted small' }, o.type === 'polygon' ? t('board_edit_hint_poly') : t('board_edit_hint')));
       wrap.append(h('p', { class: 'eda-note small' }, t('eda_final_outline')));
       wrap.append(h('button', { class: 'primary', onclick: () => { App.confirmBoard(); this.openStep = null; this.renderSteps(); } }, App.boardConfirmed ? t('board_reconfirm') : t('board_confirm')));
       return wrap;
+    },
+    /** 固定孔列表：逐个改坐标和孔径、删除，或按常用规格添加。 */
+    holesEditor() {
+      const App = this.App, holes = App.p.board.holes;
+      const box = h('div', { class: 'holes-editor', id: 'holes-editor' });
+      box.append(h('div', { class: 'step-sub' }, `${t('holes_title')}（${holes.length}）`, h('span', { class: 'unit' }, ' 单位 mm')));
+      if (!holes.length) box.append(h('p', { class: 'muted small' }, t('hole_none')));
+      if (holes.length) box.append(h('div', { class: 'hole-row hole-head', 'aria-hidden': 'true' }, h('span'), h('span', {}, 'x'), h('span', {}, 'y'), h('span', {}, '孔径'), h('span')));
+      const numIn = (i, k, v, label) => h('label', { class: 'hole-f' }, h('span', { class: 'sr-only' }, `孔${i + 1} ${label}`),
+        h('input', { type: 'number', step: k === 'd' ? 0.1 : 0.5, min: k === 'd' ? 0.5 : undefined, value: v, 'data-hole': i, 'data-k': k,
+          onchange: (e) => { const x = parseFloat(e.target.value); if (Number.isFinite(x) && (k !== 'd' || x > 0)) App.setHole(i, { [k]: x }); } }));
+      holes.forEach((ho, i) => box.append(h('div', { class: 'hole-row' },
+        h('span', { class: 'hole-id' }, `孔${i + 1}`),
+        numIn(i, 'x', ho.x, 'x'), numIn(i, 'y', ho.y, 'y'), numIn(i, 'd', ho.d, 'Ø'),
+        h('button', { class: 'icon-btn hole-del', title: t('hole_del', { i: i + 1 }), 'aria-label': t('hole_del', { i: i + 1 }), onclick: () => App.removeHole(i) }, '×'))));
+      const size = h('select', { class: 'hole-size', 'aria-label': t('holes_title') }, ...M.HOLE_SIZES.map((z) => h('option', { value: z.d }, `${z.id}（Ø${z.d}）`)));
+      box.append(h('div', { class: 'hole-add' }, size, h('button', { class: 'ghost', id: 'hole-add', onclick: () => App.addHole(parseFloat(size.value)) }, '+ ', t('hole_add'))));
+      box.append(h('p', { class: 'muted small' }, t('holes_hint')));
+      return box;
     },
     /**
      * 板框形状编辑：圆角矩形、胶囊形、倒角矩形、L 形、圆形，以及可在板上逐点编辑的自定义多边形。
@@ -758,11 +778,15 @@
         grid.append(btn);
       }
       const layers = h('select', {}, ...[2, 4, 6].map((n) => h('option', { value: n, selected: p.board.layers === n }, n)));
+      const nh = p.board.holes.length;
+      const holeOpts = [...(nh ? [['keep', t('bs_holes_keep', { n: nh })]] : []), ['corners', t('bs_holes_corners')], ['none', t('bs_holes_none')]];
+      const holeSel = h('select', { id: 'bs-holes' }, ...holeOpts.map(([v, l], i) => h('option', { value: v, selected: i === 0 }, l)));
       const two = h('input', { type: 'checkbox', checked: p.board.two_sided });
       body.append(grid, custom, hint,
         h('div', { class: 'row2 bs-opts' },
           h('label', { class: 'field' }, h('span', {}, t('board_layers')), layers),
           h('label', { class: 'field check' }, two, h('span', {}, t('board_two_sided')))),
+        h('label', { class: 'field bs-holes' }, h('span', {}, t('bs_holes')), holeSel),
         h('p', { class: 'muted small' }, t('bs_later')),
         h('p', { class: 'eda-note small' }, t('eda_final_outline')));
       updateHint();
@@ -771,7 +795,7 @@
         const ol = chosen.outline || customOutline();
         if (!ol) { this.toast(t('bs_invalid'), 'bad'); return; }
         d.close();
-        App.setupBoard({ outline: ol, layers: parseInt(layers.value, 10), two_sided: two.checked });
+        App.setupBoard({ outline: ol, layers: parseInt(layers.value, 10), two_sided: two.checked, holes: holeSel.value });
         this.openStep = null;
         this.renderAll();
       };

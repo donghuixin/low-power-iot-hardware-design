@@ -197,6 +197,17 @@
       return null;
     }
 
+    /** 编辑板框时可拖动的固定孔：返回孔序号或 -1。 */
+    function holeAt(sp) {
+      if (!App.boardEditing || R().kind !== '2d') return -1;
+      const hs = App.p.board.holes || [];
+      for (let i = hs.length - 1; i >= 0; i--) {
+        const c = R().boardToScreen(hs[i].x, hs[i].y);
+        if (Math.hypot(c.x - sp.x, c.y - sp.y) < (hs[i].d / 2) * R().s + 6) return i;
+      }
+      return -1;
+    }
+
     // ---------- 指针事件 ----------
     stage.addEventListener('pointerdown', (e) => {
       if (LP.ui.isOverPanel(e.clientX, e.clientY)) return;
@@ -215,6 +226,12 @@
         gesture = { type: 'resize', handle: h.id, orig: JSON.parse(JSON.stringify(App.p.board.outline)) };
         return;
       }
+      const hi = e.button === 0 ? holeAt(sp) : -1;
+      if (hi >= 0) {
+        const ho = App.p.board.holes[hi];
+        gesture = { type: 'hole', i: hi, start: sp, orig: { x: ho.x, y: ho.y }, moved: false };
+        return;
+      }
       if (e.button === 1 || (e.button === 0 && spaceDown)) { gesture = { type: 'pan', last: sp }; return; }
       if (e.button === 2) { gesture = { type: R().kind === '3d' ? 'orbit' : 'pan', last: sp }; return; }
       const hit = R().pick(sp.x, sp.y);
@@ -231,6 +248,7 @@
         if (App.drag) return;
         const h = handleAt(sp);
         if (h) { stage.style.cursor = h.cursor; App.emit('hover', null); return; }
+        if (holeAt(sp) >= 0) { stage.style.cursor = 'move'; App.emit('hover', null); return; }
         const hit = R().pick(sp.x, sp.y);
         stage.style.cursor = hit ? (hit.type === 'part' && !M.partByRef(App.p, hit.ref).locked ? 'grab' : 'pointer') : 'default';
         const key = hit ? hit.ref : null;
@@ -266,6 +284,14 @@
         App.redraw();
         return;
       }
+      if (gesture.type === 'hole') {
+        if (!gesture.moved && Math.hypot(sp.x - gesture.start.x, sp.y - gesture.start.y) <= CLICK_PX) return;
+        gesture.moved = true;
+        const bp = R().screenToBoard(sp.x, sp.y), ho = App.p.board.holes[gesture.i];
+        ho.x = Math.round(bp.x * 2) / 2; ho.y = Math.round(bp.y * 2) / 2;
+        App.redraw();
+        return;
+      }
       if (gesture.type === 'press') {
         const moved = Math.hypot(sp.x - gesture.start.x, sp.y - gesture.start.y) > CLICK_PX;
         if (!moved) return;
@@ -285,6 +311,14 @@
       gesture = null;
       stage.style.cursor = 'default';
       if (g.type === 'drag') { endDrag(true); return; }
+      if (g.type === 'hole') {
+        if (!g.moved) return;
+        const ho = App.p.board.holes[g.i], now = { x: ho.x, y: ho.y };
+        ho.x = g.orig.x; ho.y = g.orig.y;
+        App.setHole(g.i, now);
+        if (!M.holeFits(App.p, now.x, now.y, ho.d, g.i)) App.toast(LP.t('ui.toast_hole_tight', { i: g.i + 1 }), 'warn');
+        return;
+      }
       if (g.type === 'resize') {
         const now = { ...App.p.board.outline };
         App.p.board.outline = g.orig;
@@ -304,9 +338,11 @@
     // 编辑板框时：双击多边形的边添加顶点，双击顶点删除
     stage.addEventListener('dblclick', (e) => {
       if (!App.boardEditing || R().kind !== '2d') return;
+      const sp = local(e);
+      const hi = holeAt(sp);
+      if (hi >= 0) { App.removeHole(hi); return; }
       const o = App.p.board.outline;
       if (o.type !== 'polygon') return;
-      const sp = local(e);
       const pts = o.points.map(([x, y]) => R().boardToScreen(x, y));
       const vi = pts.findIndex((q) => Math.hypot(q.x - sp.x, q.y - sp.y) < 10);
       if (vi >= 0) {

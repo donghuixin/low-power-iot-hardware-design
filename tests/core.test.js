@@ -118,3 +118,28 @@ test('改板框尺寸时固定孔跟着最近的板角移动', () => {
   assert.equal(JSON.stringify(b.holes.map((h) => [h.x, h.y])), JSON.stringify([[3.5, 17], [26.5, 3.5]]));
   for (const h of b.holes) assert.ok(G.rectInBoard(b.outline, G.rectFromCenter(h.x, h.y, h.d, h.d)));
 });
+
+test('固定孔：四角生成、建议空位、冲突判断', () => {
+  const p = loadExample(LP);
+  const hs = LP.model.cornerHoles(p.board.outline, 2.2);
+  assert.equal(hs.length, 4);
+  for (const h of hs) assert.ok(LP.geometry.rectInBoard(p.board.outline, LP.geometry.expand(LP.geometry.rectFromCenter(h.x, h.y, h.d, h.d), 1.5)));
+  // 圆形板也能放四个
+  assert.equal(LP.model.cornerHoles({ type: 'circle', d: 32 }, 2.2).length, 4);
+  p.board.holes = hs.slice(0, 3);
+  const q = LP.model.suggestHole(p, 2.2);
+  assert.ok(q, '应找到第四个孔位');
+  assert.ok(LP.model.holeFits(p, q.x, q.y, 2.2));
+  assert.ok(!LP.model.holeFits(p, hs[0].x, hs[0].y, 2.2), '与已有孔重合时不合适');
+  assert.ok(LP.model.holeFits(p, hs[0].x, hs[0].y, 2.2, 0), '跳过自身时合适');
+  assert.ok(!LP.model.holeFits(p, 0.5, 0.5, 2.2), '贴板边不合适');
+  // 孔位不影响自动保存的项目指纹
+  const h1 = LP.model.definitionHash(p); p.board.holes = []; assert.equal(LP.model.definitionHash(p), h1);
+});
+
+test('自动保存指纹不受评估时写入的运行时字段影响', () => {
+  const p = loadExample(LP);
+  const h0 = LP.model.definitionHash(p);
+  LP.engine.evaluate(p, { boardConfirmed: true });
+  assert.equal(LP.model.definitionHash(p), h0);
+});

@@ -431,7 +431,7 @@
   }
   function stableStringify(v) {
     if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
-    if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}';
+    if (v && typeof v === 'object') return '{' + Object.keys(v).filter((k) => k[0] !== '_').sort().map((k) => JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}';
     return JSON.stringify(v);
   }
   /** 项目定义（不含摆放结果）的指纹，用于判断本地自动保存的状态是否属于同一个项目。 */
@@ -440,7 +440,7 @@
     delete d.result;
     for (const x of d.parts || []) { delete x.placed; delete x.locked; }
     for (const x of d.satellites || []) { delete x.placed; delete x.pinned; }
-    if (d.board) { delete d.board.outline; delete d.board.mask; }
+    if (d.board) { delete d.board.outline; delete d.board.mask; delete d.board.holes; }
     const s = stableStringify(d);
     let h = 5381;
     for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
@@ -491,10 +491,61 @@
     return lines.join('\n') + '\n';
   }
 
+
+  // ---------- 固定孔 ----------
+  /** 常用固定孔：孔径取螺丝的常用过孔尺寸。 */
+  const HOLE_SIZES = [{ id: 'M2', d: 2.2 }, { id: 'M2.5', d: 2.7 }, { id: 'M3', d: 3.2 }];
+  const HOLE_EDGE = 1.5;   // 孔边到板边的推荐最小距离（留出焊环和铣边公差）
+  const holeRectOf = (x, y, d) => G.rectFromCenter(x, y, d, d);
+  /** 孔放在 (x, y) 是否合适：在板内且离边足够、不与其它孔、禁布区、已摆放器件冲突。ignore 为要跳过的孔序号。 */
+  function holeFits(p, x, y, d, ignore) {
+    const b = p.board, r = holeRectOf(x, y, d);
+    if (!G.rectInBoard(b.outline, G.expand(r, HOLE_EDGE))) return false;
+    for (let i = 0; i < (b.holes || []).length; i++) {
+      if (i === ignore) continue;
+      const h = b.holes[i];
+      if (Math.hypot(h.x - x, h.y - y) < (h.d + d) / 2 + 2) return false;
+    }
+    for (const k of b.keepouts || []) if (G.overlaps(r, { x0: k.x, y0: k.y, x1: k.x + k.w, y1: k.y + k.h })) return false;
+    const rr = G.expand(r, 0.8);
+    for (const x2 of p.parts) if (x2.placed && G.overlaps(rr, footprint(x2))) return false;
+    for (const s of p.satellites) if (s.placed && s._active && G.overlaps(rr, satFootprint(s))) return false;
+    return true;
+  }
+  /** 从板框外接矩形的四个角沿对角线向中心找第一个合适的孔位（适用于各种板框形状）。 */
+  function cornerHolePositions(outline, d) {
+    const bb = G.outlineBBox(outline);
+    const cx = (bb.x0 + bb.x1) / 2, cy = (bb.y0 + bb.y1) / 2;
+    const out = [];
+    for (const [x0, y0] of [[bb.x0, bb.y0], [bb.x1, bb.y0], [bb.x1, bb.y1], [bb.x0, bb.y1]]) {
+      const L = Math.hypot(cx - x0, cy - y0), ux = (cx - x0) / L, uy = (cy - y0) / L;
+      for (let t = 0; t < L; t += 0.25) {
+        const x = Math.round((x0 + ux * t) * 2) / 2, y = Math.round((y0 + uy * t) * 2) / 2;
+        if (G.rectInBoard(outline, G.expand(holeRectOf(x, y, d), HOLE_EDGE))) { out.push({ x, y }); break; }
+      }
+    }
+    return out;
+  }
+  /** 四角各放一个孔（开场选尺寸时用）。 */
+  function cornerHoles(outline, d) { return cornerHolePositions(outline, d).map((q) => ({ x: q.x, y: q.y, d })); }
+  /** 为新孔找空位：先试四角，再按离板边由近到远扫描整板。找不到返回 null。 */
+  function suggestHole(p, d) {
+    for (const q of cornerHolePositions(p.board.outline, d)) if (holeFits(p, q.x, q.y, d)) return q;
+    const bb = G.outlineBBox(p.board.outline), cand = [];
+    for (let x = bb.x0; x <= bb.x1; x += 0.5) for (let y = bb.y0; y <= bb.y1; y += 0.5) {
+      if (!G.pointInPolygon({ x, y }, G.outlinePolygon(p.board.outline))) continue;
+      cand.push({ x, y, e: G.distToBoardEdge(p.board.outline, { x, y }) });
+    }
+    cand.sort((a, b) => a.e - b.e);
+    for (const q of cand) if (holeFits(p, q.x, q.y, d)) return { x: q.x, y: q.y };
+    return null;
+  }
+
   LP.model = {
     TOOL_VERSION, ROLES, SAT_KINDS, NET_CLASSES, SIDES, ROTS, SENSOR_ROLES,
     validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint,
     partByRef, satByRef, itemByRef, placedParts, partTags, satTags, connectedParts, parseCap,
     snapshot, restore, definitionHash, exportLayout, resultObject, exportCSV, r2, remapBoardFeatures, partsArea, BOARD_SHAPES, outlineFromShape, shapeOf, toEditablePolygon, exportDXF,
+    HOLE_SIZES, HOLE_EDGE, holeFits, cornerHoles, suggestHole,
   };
 })(globalThis.LP = globalThis.LP || {});

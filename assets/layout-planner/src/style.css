@@ -266,3 +266,20 @@ button.primary:hover { opacity: 0.88; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* 固定孔编辑 */
+.holes-editor { display: flex; flex-direction: column; gap: 6px; }
+.holes-editor .step-sub { margin: 4px 0 0; }
+.hole-row { display: grid; grid-template-columns: 30px 1fr 1fr 1fr 26px; gap: 4px; align-items: center; }
+.hole-head span { font-size: 10.5px; color: var(--muted); padding-left: 2px; }
+.hole-id { font-size: 12px; font-weight: 600; }
+.hole-f { display: block; min-width: 0; }
+.hole-f input { width: 100%; min-width: 0; height: 26px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-solid); padding: 0 4px; -moz-appearance: textfield; color: var(--text); font-size: 12px; }
+.hole-del { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-solid); font-size: 15px; line-height: 1; padding: 0; color: var(--muted); }
+.hole-del:hover { color: var(--bad, #c0392b); border-color: currentColor; }
+.hole-add { display: flex; gap: 6px; }
+.hole-add select { flex: 1; min-width: 0; height: 30px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel-solid); padding: 0 8px; color: var(--text); }
+.hole-add button { height: 30px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel-solid); padding: 0 12px; white-space: nowrap; }
+.hole-add button:hover { border-color: var(--text); }
+.hole-f input::-webkit-inner-spin-button { display: none; }
+.step-sub .unit { font-weight: 400; }
