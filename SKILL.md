@@ -51,6 +51,7 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
    - 数据率-存储：ADC → FPGA → MCU → Wi-Fi 逐级 ≥2× 余量，片上存储深度（`23`，`hw_calc.py datarate`）
    - 噪声-纹波：每个模拟轨的纹波目标与开关频率表（`22`，`hw_calc.py ripple`）
    - 时钟抖动：t_j 上限、近端相噪、发射-采样同源（`21`，`hw_calc.py jitter`）
+   方案中途换架构或换主器件后，这四项全部按新方案重算；从别的方案或参考设计继承来的数字（功耗、帧率、电源器件）逐个标出并复核，尤其是每颗稳压器的输入电压范围和是否真的可同步。
 4. **高压**按 `20-hv-pulser-tr-safety.md` 设计联锁、储能（`hw_calc.py hvcap`）和间距；**医疗用途**按 `24-medical-handheld-safety.md` 写定位声明，处理漏电、USB 隔离、声输出和接触温度。
 5. **Bring-up** 按 `25-mixed-signal-bringup.md` 的顺序：禁发上电 → 电源纹波 → 时钟 → AFE 测试码 → LVDS 训练 → 假负载发射 → 接阵列 → 仿体。
 6. 每个阶段收尾时除原清单外，再过 `references/checklists.md` 的 E 段。
