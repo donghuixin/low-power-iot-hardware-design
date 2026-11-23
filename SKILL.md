@@ -1,6 +1,6 @@
 ---
 name: low-power-iot-hardware-design
-description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉立创 EDA 与 KiCad 的 MCP 接入、交互式需求澄清、设计资料收集与核验、需求挖掘(含用户没想到的隐性需求及其对应的硬件形态)、器件与无线选型(BLE/WiFi/Thread/LoRa/蜂窝)、传感器放置(如IMU是否需要居中)、原理图可靠性审查(上拉下拉、三态、开漏/推挽、电平匹配、驱动电压电流、峰值/静态电流、电源树与去耦)、交互式 PCB 布局规划(2D/3D 摆放主器件、卫星器件自动贴放、实时布线复杂度与规则反馈)、PCB布局布线(射频与天线、信号完整性、电源完整性、EMC、DFM、测试点)以及打样后的bring-up。只要用户提到电池供电设备、可穿戴、传感器节点、nRF52/nRF53/nRF54/ESP32/STM32L/STM32WB 等低功耗SoC的硬件、原理图或PCB评审、续航/功耗预算、睡眠电流偏大、天线或射频布局、器件该怎么摆、"帮我看看这个板子/这张原理图"等，都应使用本skill，即使用户没有明确说"硬件设计"。Low-power IoT hardware design and review skill covering requirements elicitation, wireless/part selection, sensor placement, schematic reliability review, power budgeting, and PCB layout review for battery-powered devices.
+description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉立创 EDA 与 KiCad 的 MCP 接入、交互式需求澄清、设计资料收集与核验、需求挖掘(含用户没想到的隐性需求及其对应的硬件形态)、器件与无线选型(BLE/WiFi/Thread/LoRa/蜂窝)、传感器放置(如IMU是否需要居中)、原理图可靠性审查(上拉下拉、三态、开漏/推挽、电平匹配、驱动电压电流、峰值/静态电流、电源树与去耦)、交互式 PCB 布局规划(2D/3D 摆放主器件、卫星器件自动贴放、实时布线复杂度与规则反馈)、PCB布局布线(射频与天线、信号完整性、电源完整性、EMC、DFM、测试点)以及打样后的bring-up；满足门槛时启用高性能混合信号/医疗手持扩展：手持超声等医疗手持设备、FPGA+高速ADC/AFE、LVDS、高压脉冲(>50 V)、混合信号低噪声电源与时钟抖动、1S数瓦供电与接触温升。只要用户提到电池供电设备、可穿戴、传感器节点、nRF52/nRF53/nRF54/ESP32/STM32L/STM32WB 等低功耗SoC的硬件、原理图或PCB评审、续航/功耗预算、睡眠电流偏大、天线或射频布局、器件该怎么摆、"帮我看看这个板子/这张原理图"等，都应使用本skill，即使用户没有明确说"硬件设计"。Low-power IoT hardware design and review skill covering requirements elicitation, wireless/part selection, sensor placement, schematic reliability review, power budgeting, and PCB layout review for battery-powered devices, with a gated extension for high-performance mixed-signal and medical handheld devices (handheld ultrasound, FPGA + high-speed ADC/AFE, LVDS, >50 V pulsers, low-noise power).
 ---
 
 # 低功耗 IoT 硬件设计
@@ -22,6 +22,40 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
    - **P2 风险**：余量不足或特定条件下出问题（低温、电池末期、批次差异）。
    - **P3 建议**：可调试性、可生产性、成本优化。
 6. **不确定就说不确定。** 看不清的网络、缺失的页、没给的 BOM 值，直接列为"需要补充的信息"，不要猜一个值再基于它下结论。
+
+## 扩展模块：高性能混合信号与医疗手持
+
+**进入条件（硬门槛）**：阶段一或评审开始时逐条判断，满足任一条即启用本模块，并在输出顶部写明触发了哪几条：
+- 持续功耗 >1 W
+- 信号或时钟 >50 MHz，或有 LVDS / 高速串行接口
+- 任一网络电压 >50 V
+- 有 FPGA
+- ADC ≥10 MSPS
+- 接触人体的医疗或生理测量用途
+
+一条都不满足时不加载 20–25 号文件，按原有低功耗流程进行。
+
+**启用后**：
+1. **安全优先的审查顺序**：高压 / 漏电 / 温升 → 电源与噪声 → 时钟 → 高速接口 → 其余（再接阶段二、三的原有顺序）。P0 增加人身安全一类：电击、烫伤、声输出超限。
+2. **以下低功耗默认前提不再成立，改读新文件**：
+
+   | 原前提 | 位置 | 改用 |
+   |---|---|---|
+   | µA 睡眠 + 稀疏尖峰的功耗模型、续航天数 | `06-power-budget.md` 第 1 节 | `22-low-noise-power-thermal.md` 持续功耗-热模型 |
+   | 信号速率不高、不涉及传输线 | `07-layout.md` 第 5 节 | `23-highspeed-lvds-fpga.md` |
+   | 纽扣 / 小电流电池、mA 级储能 | `05-power-architecture.md` 第 1、7 节 | `22`（1S 数瓦电源路径）、`20`（高压储能） |
+   | Wi-Fi 吞吐"数 Mbps 起"、批量上传后关断 | `02-wireless-selection.md` | `23` 第 7 节（按空中实测吞吐） |
+
+3. **原理图冻结前闭合四项预算**，任何一项不闭合就回头改架构：
+   - 功耗-热：逐模式 W、末期电池电流、探头面与外壳温升（`22`）
+   - 数据率-存储：ADC → FPGA → MCU → Wi-Fi 逐级 ≥2× 余量，片上存储深度（`23`，`hw_calc.py datarate`）
+   - 噪声-纹波：每个模拟轨的纹波目标与开关频率表（`22`，`hw_calc.py ripple`）
+   - 时钟抖动：t_j 上限、近端相噪、发射-采样同源（`21`，`hw_calc.py jitter`）
+4. **高压**按 `20-hv-pulser-tr-safety.md` 设计联锁、储能（`hw_calc.py hvcap`）和间距；**医疗用途**按 `24-medical-handheld-safety.md` 写定位声明，处理漏电、USB 隔离、声输出和接触温度。
+5. **Bring-up** 按 `25-mixed-signal-bringup.md` 的顺序：禁发上电 → 电源纹波 → 时钟 → AFE 测试码 → LVDS 训练 → 假负载发射 → 接阵列 → 仿体。
+6. 每个阶段收尾时除原清单外，再过 `references/checklists.md` 的 E 段。
+
+原有的工作原则、资料管理、逐状态原理图审查、可读性、EDA 执行和布局规划器照常使用。布局规划器目前没有 FPGA、AFE、高压器件的角色和规则，这类间距在 layout 评审中人工检查。
 
 ## 第 0 步：设计开始时引导 MCP 设置
 
@@ -168,6 +202,7 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 - `scripts/power_budget.py <config.json>`：由电池、常开负载、周期性事件计算平均电流、续航、各项占比，并检查峰值电流在电池内阻上的压降。配置示例见 `assets/power-budget-example.json`。做功耗预算时用它，不要心算。
 - `scripts/make_layout_project.py <project.json> [-o out.html] [--check]`：校验布局规划器的项目数据，生成该项目专用的单文件页面。`assets/layout-planner.html` 内置示例，可直接打开试用；改动页面源码后用 `scripts/build_layout_planner.py` 重新构建。
 - `scripts/hw_calc.py`：常用小计算——I2C 上拉取值范围 (`i2c-pullup`)、脉冲负载所需储能电容 (`bulk-cap`)、分压器电流与输出阻抗 (`divider`)、晶体负载电容 (`xtal`)、续航 (`life`)。运行 `python scripts/hw_calc.py -h` 查看参数。
+  扩展模块另有：时钟抖动限制的 SNR 或允许抖动 (`jitter --fin-mhz 10 --snr-db 74`)、由 ADC LSB / 噪声底与 PSRR 反推纹波上限 (`ripple --fs-vpp 2 --bits 12 --psrr-db 40 --margin-db 10`)、高压脉冲峰值电流与 burst 储能电容 (`hvcap --cel-pf 100 --channels 32 --dv 60 --tr-ns 20 --droop-v 1 --cycles 8 --prf-khz 10`)、采集数据率与存储量 (`datarate --channels 8 --fs-msps 30 --bits 12 --window-us 200 --shots 4 --lines 80 --fps 5 --link-mbps 20`)。
 
 ## 参考文件索引
 
@@ -185,7 +220,13 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 | `references/10-easyeda-execution.md` | 嘉立创EDA 自动绘图、器件标准化、资料归档、失败恢复与保存验收 |
 | `references/11-eda-mcp-setup.md` | 设计开始时接入嘉立创 EDA 或 KiCad 的 MCP，或排查连接问题 |
 | `references/12-layout-planner.md` | 用交互式布局规划器摆放主器件：生成项目数据、页面功能、指标与规则、解读导出结果 |
-| `references/checklists.md` | 每个阶段收尾时的逐项核对 |
+| `references/20-hv-pulser-tr-safety.md` | 扩展模块：电压 >50 V；高压脉冲、T/R 与接收保护、高压电源与档位、储能、联锁、PCB 间距 |
+| `references/21-ultrasound-afe-clock.md` | 扩展模块：ADC ≥10 MSPS；超声 AFE 噪声、TGC、抗混叠、IQ 解调、时钟抖动与多普勒同源时钟 |
+| `references/22-low-noise-power-thermal.md` | 扩展模块：持续功耗 >1 W 或有高速 ADC；持续功耗模型、1S 电源路径、纹波推导、开关同步、手持热设计 |
+| `references/23-highspeed-lvds-fpga.md` | 扩展模块：LVDS / >50 MHz / FPGA；差分走线与偏斜、FPGA 核心板载板、数据率与存储、FPGA→MCU 与 Wi-Fi 吞吐 |
+| `references/24-medical-handheld-safety.md` | 扩展模块：接触人体的医疗用途；漏电、隔离、声输出、接触温度、探头头 ID 与在位检测 |
+| `references/25-mixed-signal-bringup.md` | 扩展模块：混合信号 / 高压板的分级上电、仪器、记录与故障排查 |
+| `references/checklists.md` | 每个阶段收尾时的逐项核对；启用扩展模块时加 E 段 |
 
 ## 项目主页与更新
 

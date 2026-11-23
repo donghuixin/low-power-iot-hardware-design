@@ -27,6 +27,8 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 
 每个阶段输出带严重度分级（P0–P3）的问题列表，每条包含位置、后果和修改建议。
 
+**扩展模块：高性能混合信号与医疗手持。** 设计满足任一门槛（持续功耗 >1 W、>50 MHz 或 LVDS、>50 V、FPGA、ADC ≥10 MSPS、接触人体的医疗用途）时自动启用，例如手持超声。启用后按"高压 / 漏电 / 温升 → 电源噪声 → 时钟 → 高速接口"的顺序评审，在原理图冻结前闭合功耗-热、数据率-存储、噪声-纹波、时钟抖动四项预算，并按混合信号顺序 bring-up。内容见 [`references/20`–`25`](references/20-hv-pulser-tr-safety.md) 和清单 E 段。
+
 ## 交互式布局规划器
 
 一个可以离线打开的单文件网页（[`assets/layout-planner.html`](assets/layout-planner.html)，内置示例项目，下载后双击即可试用）。用户只摆核心器件——主控、传感器、天线、连接器、电池和板框；去耦电容、晶体、匹配网络这些小件由算法按最优策略自动贴放。每一步都告诉你这样摆对布线难度有什么影响。
@@ -105,10 +107,16 @@ references/
   10-easyeda-execution.md        嘉立创EDA 实施、器件标准化、资料归档与保存验收
   11-eda-mcp-setup.md            嘉立创 EDA 与 KiCad 的 MCP 安装、连接与排错
   12-layout-planner.md           交互式布局规划器：项目数据、功能、指标与规则、解读导出
+  20-hv-pulser-tr-safety.md      扩展：高压脉冲、T/R、高压电源与联锁、间距
+  21-ultrasound-afe-clock.md     扩展：超声 AFE、采样与 IQ、时钟抖动
+  22-low-noise-power-thermal.md  扩展：持续功耗模型、纹波与开关同步、手持热设计
+  23-highspeed-lvds-fpga.md      扩展：LVDS、FPGA 核心板载板、数据率与 Wi-Fi 吞吐
+  24-medical-handheld-safety.md  扩展：漏电、隔离、声输出、接触温度、探头头
+  25-mixed-signal-bringup.md     扩展：混合信号板分级上电与测试
   checklists.md                  各阶段逐项核对清单
 scripts/
   power_budget.py                功耗预算与峰值压降检查
-  hw_calc.py                     I2C 上拉、储能电容、分压器、晶体负载电容、续航
+  hw_calc.py                     I2C 上拉、储能电容、分压器、晶体负载电容、续航；抖动、纹波、高压储能、数据率
   make_layout_project.py         校验项目数据并生成布局规划页面
   build_layout_planner.py        把规划器源码构建为单文件
 assets/
@@ -162,6 +170,8 @@ python scripts/hw_calc.py i2c-pullup --vdd 1.8 --cb-pf 40 --speed 400k
 python scripts/hw_calc.py bulk-cap --ipeak-ma 15 --pulse-ms 5 --dv 0.2
 python scripts/hw_calc.py divider --vin 4.2 --r1 2e6 --r2 1e6
 python scripts/hw_calc.py xtal --cl-pf 9 --cstray-pf 3
+python scripts/hw_calc.py jitter --fin-mhz 10 --snr-db 74
+python scripts/hw_calc.py hvcap --cel-pf 100 --channels 32 --dv 60 --tr-ns 20 --droop-v 1 --cycles 8 --prf-khz 10
 python scripts/make_layout_project.py assets/layout-project-example.json --check
 ```
 
