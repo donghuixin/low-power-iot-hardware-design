@@ -1,6 +1,6 @@
 ---
 name: low-power-iot-hardware-design
-description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉立创 EDA 与 KiCad 的 MCP 接入、交互式需求澄清、设计资料收集与核验、需求挖掘(含用户没想到的隐性需求及其对应的硬件形态)、器件与无线选型(BLE/WiFi/Thread/LoRa/蜂窝)、传感器放置(如IMU是否需要居中)、原理图可靠性审查(上拉下拉、三态、开漏/推挽、电平匹配、驱动电压电流、峰值/静态电流、电源树与去耦)、交互式 PCB 布局规划(2D/3D 摆放主器件、卫星器件自动贴放、实时布线复杂度与规则反馈)、布局布线验证(电流与回流、EMI 受扰与平面谐振、温度与散热片对比，布线前估计、布线后从 KiCad/Gerber 提取铜皮复核)、PCB布局布线(射频与天线、信号完整性、电源完整性、EMC、DFM、测试点)以及打样后的bring-up；满足门槛时启用高性能混合信号/医疗手持扩展：手持超声等医疗手持设备、FPGA+高速ADC/AFE、LVDS、高压脉冲(>50 V)、混合信号低噪声电源与时钟抖动、1S数瓦供电与接触温升。只要用户提到电池供电设备、可穿戴、传感器节点、nRF52/nRF53/nRF54/ESP32/STM32L/STM32WB 等低功耗SoC的硬件、原理图或PCB评审、续航/功耗预算、睡眠电流偏大、天线或射频布局、器件该怎么摆、"帮我看看这个板子/这张原理图"等，都应使用本skill，即使用户没有明确说"硬件设计"。Low-power IoT hardware design and review skill covering requirements elicitation, wireless/part selection, sensor placement, schematic reliability review, power budgeting, and PCB layout review for battery-powered devices, with a gated extension for high-performance mixed-signal and medical handheld devices (handheld ultrasound, FPGA + high-speed ADC/AFE, LVDS, >50 V pulsers, low-noise power).
+description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉立创 EDA 与 KiCad 的 MCP 接入、交互式需求澄清、设计资料收集与核验、需求挖掘(含用户没想到的隐性需求及其对应的硬件形态)、器件与无线选型(BLE/WiFi/Thread/LoRa/蜂窝)、传感器放置(如IMU是否需要居中)、首稿电源地符号与紧凑排版、原理图可靠性审查(上拉下拉、三态、开漏/推挽、电平匹配、驱动电压电流、峰值/静态电流、电源树与去耦)、交互式 PCB 布局规划(2D/3D 摆放主器件、卫星器件自动贴放、实时布线复杂度与规则反馈)、布局布线验证(电流与回流、EMI 受扰与平面谐振、温度与散热片对比，布线前估计、布线后从 KiCad/Gerber 提取铜皮复核)、PCB布局布线(射频与天线、信号完整性、电源完整性、EMC、DFM、测试点)以及打样后的bring-up；满足门槛时启用高性能混合信号/医疗手持扩展：手持超声等医疗手持设备、FPGA+高速ADC/AFE、LVDS、高压脉冲(超过 50 V)、混合信号低噪声电源与时钟抖动、1S数瓦供电与接触温升。适用电池供电设备、可穿戴、传感器节点、nRF52/nRF53/nRF54/ESP32/STM32L/STM32WB 等低功耗SoC的硬件、原理图或PCB评审、续航/功耗预算、睡眠电流偏大、天线或射频布局、器件该怎么摆、"帮我看看这个板子/这张原理图"等。Low-power IoT and mixed-signal hardware design, schematic drafting and review, power budgeting, and PCB planning.
 ---
 
 # 低功耗 IoT 硬件设计
@@ -108,6 +108,8 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 
 目标：每一个网络在每一种状态下（上电过程、复位中、运行、睡眠、外设断电、电池末期）都有确定且安全的电平，每一路电源都带得动、睡得下。
 
+**从第一块电路就验证画法。** 先按供电、回流和隔离关系确定真实电源网名、作用域及电源/地符号，再摆放核心和所服务引脚的外围。先在代表性功能区用原生网表查连接，用目标屏宽的全图和原字号局部查可读性，通过后再复制到其它通道。按用户约定组织图页，例如一板一图时把功能区按实际占用拼排。具体做法见 [原理图绘制流程与可读性](references/09-schematic-readability.md) 第 1–3、9 节。
+
 **审查顺序**（按此顺序可避免遗漏；细节见对应参考文件）
 
 1. **电源入口与电源树** → `references/05-power-architecture.md`
@@ -128,7 +130,7 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 8. **绘制规范与可读性** → `references/09-schematic-readability.md`
    分页与布局、连线方式、网络命名、符号、文字摆放、参数标注、设计意图注释。读不清的原理图会直接变成错误（同名标号意外短接、近似名漏连、看漏的连接），所以这一项属于可靠性审查，不能省略。
 
-如果是指导用户画原理图（而不是评审），按同样顺序给出每部分的设计要求和推荐电路，并让绘制过程遵循 `references/09-schematic-readability.md` 第 1 节的流程：先框图后分页 → 符号 → 区分卫星器件 → 摆放 → 连线 → 命名 → 整理文字 → 注释 → ERC → 导出通读。**卫星器件**（去耦、晶体、复位、DCDC 外围、匹配网络等）按数据手册推荐电路识别，照手册的形状画在所服务的引脚旁，与主器件之间一律用导线直连，不用网络标号或跨页端口；这些分组之后直接用作布局规划的卫星器件。你自己生成或修改原理图文件时同样遵守。
+指导绘图或生成原理图文件时，沿用 `references/09-schematic-readability.md` 第 1 节。先定分页、电源域和地，再按数据手册的推荐电路，把去耦、晶体、复位、DCDC 外围或匹配网络等卫星器件画在所服务的引脚旁。先画好一个功能区并试读、核对网表，再展开其余电路。这些分组可沿用到 PCB 布局规划。
 
 通过 MCP、CLI 或 API 操作嘉立创EDA时，另读 `references/10-easyeda-execution.md`：先锁定真实器件身份与封装，再读取几何、排版连线；保留修改前快照，逐脚验证替换，保存重载后验收。工具返回成功不等于连接、图面或射频性能已经通过验证。
 
