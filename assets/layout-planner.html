@@ -171,6 +171,11 @@ button.primary:hover { opacity: 0.88; }
 /* ---------- 托盘 ---------- */
 .tray-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; white-space: nowrap; overflow: hidden; }
 .tray-head .panel-title { margin: 0; }
+.tray-action { flex: none; padding: 3px 8px; font: inherit; font-size: 12px; color: var(--text); border: 1px solid var(--line); border-radius: 5px; background: var(--panel-solid); }
+.tray-action:hover { background: var(--hover); }
+.tray-action:disabled { opacity: .45; }
+#app.narrow .tray-head { overflow-x: auto; scrollbar-width: thin; }
+.tray-fixed-group { flex: none; align-self: center; }
 #item-search { margin-left: auto; min-width: 0; }
 #find-item { width: min(10em, 24vw); color: var(--text); background: var(--panel-solid); border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; }
 .tray-list { flex: 1; display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; scrollbar-width: thin; }
@@ -359,6 +364,8 @@ button.primary:hover { opacity: 0.88; }
     <div class="tray-head">
       <span class="panel-title">器件托盘</span>
       <span id="tray-count" class="muted small"></span>
+      <button id="tray-return" class="tray-action" type="button" title="全板器件放回托盘，可撤销">全部放回托盘</button>
+      <button id="tray-preset" class="tray-action" type="button" hidden>载入推荐布局</button>
       <form id="item-search" role="search"><input id="find-item" type="search" list="item-options" placeholder="查位号或名称" aria-label="按位号或名称查找器件"><datalist id="item-options"></datalist></form>
       <span class="muted small tray-hint">点取主器件，再点板面放下；周边件自动就位</span>
       <span id="tray-sats" class="small" hidden></span>
@@ -4614,12 +4621,19 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     load(raw, opts) {
       const errors = M.validate(raw);
       if (errors.length) return { ok: false, errors };
+      clearTimeout(this._saveT);
       this.p = M.normalize(raw);
+      this.restored = false;
+      this.inputPlacement = M.snapshot(this.p);
+      this.featurePoses = new Map(this.p.parts.filter(x=>x.placementRole==='board_feature' && x.placed).map(x=>[x.ref,{...x.placed}]));
+      this.hasInputPlacement = this.p.parts.some(x=>x.placed) || this.p.satellites.some(x=>x.pinned && x.placed);
       this.animOn = this.systemReduced ? this.motionOverride === true : !!this.animPreference;
       this.boardConfirmed = !!(raw.result || this.p.parts.some((x) => x.placed));
       this.undoStack = []; this.redoStack = [];
       this.sel = null; this.suggestion = null; this.delta = null; this.focusIssue = null;
-      if (!(opts && opts.skipRestore)) this.restoreAutosave();
+      const startInTray = !!opts?.startInTray;
+      if (!opts?.skipRestore) this.restoreAutosave(startInTray);
+      if (startInTray && !this.restored) this.emptyPlacement();
       this.evaluate();
       this.emit('load');
       return { ok: true, errors: [] };
@@ -4849,16 +4863,43 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       this.emit('change', { label: LP.t('ui.op_board') });
       this.redraw();
     },
+    emptyPlacement() {
+      for (const x of this.p.parts) { x.placed = null; x.locked = false; }
+      for (const s of this.p.satellites) { s.placed = null; s.pinned = false; }
+    },
     resetLayout() {
-      this.commit(LP.t('ui.op_reset'), () => {
-        const fixed = new Set(this.p.parts.filter(x=>x.placementRole === 'board_feature').map(x=>x.ref));
-        for (const x of this.p.parts) {
-          if (fixed.has(x.ref) || fixed.has(M.placementOwner(x))) continue;
-          x.placed = null; x.locked = false;
-        }
-        for (const s of this.p.satellites) { s.placed = null; s.pinned = false; }
-      }, { noAnim: true });
+      if (this.drag) LP.interactionApi.cancelDrag();
+      this.commit('全部放回托盘', () => this.emptyPlacement(), { noAnim:true, noDelta:true });
       this.select(null);
+    },
+    loadInputPlacement() {
+      if (!this.hasInputPlacement) return;
+      if (this.drag) LP.interactionApi.cancelDrag();
+      this.commit('载入初始布局', () => M.restore(this.p,this.inputPlacement), {noAnim:true,noDelta:true});
+      this.select(null);
+    },
+    pendingBoardFeatures() {
+      const missingOwners = new Set(this.p.parts.filter(x=>!x.placed && !x.locked).map(M.placementOwner));
+      return this.p.parts.filter(x=>this.featurePoses.has(x.ref) && (!x.placed || missingOwners.has(x.ref)));
+    },
+    placeBoardFeatures() {
+      const pending = this.pendingBoardFeatures();
+      if (!pending.length) return;
+      if (this.drag) LP.interactionApi.cancelDrag();
+      // Place structural pads at their reviewed coordinates, then fit their associated parts.
+      const blocked = [];
+      this.commit('放置固定板件', () => {
+        const placed = [];
+        for (const item of pending) {
+          const pose = this.featurePoses.get(item.ref);
+          if (item.placed) { placed.push(item); continue; }
+          if (LP.rules.quickLegal(this.p,item,pose).ok) {
+            item.placed = {...pose}; placed.push(item);
+          } else blocked.push(item.ref);
+        }
+        for (const item of placed) blocked.push(...LP.satellites.placeImported(this.p,item,null));
+      }, {noAnim:true});
+      if (blocked.length) this.toast('仍待放置：'+blocked.join('、'),'warn');
     },
 
     // ---------- 自动保存 ----------
@@ -4869,18 +4910,19 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     },
     autosave() {
       try {
-        localStorage.setItem(this.storageKey(), JSON.stringify({ snap: M.snapshot(this.p), boardConfirmed: this.boardConfirmed, ts: Date.now() }));
+          localStorage.setItem(this.storageKey(), JSON.stringify({ snap: M.snapshot(this.p), boardConfirmed: this.boardConfirmed, trayWorkflow: true, ts: Date.now() }));
         if (!this.storageOk) { this.storageOk = true; this.emit('storage'); }
       } catch (e) {
         if (this.storageOk) { this.storageOk = false; this.emit('storage'); }
       }
     },
-    restoreAutosave() {
+    restoreAutosave(startInTray) {
       try {
         const v = localStorage.getItem(this.storageKey());
         if (!v) return false;
         const o = JSON.parse(v);
         M.restore(this.p, o.snap);
+        if (startInTray && !o.trayWorkflow && M.snapshot(this.p) === this.inputPlacement) return false;
         this.boardConfirmed = !!o.boardConfirmed;
         this.restored = true;
         return true;
@@ -5050,6 +5092,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         if (!App.drag) { cleanup(); return; }
         ev.preventDefault(); ev.stopPropagation();
         if (ev.button === 2) { rotateDrag(); return; }
+        if (ev.target.closest?.('.tray-action')) { cleanup(); cancelDrag(); return; }
         const inTray = ev.target && ev.target.closest && ev.target.closest('#tray');
         cleanup();
         if (overStage(ev)) {
@@ -5579,6 +5622,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       $('#btn-flip').addEventListener('click', () => this.flipBoard());
       $('#btn-undo').innerHTML = ICONS.undo; $('#btn-redo').innerHTML = ICONS.redo;
       $('#btn-undo').addEventListener('click', () => App.undo());
+      $('#tray-return').addEventListener('click', () => App.resetLayout());
+      $('#tray-preset').addEventListener('click', () => App.loadInputPlacement());
       $('#btn-redo').addEventListener('click', () => App.redo());
       $('#btn-star').insertAdjacentHTML('afterbegin', ICONS.star);
       $('#btn-help').addEventListener('click', () => this.openHelp());
@@ -5998,6 +6043,13 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       const cur = this.currentStep();
       const parts = App.p.parts.filter(M.isTrayPart).sort((a, b) => LP.engine.stepOfRole(a.role) - LP.engine.stepOfRole(b.role) || a.ref.localeCompare(b.ref, 'en', { numeric: true }));
       const unplaced = parts.filter((x) => !x.placed).length;
+      $('#tray-return').disabled = ![...App.p.parts,...App.p.satellites].some(x=>x.placed);
+      $('#tray-preset').hidden = !App.hasInputPlacement;
+      $('#tray-preset').textContent = App.p.recommendation ? '载入推荐布局' : '载入初始布局';
+      const fixed = App.pendingBoardFeatures();
+      if (fixed.length && App.hasInputPlacement) {
+        list.append(h('button',{class:'tray-action tray-fixed-group',title:'按预设位置放置板上固定焊盘及其关联器件',onclick:()=>App.placeBoardFeatures()},'放置固定板件 · '+fixed.length));
+      }
       $('#tray-count').textContent = t('tray_count', { n: unplaced, total: parts.length });
       for (const x of parts) {
         const hot = !x.placed && LP.engine.stepOfRole(x.role) === cur;
@@ -6368,7 +6420,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     App.renderer = r2;
     LP.interactionApi = LP.interaction.init(App, document.getElementById('stage'));
 
-    const res = App.load(raw);
+    const res = App.load(raw, {startInTray: !raw.result});
     if (!res.ok) {
       LP.ui.showErrors(res.errors);
       return;

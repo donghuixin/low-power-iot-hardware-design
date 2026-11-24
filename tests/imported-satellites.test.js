@@ -45,7 +45,14 @@ test('native connected passives auto-land around their moved core; undo restores
   const exported=model.exportLayout(app.p,app.ev);
   assert.equal(exported.nets[0].pins.length,3);
   assert.equal(exported.parts.find(part=>part.ref==='C1').placed.y,3.8);
-  app.resetLayout(); assert(by('TP1').placed); assert.equal(by('U1').placed,null);
+  const beforeBulkReturn=model.snapshot(app.p);
+  app.resetLayout();
+  assert(app.p.parts.every(x=>!x.placed && !x.locked));
+  app.undo();
+  assert.equal(model.snapshot(app.p),beforeBulkReturn);
+  app.resetLayout();
+  app.placeBoardFeatures();
+  assert(by('TP1').placed); assert.equal(by('U1').placed,null);
 });
 
 test('a failed landing is reported and retrying the same owner pose can seat the component', () => {

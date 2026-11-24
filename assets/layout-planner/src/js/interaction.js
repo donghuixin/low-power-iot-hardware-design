@@ -113,6 +113,7 @@
         if (!App.drag) { cleanup(); return; }
         ev.preventDefault(); ev.stopPropagation();
         if (ev.button === 2) { rotateDrag(); return; }
+        if (ev.target.closest?.('.tray-action')) { cleanup(); cancelDrag(); return; }
         const inTray = ev.target && ev.target.closest && ev.target.closest('#tray');
         cleanup();
         if (overStage(ev)) {

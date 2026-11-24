@@ -98,6 +98,28 @@ try {
   await send('Page.navigate', {url:page});
   await until(() => evaluate('!!window.__LP_READY'), 'planner did not load');
   await evaluate('document.querySelectorAll("dialog[open]").forEach(d=>d.close())');
+  const empty = await placement();
+  assert(empty.every(row=>row[1]===null),'fresh board contains placed components');
+  assert(await evaluate('document.querySelector("#tray-return").disabled'));
+  if(await evaluate('LP.App.hasInputPlacement')) {
+    await evaluate('document.querySelector("#tray-preset").click()');
+    const loaded = await placement();
+    assert(loaded.some(row=>row[1]));
+    await evaluate('LP.App.toggleLock(LP.App.p.parts.find(p=>p.placed&&!p.locked&&LP.model.isTrayPart(p)).ref)');
+    const locked = await placement();
+    await evaluate('document.querySelector("#tray-return").click()');
+    assert.deepEqual(await placement(),empty,'all parts and pads must be returned');
+    await evaluate('document.querySelector("#btn-undo").click()');
+    assert.deepEqual(await placement(),locked,'undo bulk return must restore previous locks and placements');
+    await evaluate('document.querySelector("#tray-return").click();document.querySelector(".tray-fixed-group")?.click()');
+    assert(await evaluate('LP.App.p.parts.filter(x=>x.placementRole==="board_feature").every(x=>x.placed)'),'fixed pad group was stranded');
+    await evaluate('document.querySelector("#tray-return").click();LP.App.autosave();window.beforeTrayReload=true');
+    await send('Page.reload');
+    await until(()=>evaluate('!window.beforeTrayReload && !!window.__LP_READY'),'empty layout reload');
+    assert.deepEqual(await placement(),empty,'saved empty board reopened as preset');
+    await evaluate('document.querySelector("#tray-preset").click()');
+    assert.deepEqual(await placement(),loaded);
+  }
   const core = await evaluate(`(() => {
     const app=LP.App, m=LP.model;
     if (!app.p.parts.some(p=>p.placed)) {

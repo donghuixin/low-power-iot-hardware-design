@@ -163,6 +163,11 @@ button.primary:hover { opacity: 0.88; }
 /* ---------- 托盘 ---------- */
 .tray-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; white-space: nowrap; overflow: hidden; }
 .tray-head .panel-title { margin: 0; }
+.tray-action { flex: none; padding: 3px 8px; font: inherit; font-size: 12px; color: var(--text); border: 1px solid var(--line); border-radius: 5px; background: var(--panel-solid); }
+.tray-action:hover { background: var(--hover); }
+.tray-action:disabled { opacity: .45; }
+#app.narrow .tray-head { overflow-x: auto; scrollbar-width: thin; }
+.tray-fixed-group { flex: none; align-self: center; }
 #item-search { margin-left: auto; min-width: 0; }
 #find-item { width: min(10em, 24vw); color: var(--text); background: var(--panel-solid); border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; }
 .tray-list { flex: 1; display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; scrollbar-width: thin; }

@@ -141,6 +141,8 @@
       $('#btn-flip').addEventListener('click', () => this.flipBoard());
       $('#btn-undo').innerHTML = ICONS.undo; $('#btn-redo').innerHTML = ICONS.redo;
       $('#btn-undo').addEventListener('click', () => App.undo());
+      $('#tray-return').addEventListener('click', () => App.resetLayout());
+      $('#tray-preset').addEventListener('click', () => App.loadInputPlacement());
       $('#btn-redo').addEventListener('click', () => App.redo());
       $('#btn-star').insertAdjacentHTML('afterbegin', ICONS.star);
       $('#btn-help').addEventListener('click', () => this.openHelp());
@@ -560,6 +562,13 @@
       const cur = this.currentStep();
       const parts = App.p.parts.filter(M.isTrayPart).sort((a, b) => LP.engine.stepOfRole(a.role) - LP.engine.stepOfRole(b.role) || a.ref.localeCompare(b.ref, 'en', { numeric: true }));
       const unplaced = parts.filter((x) => !x.placed).length;
+      $('#tray-return').disabled = ![...App.p.parts,...App.p.satellites].some(x=>x.placed);
+      $('#tray-preset').hidden = !App.hasInputPlacement;
+      $('#tray-preset').textContent = App.p.recommendation ? '载入推荐布局' : '载入初始布局';
+      const fixed = App.pendingBoardFeatures();
+      if (fixed.length && App.hasInputPlacement) {
+        list.append(h('button',{class:'tray-action tray-fixed-group',title:'按预设位置放置板上固定焊盘及其关联器件',onclick:()=>App.placeBoardFeatures()},'放置固定板件 · '+fixed.length));
+      }
       $('#tray-count').textContent = t('tray_count', { n: unplaced, total: parts.length });
       for (const x of parts) {
         const hot = !x.placed && LP.engine.stepOfRole(x.role) === cur;

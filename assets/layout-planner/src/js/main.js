@@ -30,7 +30,7 @@
     App.renderer = r2;
     LP.interactionApi = LP.interaction.init(App, document.getElementById('stage'));
 
-    const res = App.load(raw);
+    const res = App.load(raw, {startInTray: !raw.result});
     if (!res.ok) {
       LP.ui.showErrors(res.errors);
       return;

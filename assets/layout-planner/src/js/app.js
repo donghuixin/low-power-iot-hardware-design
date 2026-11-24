@@ -39,12 +39,19 @@
     load(raw, opts) {
       const errors = M.validate(raw);
       if (errors.length) return { ok: false, errors };
+      clearTimeout(this._saveT);
       this.p = M.normalize(raw);
+      this.restored = false;
+      this.inputPlacement = M.snapshot(this.p);
+      this.featurePoses = new Map(this.p.parts.filter(x=>x.placementRole==='board_feature' && x.placed).map(x=>[x.ref,{...x.placed}]));
+      this.hasInputPlacement = this.p.parts.some(x=>x.placed) || this.p.satellites.some(x=>x.pinned && x.placed);
       this.animOn = this.systemReduced ? this.motionOverride === true : !!this.animPreference;
       this.boardConfirmed = !!(raw.result || this.p.parts.some((x) => x.placed));
       this.undoStack = []; this.redoStack = [];
       this.sel = null; this.suggestion = null; this.delta = null; this.focusIssue = null;
-      if (!(opts && opts.skipRestore)) this.restoreAutosave();
+      const startInTray = !!opts?.startInTray;
+      if (!opts?.skipRestore) this.restoreAutosave(startInTray);
+      if (startInTray && !this.restored) this.emptyPlacement();
       this.evaluate();
       this.emit('load');
       return { ok: true, errors: [] };
@@ -274,16 +281,43 @@
       this.emit('change', { label: LP.t('ui.op_board') });
       this.redraw();
     },
+    emptyPlacement() {
+      for (const x of this.p.parts) { x.placed = null; x.locked = false; }
+      for (const s of this.p.satellites) { s.placed = null; s.pinned = false; }
+    },
     resetLayout() {
-      this.commit(LP.t('ui.op_reset'), () => {
-        const fixed = new Set(this.p.parts.filter(x=>x.placementRole === 'board_feature').map(x=>x.ref));
-        for (const x of this.p.parts) {
-          if (fixed.has(x.ref) || fixed.has(M.placementOwner(x))) continue;
-          x.placed = null; x.locked = false;
-        }
-        for (const s of this.p.satellites) { s.placed = null; s.pinned = false; }
-      }, { noAnim: true });
+      if (this.drag) LP.interactionApi.cancelDrag();
+      this.commit('全部放回托盘', () => this.emptyPlacement(), { noAnim:true, noDelta:true });
       this.select(null);
+    },
+    loadInputPlacement() {
+      if (!this.hasInputPlacement) return;
+      if (this.drag) LP.interactionApi.cancelDrag();
+      this.commit('载入初始布局', () => M.restore(this.p,this.inputPlacement), {noAnim:true,noDelta:true});
+      this.select(null);
+    },
+    pendingBoardFeatures() {
+      const missingOwners = new Set(this.p.parts.filter(x=>!x.placed && !x.locked).map(M.placementOwner));
+      return this.p.parts.filter(x=>this.featurePoses.has(x.ref) && (!x.placed || missingOwners.has(x.ref)));
+    },
+    placeBoardFeatures() {
+      const pending = this.pendingBoardFeatures();
+      if (!pending.length) return;
+      if (this.drag) LP.interactionApi.cancelDrag();
+      // Place structural pads at their reviewed coordinates, then fit their associated parts.
+      const blocked = [];
+      this.commit('放置固定板件', () => {
+        const placed = [];
+        for (const item of pending) {
+          const pose = this.featurePoses.get(item.ref);
+          if (item.placed) { placed.push(item); continue; }
+          if (LP.rules.quickLegal(this.p,item,pose).ok) {
+            item.placed = {...pose}; placed.push(item);
+          } else blocked.push(item.ref);
+        }
+        for (const item of placed) blocked.push(...LP.satellites.placeImported(this.p,item,null));
+      }, {noAnim:true});
+      if (blocked.length) this.toast('仍待放置：'+blocked.join('、'),'warn');
     },
 
     // ---------- 自动保存 ----------
@@ -294,18 +328,19 @@
     },
     autosave() {
       try {
-        localStorage.setItem(this.storageKey(), JSON.stringify({ snap: M.snapshot(this.p), boardConfirmed: this.boardConfirmed, ts: Date.now() }));
+          localStorage.setItem(this.storageKey(), JSON.stringify({ snap: M.snapshot(this.p), boardConfirmed: this.boardConfirmed, trayWorkflow: true, ts: Date.now() }));
         if (!this.storageOk) { this.storageOk = true; this.emit('storage'); }
       } catch (e) {
         if (this.storageOk) { this.storageOk = false; this.emit('storage'); }
       }
     },
-    restoreAutosave() {
+    restoreAutosave(startInTray) {
       try {
         const v = localStorage.getItem(this.storageKey());
         if (!v) return false;
         const o = JSON.parse(v);
         M.restore(this.p, o.snap);
+        if (startInTray && !o.trayWorkflow && M.snapshot(this.p) === this.inputPlacement) return false;
         this.boardConfirmed = !!o.boardConfirmed;
         this.restored = true;
         return true;
