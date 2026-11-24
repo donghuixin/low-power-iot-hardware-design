@@ -38,7 +38,7 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 
 单击托盘或板上的器件把它拿起来，光标由器件本身代替。它的卫星器件——主控周围的去耦电容、晶体及负载电容、射频匹配、DCDC 电感——跟着悬浮起来，沿两条倾斜的轨道环绕。再次单击放下，卫星从轨道飞落，按"离所属引脚最近、不挡出线、远离噪声源"的原则贴到板上最合适的位置。
 
-![单击拾取、卫星环绕、落地贴放](docs/images/pick-and-orbit.gif)
+![单击拾取、卫星环绕、落地贴放；摆到差的位置时右侧立即给出线长、交叉和拥挤的变化与原因](docs/images/planner-satellites.gif)
 
 拾取中按 `R` 或右键旋转 90°，点托盘放回，`Esc` 取消；习惯拖放的话，按住拖动同样可以。
 
@@ -104,25 +104,27 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 
 选一个负载，供电从电源起点流过来（暖色），回流从它的地脚流回去（冷色），粒子越亮电流密度越大。高频负载的回流贴着去程走，地平面有缺口时会看到它绕路；右侧给出回路面积、建议线宽、压降和最近的去耦电容。
 
-![电流与回流：射频 SoC 的供电和回流](docs/images/verifier-current.png)
+![电流与回流：切换负载；把叠层假设成 2 层后，回流从贴着去程变成走线](docs/images/verifier-current.gif)
 
 ### 电磁：受扰地图与平面谐振
 
 天线、射频线、开关节点、电感、时钟各自向外扩散，叠加成受扰地图，IMU、晶体、模拟网络等敏感对象按"高 / 中 / 低"脉动提示。切到"平面谐振"，看电源/地平面对的各阶模态起伏的振型、节线和频率，接近射频频段或时钟谐波时标出来。
 
-![平面谐振：第 1 模的振型与节线](docs/images/verifier-modes.png)
+![受扰地图：叠加全部干扰源，或只看天线、只看射频走线](docs/images/verifier-emi.gif)
+
+![平面谐振：逐个模态的振型、节线与频率](docs/images/verifier-plane-modes.gif)
 
 ### 温度：加散热片前后对比
 
 逐个器件选散热片、改风速、改环境温度、打开密闭外壳，左右分屏对比改动前后，分割线可以拖动，标注直接写出"结温 102 °C → 39 °C"。
 
-![温度：同样 0.9 W，加散热片前后](docs/images/verifier-thermal.png)
+![温度：给 0.9 W 的主控逐级加大散热片，再拖动分割线对比](docs/images/verifier-thermal.gif)
 
 ### 布线后：从实际铜皮复核
 
 下图是一块布完线的板子：射频线下方的地平面开了槽、两侧地孔围栏太稀、模拟线贴着数字线走了 8 mm、顶层有一块没打孔的地铜，四条都被查出来并在板上定位。
 
-![布线后：射频参考平面、并行耦合、地铜孤岛](docs/images/verifier-routed-emi.png)
+![布线后：实际铜皮上的电流，逐条点开结论在板上定位](docs/images/verifier-routed.gif)
 
 ### 怎么用
 
@@ -174,7 +176,8 @@ assets/
   requirements-template.md       需求与架构文档模板
   power-budget-example.json      功耗预算配置示例
 tests/                           规划器与验证器的单元测试、铜皮提取测试与合成板
-docs/images/                     README 配图
+docs/images/                     README 配图与动图
+docs/record/                     动图的录制脚本（虚拟时钟逐帧截图）
 ```
 
 ## 安装
