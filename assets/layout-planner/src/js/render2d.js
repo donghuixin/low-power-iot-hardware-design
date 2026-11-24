@@ -103,6 +103,31 @@
     ctx.restore();
   }
 
+  const CHIP_COLORS = { resistor: '#35363b', capacitor: '#cfb58d', ferrite: '#5b6066', thermistor: '#775649', generic: '#686971' };
+  function drawPassive(ctx, pkg, floating) {
+    ctx.save();
+    ctx.shadowColor = 'transparent';
+    ctx.fillStyle = '#aba28c';
+    for (const pad of floating ? [] : pkg.pads) {
+      ctx.save();
+      ctx.translate(pad.x, pad.y);
+      ctx.rotate((pad.angle || 0) * Math.PI / 180);
+      ctx.fillRect(-pad.w / 2, -pad.h / 2, pad.w, pad.h);
+      ctx.restore();
+    }
+    ctx.restore();
+    const b = pkg.body;
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    body(ctx, b.w, b.h, CHIP_COLORS[pkg.kind], Math.min(b.w, b.h) * 0.065);
+    ctx.restore();
+    ctx.save();
+    ctx.shadowColor = 'transparent';
+    ctx.fillStyle = '#d6dae0';
+    for (const end of pkg.terminals) ctx.fillRect(end.x - end.w / 2, end.y - end.h / 2, end.w, end.h);
+    ctx.restore();
+  }
+
   /** 画一个器件。item 为主器件或卫星；ghost 时只画轮廓。 */
   function drawItem(ctx, item, isSat, opts) {
     const w = item.w, h = item.h;
@@ -114,8 +139,11 @@
       ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fill();
       return;
     }
+    const pkg = M.passiveGeometry(item);
+    if (pkg) return drawPassive(ctx, pkg, opts?.floating);
     if (isSat) return drawSat(ctx, item);
-    const shape = item.shape;
+    const index = M.bgaMark(item);
+    const shape = index ? 'bga' : item.shape;
     switch (shape) {
       case 'module': {
         body(ctx, w, h, '#c4c8cf', 0.3);
@@ -207,9 +235,9 @@
       case 'sot': legs(ctx, w, h, ['N', 'S']); body(ctx, w, h, '#2f3237', 0.15); pin1(ctx, w, h); break;
       case 'bga': {
         body(ctx, w, h, '#2b2e33');
-        ctx.fillStyle = 'rgba(255,255,255,0.08)';
-        for (let x = -w / 2 + 0.6; x < w / 2 - 0.3; x += 0.8) for (let y = -h / 2 + 0.6; y < h / 2 - 0.3; y += 0.8) { ctx.beginPath(); ctx.arc(x, y, 0.12, 0, Math.PI * 2); ctx.fill(); }
-        pin1(ctx, w, h); sheen(ctx, w, h, 0.12); break;
+        ctx.beginPath(); ctx.arc(index.x, index.y, index.r, 0, Math.PI * 2);
+        ctx.fillStyle = '#ddd'; ctx.fill();
+        sheen(ctx, w, h, 0.12); break;
       }
       case 'dfn': case 'uson': body(ctx, w, h, '#33363b'); edgePads(ctx, w, h, ['E', 'W']); pin1(ctx, w, h); icon(ctx, item.role, w, h); sheen(ctx, w, h, 0.1); break;
       case 'lga': body(ctx, w, h, '#30333a'); edgePads(ctx, w, h, ['N', 'E', 'S', 'W'], 'rgba(216,182,106,0.7)'); pin1(ctx, w, h); icon(ctx, item.role, w, h); sheen(ctx, w, h, 0.12); break;
@@ -415,7 +443,7 @@
       if (app.layers.sats) {
         for (const s of p.satellites) {
           if (!s.placed || !s._active || !this.onSide(s.placed.side)) continue;
-          if (drag && drag.kind === 'part' && drag.visible && s.parent[0] === drag.ref && !s.pinned) continue;
+          if (app.animOn && drag && drag.kind === 'part' && drag.visible && s.parent[0] === drag.ref && !s.pinned) continue;
           let sc = 1, alpha = 1, off = null;
           const pop = this.anims.find((a) => a.type === 'pop' && a.ref === s.ref);
           if (pop) {
@@ -584,13 +612,13 @@
       this.drawAt(item, isSat ? M.satFootprint(item, pl) : M.footprint(item, pl), pl, isSat, { lift: 1, scale: 1.04 });
       if (!isSat) {
         // 拾取时保留器件名称。
-        const sr = this.screenRect(M.footprint(item, pl));
+        const sr = this.screenRect(M.faceRect(item, pl));
         const m = Math.min(sr.w, sr.h);
         if (m >= 14) {
           ctx.save();
           ctx.font = `600 ${Math.max(9, Math.min(13, m * 0.28))}px ui-monospace, SFMono-Regular, Menlo, monospace`;
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          const light = ['chip_antenna', 'module', 'coin', 'usb_c', 'pouch', 'fpc', 'mic'].includes(item.shape);
+          const light = M.passiveGeometry(item)?.kind === 'capacitor' || ['chip_antenna', 'module', 'coin', 'usb_c', 'pouch', 'fpc', 'mic'].includes(item.shape);
           ctx.fillStyle = light ? 'rgba(30,32,36,0.85)' : 'rgba(255,255,255,0.92)';
           this.faceText(item, sr, sr.y + sr.h / 2 - 4);
           ctx.restore();
@@ -604,6 +632,7 @@
      * 位置记入 this.orbitPos，落地时卫星从这里飞向自动贴放的位置。
      */
     drawOrbit(part, pl, now, layer) {
+      if (!this.app.animOn || !this.app.layers.sats) return;
       const sats = orbitSats(this.app.p, part.ref);
       if (!sats.length) return;
       const pos = orbitPositions(part, pl, sats, this.app.reducedMotion ? 0 : now);
@@ -738,30 +767,17 @@
       ctx.fillText('mm', xl - 10, y0 + 18);
       ctx.textAlign = 'left';
     }
-    faceText(item, rect, y) {
-      const ctx = this.ctx, width = Math.max(0, rect.w - 3);
-      const name = M.faceName(item);
-      if (ctx.measureText(name).width <= width) {
-        ctx.fillText(name, rect.x + rect.w / 2, y);
-        return;
-      }
-      let compact = '';
-      for (const ch of name) {
-        if (ctx.measureText(compact + ch + '…').width > width) break;
-        compact += ch;
-      }
-      if (compact) ctx.fillText(compact + '…', rect.x + rect.w / 2, y);
-    }
+    faceText(item, rect, y) { drawFaceText(this.ctx, item, rect, y); }
     drawLabels(parts) {
       const ctx = this.ctx, app = this.app;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       for (const x of parts) {
-        const r = this.screenRect(M.footprint(x));
+        const r = this.screenRect(M.faceRect(x));
         const m = Math.min(r.w, r.h);
         if (m < 14) continue;
         const fs = Math.max(9, Math.min(13, m * 0.28));
         ctx.font = `600 ${fs}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-        const light = ['chip_antenna', 'module', 'coin', 'usb_c', 'pouch', 'fpc', 'mic'].includes(x.shape);
+        const light = M.passiveGeometry(x)?.kind === 'capacitor' || ['chip_antenna', 'module', 'coin', 'usb_c', 'pouch', 'fpc', 'mic'].includes(x.shape);
         ctx.fillStyle = light ? 'rgba(30,32,36,0.85)' : 'rgba(255,255,255,0.92)';
         const cy = x.shape === 'button' ? r.y + r.h - fs * 0.7 : r.y + r.h / 2;
         this.faceText(x, r, cy);
@@ -770,7 +786,7 @@
         ctx.font = '600 9px system-ui, sans-serif';
         for (const s of app.p.satellites) {
           if (!s.placed || !s._active || !this.onSide(s.placed.side)) continue;
-          const r = this.screenRect(M.satFootprint(s));
+          const r = this.screenRect(M.faceRect(s));
           if (r.h < 12 || r.w < 16) continue;
           ctx.fillStyle = '#fff';
           ctx.shadowColor = '#111'; ctx.shadowBlur = 3;
@@ -816,6 +832,21 @@
     return { items, rings };
   }
 
+  function drawFaceText(ctx, item, rect, y) {
+    const width = Math.max(0, rect.w - 3), center = rect.x + rect.w / 2;
+    const name = M.faceName(item);
+    if (ctx.measureText(name).width <= width) {
+      ctx.fillText(name, center, y);
+      return;
+    }
+    let compact = '';
+    for (const ch of name) {
+      if (ctx.measureText(compact + ch + '…').width > width) break;
+      compact += ch;
+    }
+    if (compact) ctx.fillText(compact + '…', center, y);
+  }
+
   /** 托盘缩略图：把器件画进一个小画布。 */
   function drawThumb(canvas, item) {
     const ctx = canvas.getContext('2d');
@@ -833,5 +864,5 @@
   }
 
   LP.Renderer2D = Renderer2D;
-  LP.render2d = { drawItem, drawThumb, roundRectPath, MASK, ACCENT, orbitSats, orbitPositions };
+  LP.render2d = { drawItem, drawThumb, drawFaceText, roundRectPath, MASK, ACCENT, CHIP_COLORS, orbitSats, orbitPositions };
 })(globalThis.LP = globalThis.LP || {});

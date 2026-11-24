@@ -63,8 +63,17 @@
       window.addEventListener('resize', () => this.onResize());
       const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
       App.systemReduced = mq.matches;
-      mq.addEventListener && mq.addEventListener('change', (e) => { App.systemReduced = e.matches; this.renderToolbar(); });
-      try { App.animOn = localStorage.getItem('lp:anim') === '1'; } catch (e) { App.animOn = false; }
+      mq.addEventListener && mq.addEventListener('change', (e) => {
+        App.systemReduced = e.matches;
+        if (App.animPreference === null && App.p) {
+          App.animOn = !!App.p.orbitFocus && !App.systemReduced;
+          App.emit('anim'); App.redraw();
+        }
+      });
+      try {
+        const stored = localStorage.getItem('lp:anim');
+        if (stored === '0' || stored === '1') App.animPreference = stored === '1';
+      } catch (e) { /* 使用项目和系统的初始偏好 */ }
       App.on('anim', () => this.renderToolbar());
       this.onResize(true);
     },

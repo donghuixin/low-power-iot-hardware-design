@@ -230,6 +230,81 @@
     return '器件';
   }
 
+  const CHIP_KINDS = { res: 'resistor', cap: 'capacitor', ferrite: 'ferrite', thermistor: 'thermistor' };
+  // Nominal package bodies for older EasyEDA exports (imperial chip codes). The footprint envelope includes land overhang.
+  const CHIP_BODIES = { '0201': [0.6, 0.3], '0402': [1.0, 0.5], '0603': [1.6, 0.8], '0805': [2.0, 1.25],
+    '1206': [3.2, 1.6], '1210': [3.2, 2.5], '2010': [5.0, 2.5], '2512': [6.3, 3.2] };
+
+  /** Board-local mm. Keep land, visible body and terminations separate from the placement envelope. */
+  function passiveGeometry(item) {
+    const spec = item.visualPackage;
+    const shape = item.shape || SAT_KINDS[item.kind]?.shape;
+    const footprint = typeof item.footprint === 'string' ? item.footprint : '';
+    const chip = /^(?:[^:]+:)?([RCL])_?(\d{4})(?:_\d{4}Metric)?$/i.exec(footprint);
+    const family = chip && ({R:'resistor', C:'capacitor'})[chip[1].toUpperCase()];
+    let kind = spec?.kind || CHIP_KINDS[shape] || family;
+    if (!kind) return null;
+    const nativeBody = spec?.body;
+    const pads = Array.isArray(spec?.pads) ? spec.pads.filter(p => p && isNum(p.x) && isNum(p.y) && isPos(p.w) && isPos(p.h)) : [];
+    const centers = pads.length ? pads : (item.physicalPads || []).flatMap(p =>
+      (p.xy || []).filter(q => Array.isArray(q) && isNum(q[0]) && isNum(q[1])).map(([x,y]) => ({x,y})));
+    const special = item.through || item.polarized || /(?:array|network|electroly|tantal|radial|axial|polar|^CP[_-]|排阻|排容|钽|电解)/i.test(footprint);
+    if (!Object.values(CHIP_KINDS).includes(kind) || special || (spec && pads.length !== 2) ||
+        (centers.length && centers.length !== 2) || (item.pins?.length > 2)) kind = 'generic';
+    const horizontal = centers.length === 2
+      ? Math.abs(centers[1].x - centers[0].x) >= Math.abs(centers[1].y - centers[0].y)
+      : (nativeBody?.w || item.w) >= (nativeBody?.h || item.h);
+    let body = {x: 0, y: 0, w: item.w, h: item.h};
+    if (isPos(nativeBody?.w) && isPos(nativeBody?.h)) {
+      body = {x: isNum(nativeBody.x) ? nativeBody.x : 0, y: isNum(nativeBody.y) ? nativeBody.y : 0, w: nativeBody.w, h: nativeBody.h};
+    } else if (!spec && kind !== 'generic' && centers.length === 2) {
+      const size = chip && CHIP_BODIES[chip[2]];
+      if (size) {
+        const [w,h] = horizontal ? size : [size[1], size[0]];
+        if (w <= item.w * 1.05 && h <= item.h * 1.05) {
+          body = {x: (centers[0].x + centers[1].x) / 2, y: (centers[0].y + centers[1].y) / 2, w, h};
+        }
+      }
+    }
+    const width = horizontal ? body.h : body.w;
+    // Imported 2D footprints have an envelope and no measured thickness. A role's default IC height is unsuitable.
+    const visualHeight = kind === 'resistor' ? Math.min(width * 0.48, 0.65) : width * 0.75;
+    const height = isPos(nativeBody?.z) ? nativeBody.z : (!spec && !footprint && item.z) || visualHeight;
+    const terminals = [];
+    if (kind !== 'generic') {
+      const length = horizontal ? body.w : body.h;
+      const end = Math.min(length * 0.21, width * 0.43);
+      const orderedPads = pads.slice().sort((a, b) => horizontal ? a.x - b.x : a.y - b.y);
+      for (const sign of [-1, 1]) {
+        const offset = sign * (length - end) / 2;
+        const index = sign < 0 ? 0 : 1;
+        terminals.push({n: orderedPads[index]?.n ?? index + 1, x: body.x + (horizontal ? offset : 0), y: body.y + (horizontal ? 0 : offset),
+          w: horizontal ? end : body.w, h: horizontal ? body.h : end});
+      }
+    }
+    return {kind, body, pads, terminals, height};
+  }
+
+  function faceRect(item, pl = item.placed) {
+    const pkg = passiveGeometry(item);
+    if (!pkg) return footprint(item, pl);
+    const {body} = pkg, center = toWorld(body.x, body.y, pl);
+    const [w,h] = dims(body.w, body.h, pl.rot || 0);
+    return G.rectFromCenter(center.x, center.y, w, h);
+  }
+
+  /** A mounted BGA exposes the package index on top; its solder balls face the board. */
+  function bgaMark(item) {
+    const footprint = typeof item.footprint === 'string' ? item.footprint.split(':').pop() : '';
+    if (item.shape !== 'bga' && !/^[A-Z]*BGA(?=[\d_\s-]|$)/i.test(footprint)) return null;
+    const a1 = item.physicalPads?.find(p => p.n === 'A1')?.xy?.[0];
+    const corner = /[-_](TL|TR|BL|BR)$/i.exec(footprint)?.[1].toUpperCase();
+    const sx = isNum(a1?.[0]) && a1[0] !== 0 ? Math.sign(a1[0]) : corner?.endsWith('R') ? 1 : -1;
+    const sy = isNum(a1?.[1]) && a1[1] !== 0 ? Math.sign(a1[1]) : corner?.startsWith('B') ? -1 : 1;
+    const r = Math.min(0.28, Math.min(item.w, item.h) * 0.08);
+    return {x: sx * (item.w / 2 - 2.4 * r), y: sy * (item.h / 2 - 2.4 * r), r};
+  }
+
   // ---------- 坐标变换 ----------
   function dims(w, h, rot) { return rot === 90 || rot === 270 ? [h, w] : [w, h]; }
   function footprint(part, pl) {
@@ -455,8 +530,9 @@
   function definitionHash(p) {
     const d = clone(p);
     delete d.result;
-    for (const x of d.parts || []) { delete x.placed; delete x.locked; }
-    for (const x of d.satellites || []) { delete x.placed; delete x.pinned; }
+    delete d.orbitFocus;
+    for (const x of d.parts || []) { delete x.placed; delete x.locked; delete x.orbitParent; delete x.visualPackage; }
+    for (const x of d.satellites || []) { delete x.placed; delete x.pinned; delete x.visualPackage; }
     if (d.board) { delete d.board.outline; delete d.board.mask; delete d.board.holes; }
     const s = stableStringify(d);
     let h = 5381;
@@ -560,7 +636,7 @@
 
   LP.model = {
     TOOL_VERSION, ROLES, SAT_KINDS, NET_CLASSES, SIDES, ROTS, SENSOR_ROLES,
-    validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint, faceName,
+    validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint, faceName, faceRect, passiveGeometry, bgaMark,
     partByRef, satByRef, itemByRef, placedParts, partTags, satTags, connectedParts, parseCap,
     snapshot, restore, definitionHash, exportLayout, resultObject, exportCSV, r2, remapBoardFeatures, partsArea, BOARD_SHAPES, outlineFromShape, shapeOf, toEditablePolygon, exportDXF,
     HOLE_SIZES, HOLE_EDGE, holeFits, cornerHoles, suggestHole,

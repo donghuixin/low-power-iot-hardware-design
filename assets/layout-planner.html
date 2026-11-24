@@ -697,8 +697,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       theme: '主题', theme_light: '浅色', theme_dark: '深色',
       help: '帮助', star: 'Star', star_title: '在 GitHub 上 Star 或 Fork 这个 skill，获取后续更新',
       anim_off: '动效', anim_on: '动效开',
-      anim_title_off: '开启网络关联或板框的动态提示，也可显示放置反馈',
-      anim_title_on: '关闭动画效果（卫星仍静止排在器件周围）',
+      anim_title_off: '查看当前核心的关联器件环绕预览。点选其他核心可切换。',
+      anim_title_on: '停止环绕预览，查看实际摆位。',
       storage_off: '未自动保存，请手动导出', restored: '已恢复上次的摆放',
       panel_steps: '步骤', panel_eval: '评估',
 
@@ -1170,6 +1170,81 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     return '器件';
   }
 
+  const CHIP_KINDS = { res: 'resistor', cap: 'capacitor', ferrite: 'ferrite', thermistor: 'thermistor' };
+  // Nominal package bodies for older EasyEDA exports (imperial chip codes). The footprint envelope includes land overhang.
+  const CHIP_BODIES = { '0201': [0.6, 0.3], '0402': [1.0, 0.5], '0603': [1.6, 0.8], '0805': [2.0, 1.25],
+    '1206': [3.2, 1.6], '1210': [3.2, 2.5], '2010': [5.0, 2.5], '2512': [6.3, 3.2] };
+
+  /** Board-local mm. Keep land, visible body and terminations separate from the placement envelope. */
+  function passiveGeometry(item) {
+    const spec = item.visualPackage;
+    const shape = item.shape || SAT_KINDS[item.kind]?.shape;
+    const footprint = typeof item.footprint === 'string' ? item.footprint : '';
+    const chip = /^(?:[^:]+:)?([RCL])_?(\d{4})(?:_\d{4}Metric)?$/i.exec(footprint);
+    const family = chip && ({R:'resistor', C:'capacitor'})[chip[1].toUpperCase()];
+    let kind = spec?.kind || CHIP_KINDS[shape] || family;
+    if (!kind) return null;
+    const nativeBody = spec?.body;
+    const pads = Array.isArray(spec?.pads) ? spec.pads.filter(p => p && isNum(p.x) && isNum(p.y) && isPos(p.w) && isPos(p.h)) : [];
+    const centers = pads.length ? pads : (item.physicalPads || []).flatMap(p =>
+      (p.xy || []).filter(q => Array.isArray(q) && isNum(q[0]) && isNum(q[1])).map(([x,y]) => ({x,y})));
+    const special = item.through || item.polarized || /(?:array|network|electroly|tantal|radial|axial|polar|^CP[_-]|排阻|排容|钽|电解)/i.test(footprint);
+    if (!Object.values(CHIP_KINDS).includes(kind) || special || (spec && pads.length !== 2) ||
+        (centers.length && centers.length !== 2) || (item.pins?.length > 2)) kind = 'generic';
+    const horizontal = centers.length === 2
+      ? Math.abs(centers[1].x - centers[0].x) >= Math.abs(centers[1].y - centers[0].y)
+      : (nativeBody?.w || item.w) >= (nativeBody?.h || item.h);
+    let body = {x: 0, y: 0, w: item.w, h: item.h};
+    if (isPos(nativeBody?.w) && isPos(nativeBody?.h)) {
+      body = {x: isNum(nativeBody.x) ? nativeBody.x : 0, y: isNum(nativeBody.y) ? nativeBody.y : 0, w: nativeBody.w, h: nativeBody.h};
+    } else if (!spec && kind !== 'generic' && centers.length === 2) {
+      const size = chip && CHIP_BODIES[chip[2]];
+      if (size) {
+        const [w,h] = horizontal ? size : [size[1], size[0]];
+        if (w <= item.w * 1.05 && h <= item.h * 1.05) {
+          body = {x: (centers[0].x + centers[1].x) / 2, y: (centers[0].y + centers[1].y) / 2, w, h};
+        }
+      }
+    }
+    const width = horizontal ? body.h : body.w;
+    // Imported 2D footprints have an envelope and no measured thickness. A role's default IC height is unsuitable.
+    const visualHeight = kind === 'resistor' ? Math.min(width * 0.48, 0.65) : width * 0.75;
+    const height = isPos(nativeBody?.z) ? nativeBody.z : (!spec && !footprint && item.z) || visualHeight;
+    const terminals = [];
+    if (kind !== 'generic') {
+      const length = horizontal ? body.w : body.h;
+      const end = Math.min(length * 0.21, width * 0.43);
+      const orderedPads = pads.slice().sort((a, b) => horizontal ? a.x - b.x : a.y - b.y);
+      for (const sign of [-1, 1]) {
+        const offset = sign * (length - end) / 2;
+        const index = sign < 0 ? 0 : 1;
+        terminals.push({n: orderedPads[index]?.n ?? index + 1, x: body.x + (horizontal ? offset : 0), y: body.y + (horizontal ? 0 : offset),
+          w: horizontal ? end : body.w, h: horizontal ? body.h : end});
+      }
+    }
+    return {kind, body, pads, terminals, height};
+  }
+
+  function faceRect(item, pl = item.placed) {
+    const pkg = passiveGeometry(item);
+    if (!pkg) return footprint(item, pl);
+    const {body} = pkg, center = toWorld(body.x, body.y, pl);
+    const [w,h] = dims(body.w, body.h, pl.rot || 0);
+    return G.rectFromCenter(center.x, center.y, w, h);
+  }
+
+  /** A mounted BGA exposes the package index on top; its solder balls face the board. */
+  function bgaMark(item) {
+    const footprint = typeof item.footprint === 'string' ? item.footprint.split(':').pop() : '';
+    if (item.shape !== 'bga' && !/^[A-Z]*BGA(?=[\d_\s-]|$)/i.test(footprint)) return null;
+    const a1 = item.physicalPads?.find(p => p.n === 'A1')?.xy?.[0];
+    const corner = /[-_](TL|TR|BL|BR)$/i.exec(footprint)?.[1].toUpperCase();
+    const sx = isNum(a1?.[0]) && a1[0] !== 0 ? Math.sign(a1[0]) : corner?.endsWith('R') ? 1 : -1;
+    const sy = isNum(a1?.[1]) && a1[1] !== 0 ? Math.sign(a1[1]) : corner?.startsWith('B') ? -1 : 1;
+    const r = Math.min(0.28, Math.min(item.w, item.h) * 0.08);
+    return {x: sx * (item.w / 2 - 2.4 * r), y: sy * (item.h / 2 - 2.4 * r), r};
+  }
+
   // ---------- 坐标变换 ----------
   function dims(w, h, rot) { return rot === 90 || rot === 270 ? [h, w] : [w, h]; }
   function footprint(part, pl) {
@@ -1395,8 +1470,9 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
   function definitionHash(p) {
     const d = clone(p);
     delete d.result;
-    for (const x of d.parts || []) { delete x.placed; delete x.locked; }
-    for (const x of d.satellites || []) { delete x.placed; delete x.pinned; }
+    delete d.orbitFocus;
+    for (const x of d.parts || []) { delete x.placed; delete x.locked; delete x.orbitParent; delete x.visualPackage; }
+    for (const x of d.satellites || []) { delete x.placed; delete x.pinned; delete x.visualPackage; }
     if (d.board) { delete d.board.outline; delete d.board.mask; delete d.board.holes; }
     const s = stableStringify(d);
     let h = 5381;
@@ -1500,7 +1576,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
 
   LP.model = {
     TOOL_VERSION, ROLES, SAT_KINDS, NET_CLASSES, SIDES, ROTS, SENSOR_ROLES,
-    validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint, faceName,
+    validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint, faceName, faceRect, passiveGeometry, bgaMark,
     partByRef, satByRef, itemByRef, placedParts, partTags, satTags, connectedParts, parseCap,
     snapshot, restore, definitionHash, exportLayout, resultObject, exportCSV, r2, remapBoardFeatures, partsArea, BOARD_SHAPES, outlineFromShape, shapeOf, toEditablePolygon, exportDXF,
     HOLE_SIZES, HOLE_EDGE, holeFits, cornerHoles, suggestHole,
@@ -2766,6 +2842,31 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     ctx.restore();
   }
 
+  const CHIP_COLORS = { resistor: '#35363b', capacitor: '#cfb58d', ferrite: '#5b6066', thermistor: '#775649', generic: '#686971' };
+  function drawPassive(ctx, pkg, floating) {
+    ctx.save();
+    ctx.shadowColor = 'transparent';
+    ctx.fillStyle = '#aba28c';
+    for (const pad of floating ? [] : pkg.pads) {
+      ctx.save();
+      ctx.translate(pad.x, pad.y);
+      ctx.rotate((pad.angle || 0) * Math.PI / 180);
+      ctx.fillRect(-pad.w / 2, -pad.h / 2, pad.w, pad.h);
+      ctx.restore();
+    }
+    ctx.restore();
+    const b = pkg.body;
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    body(ctx, b.w, b.h, CHIP_COLORS[pkg.kind], Math.min(b.w, b.h) * 0.065);
+    ctx.restore();
+    ctx.save();
+    ctx.shadowColor = 'transparent';
+    ctx.fillStyle = '#d6dae0';
+    for (const end of pkg.terminals) ctx.fillRect(end.x - end.w / 2, end.y - end.h / 2, end.w, end.h);
+    ctx.restore();
+  }
+
   /** 画一个器件。item 为主器件或卫星；ghost 时只画轮廓。 */
   function drawItem(ctx, item, isSat, opts) {
     const w = item.w, h = item.h;
@@ -2777,8 +2878,11 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fill();
       return;
     }
+    const pkg = M.passiveGeometry(item);
+    if (pkg) return drawPassive(ctx, pkg, opts?.floating);
     if (isSat) return drawSat(ctx, item);
-    const shape = item.shape;
+    const index = M.bgaMark(item);
+    const shape = index ? 'bga' : item.shape;
     switch (shape) {
       case 'module': {
         body(ctx, w, h, '#c4c8cf', 0.3);
@@ -2870,9 +2974,9 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       case 'sot': legs(ctx, w, h, ['N', 'S']); body(ctx, w, h, '#2f3237', 0.15); pin1(ctx, w, h); break;
       case 'bga': {
         body(ctx, w, h, '#2b2e33');
-        ctx.fillStyle = 'rgba(255,255,255,0.08)';
-        for (let x = -w / 2 + 0.6; x < w / 2 - 0.3; x += 0.8) for (let y = -h / 2 + 0.6; y < h / 2 - 0.3; y += 0.8) { ctx.beginPath(); ctx.arc(x, y, 0.12, 0, Math.PI * 2); ctx.fill(); }
-        pin1(ctx, w, h); sheen(ctx, w, h, 0.12); break;
+        ctx.beginPath(); ctx.arc(index.x, index.y, index.r, 0, Math.PI * 2);
+        ctx.fillStyle = '#ddd'; ctx.fill();
+        sheen(ctx, w, h, 0.12); break;
       }
       case 'dfn': case 'uson': body(ctx, w, h, '#33363b'); edgePads(ctx, w, h, ['E', 'W']); pin1(ctx, w, h); icon(ctx, item.role, w, h); sheen(ctx, w, h, 0.1); break;
       case 'lga': body(ctx, w, h, '#30333a'); edgePads(ctx, w, h, ['N', 'E', 'S', 'W'], 'rgba(216,182,106,0.7)'); pin1(ctx, w, h); icon(ctx, item.role, w, h); sheen(ctx, w, h, 0.12); break;
@@ -3078,7 +3182,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       if (app.layers.sats) {
         for (const s of p.satellites) {
           if (!s.placed || !s._active || !this.onSide(s.placed.side)) continue;
-          if (drag && drag.kind === 'part' && drag.visible && s.parent[0] === drag.ref && !s.pinned) continue;
+          if (app.animOn && drag && drag.kind === 'part' && drag.visible && s.parent[0] === drag.ref && !s.pinned) continue;
           let sc = 1, alpha = 1, off = null;
           const pop = this.anims.find((a) => a.type === 'pop' && a.ref === s.ref);
           if (pop) {
@@ -3247,13 +3351,13 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       this.drawAt(item, isSat ? M.satFootprint(item, pl) : M.footprint(item, pl), pl, isSat, { lift: 1, scale: 1.04 });
       if (!isSat) {
         // 拾取时保留器件名称。
-        const sr = this.screenRect(M.footprint(item, pl));
+        const sr = this.screenRect(M.faceRect(item, pl));
         const m = Math.min(sr.w, sr.h);
         if (m >= 14) {
           ctx.save();
           ctx.font = `600 ${Math.max(9, Math.min(13, m * 0.28))}px ui-monospace, SFMono-Regular, Menlo, monospace`;
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          const light = ['chip_antenna', 'module', 'coin', 'usb_c', 'pouch', 'fpc', 'mic'].includes(item.shape);
+          const light = M.passiveGeometry(item)?.kind === 'capacitor' || ['chip_antenna', 'module', 'coin', 'usb_c', 'pouch', 'fpc', 'mic'].includes(item.shape);
           ctx.fillStyle = light ? 'rgba(30,32,36,0.85)' : 'rgba(255,255,255,0.92)';
           this.faceText(item, sr, sr.y + sr.h / 2 - 4);
           ctx.restore();
@@ -3267,6 +3371,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
      * 位置记入 this.orbitPos，落地时卫星从这里飞向自动贴放的位置。
      */
     drawOrbit(part, pl, now, layer) {
+      if (!this.app.animOn || !this.app.layers.sats) return;
       const sats = orbitSats(this.app.p, part.ref);
       if (!sats.length) return;
       const pos = orbitPositions(part, pl, sats, this.app.reducedMotion ? 0 : now);
@@ -3401,30 +3506,17 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       ctx.fillText('mm', xl - 10, y0 + 18);
       ctx.textAlign = 'left';
     }
-    faceText(item, rect, y) {
-      const ctx = this.ctx, width = Math.max(0, rect.w - 3);
-      const name = M.faceName(item);
-      if (ctx.measureText(name).width <= width) {
-        ctx.fillText(name, rect.x + rect.w / 2, y);
-        return;
-      }
-      let compact = '';
-      for (const ch of name) {
-        if (ctx.measureText(compact + ch + '…').width > width) break;
-        compact += ch;
-      }
-      if (compact) ctx.fillText(compact + '…', rect.x + rect.w / 2, y);
-    }
+    faceText(item, rect, y) { drawFaceText(this.ctx, item, rect, y); }
     drawLabels(parts) {
       const ctx = this.ctx, app = this.app;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       for (const x of parts) {
-        const r = this.screenRect(M.footprint(x));
+        const r = this.screenRect(M.faceRect(x));
         const m = Math.min(r.w, r.h);
         if (m < 14) continue;
         const fs = Math.max(9, Math.min(13, m * 0.28));
         ctx.font = `600 ${fs}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-        const light = ['chip_antenna', 'module', 'coin', 'usb_c', 'pouch', 'fpc', 'mic'].includes(x.shape);
+        const light = M.passiveGeometry(x)?.kind === 'capacitor' || ['chip_antenna', 'module', 'coin', 'usb_c', 'pouch', 'fpc', 'mic'].includes(x.shape);
         ctx.fillStyle = light ? 'rgba(30,32,36,0.85)' : 'rgba(255,255,255,0.92)';
         const cy = x.shape === 'button' ? r.y + r.h - fs * 0.7 : r.y + r.h / 2;
         this.faceText(x, r, cy);
@@ -3433,7 +3525,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         ctx.font = '600 9px system-ui, sans-serif';
         for (const s of app.p.satellites) {
           if (!s.placed || !s._active || !this.onSide(s.placed.side)) continue;
-          const r = this.screenRect(M.satFootprint(s));
+          const r = this.screenRect(M.faceRect(s));
           if (r.h < 12 || r.w < 16) continue;
           ctx.fillStyle = '#fff';
           ctx.shadowColor = '#111'; ctx.shadowBlur = 3;
@@ -3479,6 +3571,21 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     return { items, rings };
   }
 
+  function drawFaceText(ctx, item, rect, y) {
+    const width = Math.max(0, rect.w - 3), center = rect.x + rect.w / 2;
+    const name = M.faceName(item);
+    if (ctx.measureText(name).width <= width) {
+      ctx.fillText(name, center, y);
+      return;
+    }
+    let compact = '';
+    for (const ch of name) {
+      if (ctx.measureText(compact + ch + '…').width > width) break;
+      compact += ch;
+    }
+    if (compact) ctx.fillText(compact + '…', center, y);
+  }
+
   /** 托盘缩略图：把器件画进一个小画布。 */
   function drawThumb(canvas, item) {
     const ctx = canvas.getContext('2d');
@@ -3496,7 +3603,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
   }
 
   LP.Renderer2D = Renderer2D;
-  LP.render2d = { drawItem, drawThumb, roundRectPath, MASK, ACCENT, orbitSats, orbitPositions };
+  LP.render2d = { drawItem, drawThumb, drawFaceText, roundRectPath, MASK, ACCENT, CHIP_COLORS, orbitSats, orbitPositions };
 })(globalThis.LP = globalThis.LP || {});
 
 </script>
@@ -3765,8 +3872,38 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     }
     meshOf(geo, mat, x, y, z) { const m = new this.T.Mesh(geo, mat); m.position.set(x || 0, y || 0, z || 0); m.castShadow = true; m.receiveShadow = true; return m; }
 
+    passiveModel(pkg, floating) {
+      const group = new this.T.Group();
+      const b = pkg.body, height = pkg.height * HZ;
+      const pads = floating ? [] : pkg.pads;
+      const landHeight = pads.length ? 0.025 : 0;
+      const landMat = this.std(0xaba28c, {metalness: 0.4, roughness: 0.55});
+      for (const pad of pads) {
+        const mesh = this.meshOf(this.box(pad.w, pad.h, landHeight), landMat, pad.x, 0, -pad.y);
+        mesh.name = 'pad:' + pad.n;
+        mesh.rotation.y = (pad.angle || 0) * Math.PI / 180;
+        group.add(mesh);
+      }
+      const end = pkg.terminals[0];
+      const alongX = end && end.x !== pkg.terminals[1].x;
+      const centerW = end && alongX ? b.w - end.w * 2 : b.w;
+      const centerH = end && !alongX ? b.h - end.h * 2 : b.h;
+      const body = this.meshOf(this.box(centerW, centerH, height), this.std(LP.render2d.CHIP_COLORS[pkg.kind]), b.x, landHeight, -b.y);
+      body.name = 'body';
+      group.add(body);
+      const silver = this.std(0xd6dae0, {metalness: 0.45, roughness: 0.36});
+      for (const t of pkg.terminals) {
+        const mesh = this.meshOf(this.box(t.w, t.h, height), silver, t.x, landHeight, -t.y);
+        mesh.name = 'terminal:' + t.n;
+        group.add(mesh);
+      }
+      return group;
+    }
+
     /** 主器件模型（局部坐标：中心为原点、底面在 y=0、板面 x 向右、板面 y 向 −z）。 */
     partModel(part) {
+      const pkg = M.passiveGeometry(part);
+      if (pkg) return this.passiveModel(pkg);
       const T = this.T, g = new T.Group();
       const w = part.w, d = part.h, H = Math.max(0.5, part.z * HZ);
       const gold = this.std(0xd8b66a, { metalness: 0.3, roughness: 0.45 });
@@ -3781,7 +3918,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         }
       };
       const pin1 = () => { const m = this.meshOf(this.cyl(Math.min(0.28, Math.min(w, d) * 0.08), 0.04, 16), this.std(0xdedede)); m.position.set(-w / 2 + 0.6, H, -d / 2 + 0.6); g.add(m); };
-      switch (part.shape) {
+      const index = M.bgaMark(part);
+      switch (index ? 'bga' : part.shape) {
         case 'coin': { const r = Math.min(w, d) / 2; g.add(this.meshOf(this.cyl(r, H, 48), silver)); const tab = this.meshOf(this.box(r * 0.5, r * 0.35, H * 0.6), silver); tab.position.z = -r; g.add(tab); break; }
         case 'module': g.add(this.meshOf(this.rbox(w, d, H, 0.3), silver)); break;
         case 'chip_antenna': {
@@ -3819,7 +3957,13 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
           pin1(); break;
         }
         case 'dfn': case 'uson': g.add(this.meshOf(this.rbox(w, d, H, Math.min(w, d) * 0.12), dark)); pads(['E', 'W']); pin1(); break;
-        case 'lga': case 'bga': g.add(this.meshOf(this.rbox(w, d, H, Math.min(w, d) * 0.12), this.std(0x30333a))); pads(['N', 'E', 'S', 'W']); pin1(); break;
+        case 'bga': {
+          g.add(this.meshOf(this.rbox(w, d, H, Math.min(w, d) * 0.08), this.std(0x2b2e33)));
+          const dot = this.meshOf(this.cyl(index.r, 0.025, 16), this.std(0xdddddd), index.x, H, -index.y);
+          dot.name = 'A1'; g.add(dot);
+          break;
+        }
+        case 'lga': g.add(this.meshOf(this.rbox(w, d, H, Math.min(w, d) * 0.12), this.std(0x30333a))); pads(['N', 'E', 'S', 'W']); pin1(); break;
         case 'qfn': default: g.add(this.meshOf(this.rbox(w, d, H, Math.min(w, d) * 0.12), dark)); pads(['N', 'E', 'S', 'W']); pin1(); break;
       }
       if (part.role === 'imu') {
@@ -3830,6 +3974,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       return g;
     }
     satModel(s) {
+      const pkg = M.passiveGeometry(s);
+      if (pkg) return this.passiveModel(pkg);
       const T = this.T, g = new T.Group();
       const w = s.w, d = s.h, H = Math.max(0.35, Math.min(w, d) * 0.7) * HZ;
       const shape = M.SAT_KINDS[s.kind].shape;
@@ -4088,7 +4234,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       const T = this.T, app = this.app, p = app.p, d = app.drag;
       for (let i = this.dyn.children.length - 1; i >= 0; i--) this.dyn.remove(this.dyn.children[i]);
       for (const [ref, g] of this.partGroups) g.visible = !(d && d.ref === ref && d.visible);
-      for (const [ref, g] of this.satMeshes) { const s = M.satByRef(p, ref); g.visible = !(d && d.kind === 'part' && d.visible && s.parent[0] === d.ref && !s.pinned); }
+      for (const [ref, g] of this.satMeshes) { const s = M.satByRef(p, ref); g.visible = !(app.animOn && d && d.kind === 'part' && d.visible && s.parent[0] === d.ref && !s.pinned); }
       if (!d || !d.visible || !d.pl) { this.orbitPos = this.orbitPos || null; return; }
       const item = M.itemByRef(p, d.ref);
       const isSat = d.kind === 'sat';
@@ -4111,7 +4257,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       this.dyn.add(model);
       // 卫星环绕
       this.orbitPos = {};
-      if (!isSat) {
+      if (!isSat && app.animOn && app.layers.sats) {
         const sats = LP.render2d.orbitSats(p, item.ref);
         if (sats.length) {
           const pos = LP.render2d.orbitPositions(item, raw, sats, app.reducedMotion ? 0 : now);
@@ -4142,7 +4288,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         const ref = part.ref;
         const hidden = !part || !part.placed || (part.kind && (!app.layers.sats || !part._active)) || (app.drag && app.drag.ref === ref && app.drag.visible) || !this.onSide(part.through ? 'both' : part.placed.side);
         if (hidden) { el.style.display = 'none'; continue; }
-        const r = this.screenRect(part.kind ? M.satFootprint(part) : M.footprint(part), (part.z || 0.6) * HZ);
+        const pkg = M.passiveGeometry(part);
+        const r = this.screenRect(M.faceRect(part), (pkg?.height || part.z || 0.6) * HZ + (pkg?.pads.length ? 0.025 : 0));
         if (Math.min(r.w, r.h) < 16) { el.style.display = 'none'; continue; }
         el.style.display = '';
         el.style.maxWidth = Math.max(0, r.w - 3) + 'px';
@@ -4177,9 +4324,9 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     layers: { keepout: true, edge: false, heat: false, magnetic: false, congestion: false, sats: true, halo: true, grid: true },
     editSats: false,
     theme: 'light',
-    animOn: false,          // 动效开关，默认关闭
+    animOn: false,
+    animPreference: null,   // null 表示尚未手动选择，推荐布局可首开预览
     systemReduced: false,   // 系统"减少动态效果"
-    /** 初次打开静止，用户可显式开启并随时停止。 */
     get reducedMotion() { return !this.animOn; },
     undoStack: [], redoStack: [],
     drag: null, suggestion: null, delta: null, focusIssue: null,
@@ -4199,6 +4346,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       const errors = M.validate(raw);
       if (errors.length) return { ok: false, errors };
       this.p = M.normalize(raw);
+      this.animOn = this.animPreference ?? (!!this.p.orbitFocus && !this.systemReduced);
       this.boardConfirmed = !!(raw.result || this.p.parts.some((x) => x.placed));
       this.undoStack = []; this.redoStack = [];
       this.sel = null; this.suggestion = null; this.delta = null; this.focusIssue = null;
@@ -4467,12 +4615,13 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     exportCSV() { this.download(`${this.slug()}-placement.csv`, '﻿' + M.exportCSV(this.p), 'text/csv'); },
 
     setAnim(on) {
-      this.animOn = !!on;
+      this.animOn = this.animPreference = !!on;
       try { localStorage.setItem('lp:anim', on ? '1' : '0'); } catch (e) { /* 存储不可用 */ }
       if (!on && LP.ui) {
         for (const renderer of [LP.ui.r2, LP.ui.r3]) {
           if (!renderer) continue;
           renderer.anims = [];
+          renderer.orbitPos = null;
           if (renderer === this.renderer && renderer === LP.ui.r3) renderer.rebuild();
         }
       }
@@ -4929,11 +5078,167 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
 </script>
 <script>
 /* ---- js/motion.js ---- */
-/* 共享的屏幕反馈层，只投影本视面的真实端点或板框，不修改工程坐标。 */
+/* 在独立画布上投影关联器件的环绕预览；命中、撤销与导出始终使用板上的实位。 */
 (function (LP) {
   'use strict';
   const M = LP.model;
   let app, canvas, ctx, frame = 0, world, screen, face, pulses = [];
+  let parents, groups, group, groupKey, orbitFrame;
+
+  function indexGroups() {
+    parents = new Map();
+    groups = new Map();
+    const parts = new Map(app.p.parts.map(part => [part.ref, part]));
+    const add = (item, owner, native) => {
+      const core = parts.get(owner);
+      if (!core || core === item) return;
+      parents.set(item.ref, owner);
+      if (!groups.has(owner)) groups.set(owner, { core, members: [] });
+      groups.get(owner).members.push({ item, native });
+    };
+    for (const part of parts.values()) add(part, part.orbitParent || part.associatedParent, false);
+    for (const sat of app.p.satellites) add(sat, sat.parent[0], true);
+  }
+
+  function visibleGroup() {
+    if (!app.layers.sats || app.boardEditing || (app.drag && !app.drag.visible)) return null;
+    if (!groups) indexGroups();
+    const drag = app.drag, side = app.renderer.viewSide();
+    const selected = drag ? drag.ref : app.sel && app.sel.ref;
+    const key = JSON.stringify([selected, !!drag, drag && drag.pl && drag.pl.side, side]);
+    if (key === groupKey) return group;
+    groupKey = key;
+    group = null;
+    function consider(candidate) {
+      if (!candidate) return null;
+      const {core, members} = candidate;
+      const pose = drag && drag.ref === core.ref ? drag.pl : core.placed;
+      if (!pose || (!core.through && pose.side !== side)) return null;
+      const visible = members.filter(({item, native}) => item.placed && item.placed.side === side &&
+        !item.locked && !item.pinned && (!native || (item._active && !drag)));
+      if (!visible.length) return null;
+      const dist = ({item}) => Math.hypot(item.placed.x - pose.x, item.placed.y - pose.y);
+      visible.sort((a, b) => Number(b.item.ref === selected) - Number(a.item.ref === selected) || dist(a) - dist(b));
+      return { core, members: visible.slice(0, 8), total: visible.length };
+    }
+    if (selected) {
+      // 拖动普通器件时只显示该器件本身的反馈。点选卫星可单独查看所属核心。
+      group = consider(groups.get(selected) || (!drag && groups.get(parents.get(selected))));
+    } else {
+      group = consider(groups.get(app.p.orbitFocus));
+      if (!group) for (const candidate of groups.values()) {
+        const next = consider(candidate);
+        if (next && (!group || next.total > group.total)) group = next;
+      }
+    }
+    return group;
+  }
+
+  function drawOrbitLabel(item, pkg, body, origin, ax, ay, bx, by) {
+    let horizontal = body.w >= body.h;
+    let length = horizontal ? body.w : body.h;
+    if (pkg && pkg.terminals.length === 2) {
+      const [a, b] = pkg.terminals;
+      horizontal = Math.abs(a.x - b.x) >= Math.abs(a.y - b.y);
+      length = horizontal ? Math.abs(a.x - b.x) - (a.w + b.w) / 2 : Math.abs(a.y - b.y) - (a.h + b.h) / 2;
+    }
+    const across = horizontal ? body.h : body.w;
+    const ux = horizontal ? ax : bx, uy = horizontal ? ay : by;
+    const vx = horizontal ? bx : ax, vy = horizontal ? by : ay;
+    const unit = Math.hypot(ux, uy);
+    if (unit < 0.01) return;
+    // 只使用投影后本体中段可容纳的矩形，给金属端头留白。
+    const width = length * unit - across * Math.abs(ux * vx + uy * vy) / unit;
+    const height = across * Math.abs(ux * vy - uy * vx) / unit;
+    if (width < 14 || height < 9) return;
+    let angle = Math.atan2(uy, ux);
+    if (angle > Math.PI / 2) angle -= Math.PI;
+    if (angle <= -Math.PI / 2) angle += Math.PI;
+    ctx.save();
+    ctx.translate(origin.x + ax * body.x + bx * body.y, origin.y + ay * body.x + by * body.y);
+    ctx.rotate(angle);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '600 ' + Math.min(13, Math.max(8, height * 0.58)) + 'px ui-monospace, monospace';
+    const light = pkg?.kind === 'capacitor' || ['module', 'coin', 'usb_c', 'fpc', 'mic'].includes(item.shape);
+    ctx.fillStyle = light ? '#282b2f' : '#f5f7f8';
+    LP.render2d.drawFaceText(ctx, item, { x: -width / 2, w: width }, 0);
+    ctx.restore();
+  }
+
+  function drawGroup(group, now) {
+    const {core, members, total} = group, renderer = app.renderer;
+    const drag = app.drag, pl = drag ? { ...drag.pl, ...(drag.raw || {}) } : core.placed;
+    const height = (core.z || 1) + (drag ? 3.0 : 0.8);
+    const project = (x, y, z) => renderer.boardToScreen(x, y, z);
+    const center = project(pl.x, pl.y, height);
+    // 两个绘制器都采用平行投影。每帧只需四个投影点，即可让导轨和封装随翻面、缩放、相机旋转。
+    const px = project(pl.x + 1, pl.y, height), py = project(pl.x, pl.y + 1, height);
+    const pz = project(pl.x, pl.y, height + 1);
+    const ex = {x:px.x-center.x, y:px.y-center.y}, ey = {x:py.x-center.x, y:py.y-center.y};
+    const ez = {x:pz.x-center.x, y:pz.y-center.y};
+    const scale = Math.max(0.01, Math.hypot(ex.x, ex.y), Math.hypot(ey.x, ey.y));
+    const pos = LP.render2d.orbitPositions(core, pl, members.map(m => m.item), now);
+    const modelAt = (x, y, z = 0) => ({
+      x: center.x + ex.x * (x-pl.x) + ey.x * (y-pl.y) + ez.x * z,
+      y: center.y + ex.y * (x-pl.x) + ey.y * (y-pl.y) + ez.y * z
+    });
+    ctx.save();
+    ctx.beginPath();
+    let top = Infinity;
+    for (const ring of pos.rings.filter(Boolean)) {
+      for (let i = 0; i <= 64; i++) {
+        const a = Math.PI * 2 * i / 64;
+        const q = modelAt(pl.x + ring.rx * Math.cos(a), pl.y + ring.ry * Math.sin(a));
+        top = Math.min(top, q.y);
+        if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y);
+      }
+    }
+    ctx.strokeStyle = 'rgba(8,45,49,.75)'; ctx.lineWidth = 3; ctx.stroke();
+    ctx.setLineDash([4, 5]); ctx.strokeStyle = '#71e8d2'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]);
+    const painted = [];
+    for (let i = 0; i < pos.items.length; i++) {
+      const q = pos.items[i], item = q.sat;
+      const pkg = M.passiveGeometry(item), body = pkg ? pkg.body : {x:0, y:0, w:item.w, h:item.h};
+      const z = Math.min(pkg ? pkg.height : (item.z || 0.45), 2), origin = modelAt(q.x, q.y, z);
+      const cos = Math.cos(q.ang + Math.PI/2), sin = Math.sin(q.ang + Math.PI/2);
+      const k = Math.min(1.8, Math.max(1, 13 / (scale * Math.max(body.w, body.h))));
+      ctx.save();
+      const ax = (ex.x*cos+ey.x*sin)*k, ay = (ex.y*cos+ey.y*sin)*k;
+      const bx = (ey.x*cos-ex.x*sin)*k, by = (ey.y*cos-ex.y*sin)*k;
+      if (renderer.kind === '3d') {
+        const corners = [[-1,-1], [1,-1], [1,1], [-1,1]].map(([sx,sy]) => {
+          const x = body.x + sx*body.w/2, y = body.y + sy*body.h/2;
+          return { x:origin.x + ax*x + bx*y, y:origin.y + ay*x + by*y };
+        });
+        ctx.fillStyle = '#596165';
+        for (let j = 0; j < corners.length; j++) {
+          const a = corners[j], b = corners[(j+1)%4];
+          ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y);
+          ctx.lineTo(b.x-ez.x*z,b.y-ez.y*z); ctx.lineTo(a.x-ez.x*z,a.y-ez.y*z); ctx.closePath(); ctx.fill();
+        }
+      }
+      ctx.transform(ax, ay, bx, by, origin.x, origin.y);
+      LP.render2d.roundRectPath(ctx, body.x-body.w/2, body.y-body.h/2, body.w, body.h, Math.min(body.w,body.h)*0.1);
+      ctx.lineWidth = 4/(scale*k); ctx.strokeStyle = '#16545a'; ctx.stroke();
+      ctx.lineWidth = 2/(scale*k); ctx.strokeStyle = '#9affdf'; ctx.stroke();
+      LP.render2d.drawItem(ctx, item, members[i].native, {floating:true});
+      ctx.restore();
+      drawOrbitLabel(item, pkg, body, origin, ax, ay, bx, by);
+      painted.push({ref:item.ref, x:origin.x, y:origin.y, angle:q.ang, home:modelAt(item.placed.x, item.placed.y, -height)});
+    }
+    const label = M.faceName(core) + ' · 关联预览 ' + members.length + (members.length < total ? '/' + total : '');
+    ctx.font = '600 11px system-ui, sans-serif';
+    const width = ctx.measureText(label).width + 14;
+    const cx = Math.max(width/2+2, Math.min(canvas.clientWidth-width/2-2, center.x));
+    const cy = Math.max(13, top-13);
+    LP.render2d.roundRectPath(ctx,cx-width/2,cy-9,width,18,5);
+    ctx.fillStyle = 'rgba(13,53,56,.94)'; ctx.fill();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#c7ffed'; ctx.fillText(label,cx,cy);
+    ctx.restore();
+    orbitFrame = { core:core.ref, center, members:painted, total };
+    canvas.dataset.orbitCore = core.ref;
+  }
 
   function trace() {
     const p = app.p, renderer = app.renderer, selected = app.sel && app.sel.ref;
@@ -4980,8 +5285,27 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     }
     ctx.setTransform(scale, 0, 0, scale, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    if (!world || face !== app.flipped) { world = trace(); face = app.flipped; screen = null; }
-    if (!screen) screen = project();
+    const activeGroup = visibleGroup();
+    if (activeGroup) {
+      drawGroup(activeGroup, now);
+      canvas.dataset.trace = '';
+    } else {
+      orbitFrame = null;
+      delete canvas.dataset.orbitCore;
+      if (!world || face !== app.flipped) { world = trace(); face = app.flipped; screen = null; }
+      if (!screen) screen = project();
+      drawTrace(now);
+    }
+    pulses = pulses.filter(p => now - p.start < 650);
+    for (const p of pulses) {
+      const pos = app.renderer.boardToScreen(p.x, p.y, 0.7), t = (now - p.start) / 650;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, 5 + 26 * t, 0, 2 * Math.PI);
+      ctx.strokeStyle = 'rgba(255,211,63,' + (1 - t) + ')'; ctx.lineWidth = 3; ctx.stroke();
+    }
+    frame = requestAnimationFrame(draw);
+  }
+
+  function drawTrace(now) {
     const { projected, segments, length } = screen;
     canvas.dataset.trace = world.name;
     ctx.lineCap = 'round';
@@ -4998,18 +5322,12 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
       ctx.fillStyle = '#fff6af'; ctx.fill(); ctx.strokeStyle = '#11696a'; ctx.lineWidth = 1.8; ctx.stroke();
     }
-    pulses = pulses.filter(p => now - p.start < 650);
-    for (const p of pulses) {
-      const pos = app.renderer.boardToScreen(p.x, p.y, 0.7), t = (now - p.start) / 650;
-      ctx.beginPath(); ctx.arc(pos.x, pos.y, 5 + 26 * t, 0, 2 * Math.PI);
-      ctx.strokeStyle = 'rgba(255,211,63,' + (1 - t) + ')'; ctx.lineWidth = 3; ctx.stroke();
-    }
-    frame = requestAnimationFrame(draw);
   }
 
   function reset() {
     if (frame) cancelAnimationFrame(frame);
-    world = screen = null; frame = 0; pulses = [];
+    groups = group = groupKey = orbitFrame = world = screen = null; frame = 0; pulses = [];
+    delete canvas.dataset.orbitCore; delete canvas.dataset.trace;
     canvas.hidden = true;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -5017,11 +5335,12 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
   }
 
   LP.motion = {
+    get orbitFrame() { return orbitFrame; },
     init(application, layer) {
       app = application; canvas = layer; ctx = canvas.getContext('2d');
       for (const name of ['anim', 'load', 'select', 'view']) app.on(name, reset);
-      app.on('change', () => { world = screen = null; });
-      app.on('boardlive', () => { world = screen = null; });
+      app.on('change', () => { groups = groupKey = world = screen = null; });
+      app.on('boardlive', () => { groups = groupKey = world = screen = null; });
       app.on('drawn', () => { screen = null; });
       document.addEventListener('visibilitychange', reset);
     },
@@ -5103,8 +5422,17 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       window.addEventListener('resize', () => this.onResize());
       const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
       App.systemReduced = mq.matches;
-      mq.addEventListener && mq.addEventListener('change', (e) => { App.systemReduced = e.matches; this.renderToolbar(); });
-      try { App.animOn = localStorage.getItem('lp:anim') === '1'; } catch (e) { App.animOn = false; }
+      mq.addEventListener && mq.addEventListener('change', (e) => {
+        App.systemReduced = e.matches;
+        if (App.animPreference === null && App.p) {
+          App.animOn = !!App.p.orbitFocus && !App.systemReduced;
+          App.emit('anim'); App.redraw();
+        }
+      });
+      try {
+        const stored = localStorage.getItem('lp:anim');
+        if (stored === '0' || stored === '1') App.animPreference = stored === '1';
+      } catch (e) { /* 使用项目和系统的初始偏好 */ }
       App.on('anim', () => this.renderToolbar());
       this.onResize(true);
     },

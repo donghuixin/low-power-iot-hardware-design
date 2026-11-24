@@ -261,8 +261,38 @@
     }
     meshOf(geo, mat, x, y, z) { const m = new this.T.Mesh(geo, mat); m.position.set(x || 0, y || 0, z || 0); m.castShadow = true; m.receiveShadow = true; return m; }
 
+    passiveModel(pkg, floating) {
+      const group = new this.T.Group();
+      const b = pkg.body, height = pkg.height * HZ;
+      const pads = floating ? [] : pkg.pads;
+      const landHeight = pads.length ? 0.025 : 0;
+      const landMat = this.std(0xaba28c, {metalness: 0.4, roughness: 0.55});
+      for (const pad of pads) {
+        const mesh = this.meshOf(this.box(pad.w, pad.h, landHeight), landMat, pad.x, 0, -pad.y);
+        mesh.name = 'pad:' + pad.n;
+        mesh.rotation.y = (pad.angle || 0) * Math.PI / 180;
+        group.add(mesh);
+      }
+      const end = pkg.terminals[0];
+      const alongX = end && end.x !== pkg.terminals[1].x;
+      const centerW = end && alongX ? b.w - end.w * 2 : b.w;
+      const centerH = end && !alongX ? b.h - end.h * 2 : b.h;
+      const body = this.meshOf(this.box(centerW, centerH, height), this.std(LP.render2d.CHIP_COLORS[pkg.kind]), b.x, landHeight, -b.y);
+      body.name = 'body';
+      group.add(body);
+      const silver = this.std(0xd6dae0, {metalness: 0.45, roughness: 0.36});
+      for (const t of pkg.terminals) {
+        const mesh = this.meshOf(this.box(t.w, t.h, height), silver, t.x, landHeight, -t.y);
+        mesh.name = 'terminal:' + t.n;
+        group.add(mesh);
+      }
+      return group;
+    }
+
     /** 主器件模型（局部坐标：中心为原点、底面在 y=0、板面 x 向右、板面 y 向 −z）。 */
     partModel(part) {
+      const pkg = M.passiveGeometry(part);
+      if (pkg) return this.passiveModel(pkg);
       const T = this.T, g = new T.Group();
       const w = part.w, d = part.h, H = Math.max(0.5, part.z * HZ);
       const gold = this.std(0xd8b66a, { metalness: 0.3, roughness: 0.45 });
@@ -277,7 +307,8 @@
         }
       };
       const pin1 = () => { const m = this.meshOf(this.cyl(Math.min(0.28, Math.min(w, d) * 0.08), 0.04, 16), this.std(0xdedede)); m.position.set(-w / 2 + 0.6, H, -d / 2 + 0.6); g.add(m); };
-      switch (part.shape) {
+      const index = M.bgaMark(part);
+      switch (index ? 'bga' : part.shape) {
         case 'coin': { const r = Math.min(w, d) / 2; g.add(this.meshOf(this.cyl(r, H, 48), silver)); const tab = this.meshOf(this.box(r * 0.5, r * 0.35, H * 0.6), silver); tab.position.z = -r; g.add(tab); break; }
         case 'module': g.add(this.meshOf(this.rbox(w, d, H, 0.3), silver)); break;
         case 'chip_antenna': {
@@ -315,7 +346,13 @@
           pin1(); break;
         }
         case 'dfn': case 'uson': g.add(this.meshOf(this.rbox(w, d, H, Math.min(w, d) * 0.12), dark)); pads(['E', 'W']); pin1(); break;
-        case 'lga': case 'bga': g.add(this.meshOf(this.rbox(w, d, H, Math.min(w, d) * 0.12), this.std(0x30333a))); pads(['N', 'E', 'S', 'W']); pin1(); break;
+        case 'bga': {
+          g.add(this.meshOf(this.rbox(w, d, H, Math.min(w, d) * 0.08), this.std(0x2b2e33)));
+          const dot = this.meshOf(this.cyl(index.r, 0.025, 16), this.std(0xdddddd), index.x, H, -index.y);
+          dot.name = 'A1'; g.add(dot);
+          break;
+        }
+        case 'lga': g.add(this.meshOf(this.rbox(w, d, H, Math.min(w, d) * 0.12), this.std(0x30333a))); pads(['N', 'E', 'S', 'W']); pin1(); break;
         case 'qfn': default: g.add(this.meshOf(this.rbox(w, d, H, Math.min(w, d) * 0.12), dark)); pads(['N', 'E', 'S', 'W']); pin1(); break;
       }
       if (part.role === 'imu') {
@@ -326,6 +363,8 @@
       return g;
     }
     satModel(s) {
+      const pkg = M.passiveGeometry(s);
+      if (pkg) return this.passiveModel(pkg);
       const T = this.T, g = new T.Group();
       const w = s.w, d = s.h, H = Math.max(0.35, Math.min(w, d) * 0.7) * HZ;
       const shape = M.SAT_KINDS[s.kind].shape;
@@ -584,7 +623,7 @@
       const T = this.T, app = this.app, p = app.p, d = app.drag;
       for (let i = this.dyn.children.length - 1; i >= 0; i--) this.dyn.remove(this.dyn.children[i]);
       for (const [ref, g] of this.partGroups) g.visible = !(d && d.ref === ref && d.visible);
-      for (const [ref, g] of this.satMeshes) { const s = M.satByRef(p, ref); g.visible = !(d && d.kind === 'part' && d.visible && s.parent[0] === d.ref && !s.pinned); }
+      for (const [ref, g] of this.satMeshes) { const s = M.satByRef(p, ref); g.visible = !(app.animOn && d && d.kind === 'part' && d.visible && s.parent[0] === d.ref && !s.pinned); }
       if (!d || !d.visible || !d.pl) { this.orbitPos = this.orbitPos || null; return; }
       const item = M.itemByRef(p, d.ref);
       const isSat = d.kind === 'sat';
@@ -607,7 +646,7 @@
       this.dyn.add(model);
       // 卫星环绕
       this.orbitPos = {};
-      if (!isSat) {
+      if (!isSat && app.animOn && app.layers.sats) {
         const sats = LP.render2d.orbitSats(p, item.ref);
         if (sats.length) {
           const pos = LP.render2d.orbitPositions(item, raw, sats, app.reducedMotion ? 0 : now);
@@ -638,7 +677,8 @@
         const ref = part.ref;
         const hidden = !part || !part.placed || (part.kind && (!app.layers.sats || !part._active)) || (app.drag && app.drag.ref === ref && app.drag.visible) || !this.onSide(part.through ? 'both' : part.placed.side);
         if (hidden) { el.style.display = 'none'; continue; }
-        const r = this.screenRect(part.kind ? M.satFootprint(part) : M.footprint(part), (part.z || 0.6) * HZ);
+        const pkg = M.passiveGeometry(part);
+        const r = this.screenRect(M.faceRect(part), (pkg?.height || part.z || 0.6) * HZ + (pkg?.pads.length ? 0.025 : 0));
         if (Math.min(r.w, r.h) < 16) { el.style.display = 'none'; continue; }
         el.style.display = '';
         el.style.maxWidth = Math.max(0, r.w - 3) + 'px';

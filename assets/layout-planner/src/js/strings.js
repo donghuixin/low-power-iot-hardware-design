@@ -145,8 +145,8 @@
       theme: '主题', theme_light: '浅色', theme_dark: '深色',
       help: '帮助', star: 'Star', star_title: '在 GitHub 上 Star 或 Fork 这个 skill，获取后续更新',
       anim_off: '动效', anim_on: '动效开',
-      anim_title_off: '开启网络关联或板框的动态提示，也可显示放置反馈',
-      anim_title_on: '关闭动画效果（卫星仍静止排在器件周围）',
+      anim_title_off: '查看当前核心的关联器件环绕预览。点选其他核心可切换。',
+      anim_title_on: '停止环绕预览，查看实际摆位。',
       storage_off: '未自动保存，请手动导出', restored: '已恢复上次的摆放',
       panel_steps: '步骤', panel_eval: '评估',
 

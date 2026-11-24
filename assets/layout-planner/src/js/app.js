@@ -17,9 +17,9 @@
     layers: { keepout: true, edge: false, heat: false, magnetic: false, congestion: false, sats: true, halo: true, grid: true },
     editSats: false,
     theme: 'light',
-    animOn: false,          // 动效开关，默认关闭
+    animOn: false,
+    animPreference: null,   // null 表示尚未手动选择，推荐布局可首开预览
     systemReduced: false,   // 系统"减少动态效果"
-    /** 初次打开静止，用户可显式开启并随时停止。 */
     get reducedMotion() { return !this.animOn; },
     undoStack: [], redoStack: [],
     drag: null, suggestion: null, delta: null, focusIssue: null,
@@ -39,6 +39,7 @@
       const errors = M.validate(raw);
       if (errors.length) return { ok: false, errors };
       this.p = M.normalize(raw);
+      this.animOn = this.animPreference ?? (!!this.p.orbitFocus && !this.systemReduced);
       this.boardConfirmed = !!(raw.result || this.p.parts.some((x) => x.placed));
       this.undoStack = []; this.redoStack = [];
       this.sel = null; this.suggestion = null; this.delta = null; this.focusIssue = null;
@@ -307,12 +308,13 @@
     exportCSV() { this.download(`${this.slug()}-placement.csv`, '﻿' + M.exportCSV(this.p), 'text/csv'); },
 
     setAnim(on) {
-      this.animOn = !!on;
+      this.animOn = this.animPreference = !!on;
       try { localStorage.setItem('lp:anim', on ? '1' : '0'); } catch (e) { /* 存储不可用 */ }
       if (!on && LP.ui) {
         for (const renderer of [LP.ui.r2, LP.ui.r3]) {
           if (!renderer) continue;
           renderer.anims = [];
+          renderer.orbitPos = null;
           if (renderer === this.renderer && renderer === LP.ui.r3) renderer.rebuild();
         }
       }
