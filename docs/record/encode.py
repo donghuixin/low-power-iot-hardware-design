@@ -9,7 +9,7 @@ from vt import FRAMES, FPS, encode  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 NAMES = sys.argv[1:] or sorted(os.listdir(FRAMES))
-HEAVY = {"verifier-current", "verifier-thermal", "verifier-plane-modes", "verifier-routed"}   # 粒子多，GIF 用更小的尺寸和调色板
+HEAVY = {"verifier-current", "verifier-thermal", "verifier-plane-modes", "verifier-routed", "verifier3d-current", "verifier3d-emi", "verifier3d-modes", "verifier3d-thermal"}   # 粒子多，GIF 用更小的尺寸和调色板
 for n in NAMES:
     mp4, gif = encode(n, "/tmp/rec-out")
     if n in HEAVY:

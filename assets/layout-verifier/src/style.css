@@ -88,3 +88,21 @@ body.drop #drop-hint { display: flex; }
   #top { height: auto; flex-wrap: wrap; padding: 8px 12px; }
   .actions { flex-wrap: wrap; }
 }
+
+/* 3D 展示 */
+.view-seg { flex: 0 0 auto; }
+.view-seg button { padding: 5px 14px; font-weight: 600; }
+.view-seg button[aria-selected="true"] { background: #3a2f12; color: #ffe3a1; }
+#three-host { position: absolute; inset: 0 0 34px 0; }
+#three-host canvas { position: absolute; inset: 0; display: block; cursor: grab; }
+#three-host canvas:active { cursor: grabbing; }
+.l3d-host { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.l3d { position: absolute; left: 0; top: 0; white-space: nowrap; font-size: 12px; color: #e8ecf4; text-shadow: 0 1px 3px #000, 0 0 6px #000; will-change: transform; }
+.l3d.ref { color: #aab3c5; font-size: 11px; }
+.l3d.layer { color: #9fd3ff; font-size: 13px; font-weight: 600; }
+.l3d.layer.warm { color: #ffc58a; }
+.l3d.mark.green { color: #7ee787; } .l3d.mark.yellow { color: #ffd166; } .l3d.mark.pink { color: #ffb3ea; }
+.l3d.mark.high { color: #ff7a7a; } .l3d.mark.mid { color: #ffd27a; } .l3d.mark.low { color: #9ee3b0; }
+.l3d.big { font-size: 26px; font-weight: 300; color: #fff; }
+.l3d.small { font-size: 12px; color: #d7dbe6; }
+.l3d.side { font-size: 14px; font-weight: 700; color: #fff; background: rgba(10,12,16,.55); padding: 2px 8px; border-radius: 6px; }

@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>原理图绘制流程（演示动画）</title>
+<!-- 宣传用动画：按 references/09-schematic-readability.md 第 1 节的十步流程，画出 BLE IMU 节点的"主控最小系统"一页。
+     动画由 requestAnimationFrame 驱动，录屏脚本（record_schematic.py）用虚拟时钟逐帧截图。 -->
+<style>
+  html, body { margin: 0; height: 100%; background: #0c0e13; overflow: hidden; font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  svg { width: 100vw; height: 100vh; display: block; }
+  .paper { fill: #fbf8f1; }
+  .frame { fill: none; stroke: #8a7f6a; stroke-width: 1.5; }
+  .wire { fill: none; stroke: #0b7a55; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+  .sym { fill: none; stroke: #9b2226; stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
+  .body { fill: #fff3d6; stroke: #9b2226; stroke-width: 2.4; }
+  .pin { stroke: #9b2226; stroke-width: 2; }
+  .pinname { font-size: 13px; fill: #5a2a1a; }
+  .ref { font-size: 15px; font-weight: 700; fill: #1f2a44; }
+  .val { font-size: 13px; fill: #44506b; }
+  .net { font-size: 14px; font-weight: 700; fill: #b2551b; }
+  .netflag { fill: #fff0e3; stroke: #b2551b; stroke-width: 1.6; }
+  .pwr { font-size: 13px; font-weight: 700; fill: #9b2226; }
+  .note { fill: none; stroke: #6a5acd; stroke-width: 1.6; stroke-dasharray: 7 5; }
+  .notetext { font-size: 14px; fill: #5b4bc4; font-weight: 700; }
+  .dot { fill: #0b7a55; }
+  .ui { fill: #e8ecf4; }
+  .muted { fill: #8b93a7; }
+  .blk { fill: #eef3ff; stroke: #3d5a99; stroke-width: 2; }
+  .blktext { font-size: 18px; font-weight: 700; fill: #22345e; text-anchor: middle; }
+  .arrow { fill: none; stroke: #3d5a99; stroke-width: 2.2; marker-end: url(#ah); }
+</style>
+</head>
+<body>
+<svg id="s" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#3d5a99"/></marker>
+    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#e4dccb"/></pattern>
+    <linearGradient id="scan" x1="0" x2="1"><stop offset="0" stop-color="#2ecc71" stop-opacity="0"/><stop offset="1" stop-color="#2ecc71" stop-opacity=".35"/></linearGradient>
+  </defs>
+  <g id="left"></g>
+  <g id="sheet"></g>
+  <g id="hud"></g>
+</svg>
+<script>
+'use strict';
+const NS = 'http://www.w3.org/2000/svg';
+const $ = (id) => document.getElementById(id);
+function el(tag, attrs = {}, parent, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (text != null) e.textContent = text;
+  if (parent) parent.append(e);
+  return e;
+}
+const clamp = (v) => Math.max(0, Math.min(1, v));
+const ease = (p) => p * p * (3 - 2 * p);
+const easeOut = (p) => 1 - Math.pow(1 - p, 3);
+const TL = [];
+const at = (t0, t1, fn) => TL.push([t0, t1, fn]);
+const op = (e, a) => e.setAttribute('opacity', a.toFixed(3));
+
+// ---------------- 左侧：十步流程 ----------------
+const STEPS = [
+  ['先画框图，后定分页', 0, 2.6],
+  ['确认符号：引脚按功能排列', 2.6, 4.0],
+  ['列出卫星器件（查手册典型电路）', 4.0, 5.6],
+  ['按信号流向摆放，卫星贴所服务的引脚', 5.6, 8.0],
+  ['连线：同页近处直连', 8.0, 10.6],
+  ['命名网络：跨页用标号与端口', 10.6, 12.0],
+  ['整理文字，互不重叠', 12.0, 13.6],
+  ['写上设计意图注释', 13.6, 15.2],
+  ['位号标注，ERC 清零', 15.2, 16.8],
+  ['导出 PDF 从头通读', 16.8, 18.6],
+];
+const END = 20.6;
+const L = $('left');
+el('text', { x: 40, y: 78, class: 'ui', 'font-size': 26, 'font-weight': 700 }, L, '原理图绘制流程');
+el('text', { x: 40, y: 106, class: 'muted', 'font-size': 14 }, L, 'references/09 · 第 1 节');
+const stepEls = STEPS.map(([name, t0, t1], i) => {
+  const y = 160 + i * 64;
+  const g = el('g', {}, L);
+  const bg = el('rect', { x: 28, y: y - 30, width: 300, height: 54, rx: 10, fill: '#1b2030', opacity: 0 }, g);
+  const c = el('circle', { cx: 56, cy: y - 3, r: 14, fill: '#232838', stroke: '#3a4152', 'stroke-width': 1.5 }, g);
+  const n = el('text', { x: 56, y: y + 2, 'text-anchor': 'middle', 'font-size': 14, 'font-weight': 700, fill: '#8b93a7' }, g, String(i + 1));
+  const t = el('text', { x: 82, y: y + 2, 'font-size': 15, fill: '#8b93a7' }, g, name);
+  const bar = el('rect', { x: 82, y: y + 12, width: 0, height: 3, rx: 1.5, fill: '#ffd166' }, g);
+  at(t0, t1, (p, raw, now) => {
+    const active = now >= t0 && now < t1, done = now >= t1;
+    bg.setAttribute('opacity', active ? 1 : 0);
+    c.setAttribute('fill', done ? '#1f6b3a' : active ? '#6b5320' : '#232838');
+    c.setAttribute('stroke', done ? '#2ecc71' : active ? '#ffd166' : '#3a4152');
+    n.setAttribute('fill', done || active ? '#fff' : '#8b93a7');
+    n.textContent = done ? '✓' : String(i + 1);
+    t.setAttribute('fill', active ? '#ffe3a1' : done ? '#cfd6e4' : '#8b93a7');
+    bar.setAttribute('width', active ? 230 * raw : 0);
+  });
+  return g;
+});
+
+// ---------------- 图纸 ----------------
+const SH = $('sheet');
+const SX = 380, SY = 40, SW = 1190, SHH = 820;
+el('rect', { x: SX, y: SY, width: SW, height: SHH, rx: 6, class: 'paper' }, SH);
+el('rect', { x: SX, y: SY, width: SW, height: SHH, rx: 6, fill: 'url(#grid)' }, SH);
+el('rect', { x: SX + 16, y: SY + 16, width: SW - 32, height: SHH - 32, class: 'frame' }, SH);
+// 标题栏
+const TB = el('g', {}, SH);
+const tbx = SX + SW - 16 - 380, tby = SY + SHH - 16 - 86;
+el('rect', { x: tbx, y: tby, width: 380, height: 86, fill: '#fff', class: 'frame' }, TB);
+el('line', { x1: tbx, y1: tby + 30, x2: tbx + 380, y2: tby + 30, class: 'frame' }, TB);
+el('line', { x1: tbx + 250, y1: tby + 30, x2: tbx + 250, y2: tby + 86, class: 'frame' }, TB);
+el('text', { x: tbx + 12, y: tby + 21, 'font-size': 14, fill: '#44506b' }, TB, 'BLE IMU 温湿度节点 · 版本 A1 · 2026-11-24');
+const tbTitle = el('text', { x: tbx + 12, y: tby + 64, 'font-size': 20, 'font-weight': 700, fill: '#1f2a44' }, TB, '封面与系统框图');
+const tbPage = el('text', { x: tbx + 315, y: tby + 64, 'text-anchor': 'middle', 'font-size': 16, fill: '#1f2a44' }, TB, '第 1 页 / 共 9 页');
+
+// ---------- 第 1 步：框图与分页 ----------
+const COVER = el('g', {}, SH);
+const blocks = [
+  ['电池与充电', 480, 170], ['稳压 3.0 V', 700, 170], ['主控 BLE SoC', 940, 300], ['射频与天线', 1200, 300],
+  ['IMU', 700, 430], ['温湿度', 700, 540], ['Flash', 940, 540], ['接口 / 调试', 1200, 540],
+];
+const bEls = blocks.map(([name, x, y], i) => {
+  const g = el('g', { opacity: 0 }, COVER);
+  el('rect', { x: x - 85, y: y - 32, width: 170, height: 64, rx: 10, class: 'blk', fill: i === 2 ? '#fff3d6' : '#eef3ff' }, g);
+  el('text', { x, y: y + 6, class: 'blktext' }, g, name);
+  at(0.15 + i * 0.12, 0.55 + i * 0.12, (p) => { op(g, p); g.setAttribute('transform', `translate(0 ${(1 - p) * 14})`); });
+  return { g, x, y };
+});
+const arrows = ['M565 170 L612 170', 'M785 170 L940 170 L940 266', 'M1025 300 L1112 300', 'M855 320 L700 320 L700 396', 'M870 332 L870 540 L787 540', 'M940 334 L940 506', 'M1000 332 L1000 470 L1200 470 L1200 506'];
+arrows.forEach((d, i) => {
+  const p = el('path', { d, class: 'arrow', pathLength: 1, 'stroke-dasharray': 1, 'stroke-dashoffset': 1 }, COVER);
+  at(1.05 + i * 0.08, 1.5 + i * 0.08, (q) => p.setAttribute('stroke-dashoffset', 1 - q));
+});
+const pages = ['1 封面与框图', '2 电源输入与充电', '3 稳压与电源域', '4 主控最小系统', '5 射频与天线', '6 传感器', '7 存储', '8 接口与调试', '9 测试点'];
+const PL = el('g', { opacity: 0 }, COVER);
+el('rect', { x: 430, y: 640, width: 470, height: 168, rx: 8, fill: '#fff', stroke: '#c9bfa8' }, PL);
+el('text', { x: 446, y: 664, 'font-size': 14, 'font-weight': 700, fill: '#44506b' }, PL, '页面目录（一页一个功能）');
+const pageHi = el('rect', { x: 0, y: 0, width: 0, height: 22, rx: 4, fill: '#ffd166', opacity: 0 }, PL);
+pages.forEach((t, i) => el('text', { x: 446 + (i % 3) * 152, y: 694 + Math.floor(i / 3) * 34, 'font-size': 14, fill: '#1f2a44' }, PL, t));
+at(1.6, 2.0, (p) => op(PL, p));
+at(2.0, 2.3, (p) => { pageHi.setAttribute('x', 440); pageHi.setAttribute('y', 714); pageHi.setAttribute('width', 140); op(pageHi, p * 0.8); });
+at(2.35, 2.75, (p, raw, now) => { op(COVER, 1 - p); });
+
+// 切到第 4 页
+at(2.5, 2.8, (p, raw, now) => {
+  const on = now >= 2.65;
+  tbTitle.textContent = on ? '主控最小系统' : '封面与系统框图';
+  tbPage.textContent = on ? '第 4 页 / 共 9 页' : '第 1 页 / 共 9 页';
+});
+
+// ---------- 原理图元件绘制工具 ----------
+const PAGE = el('g', { transform: 'translate(975 398) scale(1.35) translate(-950 -435)' }, SH);   // 原理图放大到图纸中央
+const NOTES = el('g', {}, PAGE);
+const WIRES = el('g', {}, PAGE);
+const PARTS = el('g', {}, PAGE);
+const LABELS = el('g', {}, PAGE);
+const TEXTS = el('g', {}, PAGE);
+const DOTS = el('g', {}, PAGE);
+
+function gnd(g, x, y) { el('path', { d: `M${x} ${y} L${x} ${y + 8} M${x - 11} ${y + 8} L${x + 11} ${y + 8} M${x - 7} ${y + 13} L${x + 7} ${y + 13} M${x - 3} ${y + 18} L${x + 3} ${y + 18}`, class: 'sym' }, g); }
+function vdd(g, x, y, name = 'VDD') { el('path', { d: `M${x} ${y} L${x} ${y - 10} M${x - 11} ${y - 10} L${x + 11} ${y - 10}`, class: 'sym' }, g); el('text', { x, y: y - 16, 'text-anchor': 'middle', class: 'pwr' }, g, name); }
+function capV(g, x, y) { el('path', { d: `M${x} ${y} L${x} ${y + 14} M${x - 12} ${y + 14} L${x + 12} ${y + 14} M${x - 12} ${y + 21} L${x + 12} ${y + 21} M${x} ${y + 21} L${x} ${y + 35}`, class: 'sym' }, g); }
+function indH(g, x, y) { let d = `M${x} ${y} L${x + 8} ${y}`; for (let k = 0; k < 4; k++) d += ` A6 6 0 0 1 ${x + 20 + k * 12} ${y}`; d += ` L${x + 64} ${y}`; el('path', { d, class: 'sym' }, g); }
+function xtalH(g, x, y) { el('path', { d: `M${x} ${y} L${x + 14} ${y} M${x + 14} ${y - 12} L${x + 14} ${y + 12} M${x + 46} ${y - 12} L${x + 46} ${y + 12} M${x + 46} ${y} L${x + 60} ${y}`, class: 'sym' }, g); el('rect', { x: x + 20, y: y - 14, width: 20, height: 28, class: 'body', 'stroke-width': 2 }, g); }
+function ant(g, x, y) { el('path', { d: `M${x} ${y} L${x} ${y - 34} M${x - 14} ${y - 52} L${x} ${y - 34} L${x + 14} ${y - 52} M${x} ${y - 34} L${x} ${y - 54}`, class: 'sym' }, g); }
+
+// U1 符号：左侧电源与时钟，右侧 IO，下方地
+const U = { x0: 820, y0: 250, x1: 1020, y1: 600 };
+const LP_ = [['VDD', 290], ['VDD', 320], ['DEC1', 360], ['DEC4', 430], ['XC1', 500], ['XC2', 535]];
+const RP = [['ANT', 290], ['P0.04', 370], ['P0.05', 395], ['P0.06', 420], ['P0.08', 465], ['P0.09', 490], ['P0.10', 535]];
+const SYM = el('g', { opacity: 0 }, PARTS);
+const body = el('rect', { x: U.x0, y: U.y0, width: U.x1 - U.x0, height: U.y1 - U.y0, rx: 3, class: 'body' }, SYM);
+el('text', { x: (U.x0 + U.x1) / 2, y: U.y0 + 160, 'text-anchor': 'middle', 'font-size': 17, 'font-weight': 700, fill: '#9b2226' }, SYM, 'nRF52832');
+el('text', { x: (U.x0 + U.x1) / 2, y: U.y0 + 182, 'text-anchor': 'middle', 'font-size': 12, fill: '#9b2226' }, SYM, 'QFN48');
+const pinEls = [];
+LP_.forEach(([n, y]) => { const g = el('g', { opacity: 0 }, SYM); el('line', { x1: U.x0 - 30, y1: y, x2: U.x0, y2: y, class: 'pin' }, g); el('text', { x: U.x0 + 6, y: y + 4, class: 'pinname' }, g, n); pinEls.push(g); });
+RP.forEach(([n, y]) => { const g = el('g', { opacity: 0 }, SYM); el('line', { x1: U.x1, y1: y, x2: U.x1 + 30, y2: y, class: 'pin' }, g); el('text', { x: U.x1 - 6, y: y + 4, 'text-anchor': 'end', class: 'pinname' }, g, n); pinEls.push(g); });
+{ const g = el('g', { opacity: 0 }, SYM); el('line', { x1: 920, y1: U.y1, x2: 920, y2: U.y1 + 30, class: 'pin' }, g); el('text', { x: 920, y: U.y1 - 8, 'text-anchor': 'middle', class: 'pinname' }, g, 'VSS'); pinEls.push(g); }
+// 功能分组的色带
+const grpBands = [[U.x0 + 2, 276, 330, '#ffd9d0'], [U.x0 + 2, 486, 548, '#dbe8ff'], [U.x1 - 60, 356, 432, '#e3f5e5'], [U.x1 - 60, 452, 548, '#e3f5e5']];
+const bandEls = grpBands.map(([x, y0, y1, c]) => el('rect', { x, y: y0, width: 58, height: y1 - y0, fill: c, opacity: 0 }, SYM));
+at(2.7, 3.1, (p) => { op(SYM, p); body.setAttribute('transform', `translate(0 ${(1 - p) * 10})`); });
+pinEls.forEach((g, i) => at(2.9 + i * 0.06, 3.15 + i * 0.06, (p) => op(g, p)));
+bandEls.forEach((b, i) => at(3.4 + i * 0.1, 3.8, (p, raw, now) => op(b, now < 5.6 ? p * 0.9 : Math.max(0, 0.9 - (now - 5.6) * 2))));
+
+// ---------- 卫星器件：先在"手册典型电路"卡片里列出，再飞到引脚旁 ----------
+const CARD = el('g', { opacity: 0 }, SH);
+el('rect', { x: 1110, y: 560, width: 420, height: 196, rx: 10, fill: '#ffffff', stroke: '#c9bfa8', 'stroke-width': 1.5 }, CARD);
+el('text', { x: 1128, y: 590, 'font-size': 15, 'font-weight': 700, fill: '#1f2a44' }, CARD, '手册 · Typical Application');
+const satList = [['C1 C2', '100 nF / 4.7 µF', '→ VDD'], ['C3 C4', '100 nF / 1 µF', '→ DEC1 / DEC4'], ['Y1 C6 C7', '32 MHz, 12 pF ×2', '→ XC1 / XC2'], ['L1 C8 C9', '3.9 nH, 1.0 pF ×2', '→ ANT（π 匹配）']];
+const ticks = satList.map(([r, v, pin], i) => {
+  const y = 620 + i * 32;
+  const g = el('g', { opacity: 0 }, CARD);
+  el('text', { x: 1150, y, 'font-size': 14, 'font-weight': 700, fill: '#1f2a44' }, g, r);
+  el('text', { x: 1240, y, 'font-size': 13, fill: '#44506b' }, g, v);
+  el('text', { x: 1395, y, 'font-size': 13, fill: '#b2551b' }, g, pin);
+  const tk = el('text', { x: 1130, y, 'font-size': 15, fill: '#1f6b3a', opacity: 0 }, g, '✓');
+  at(4.2 + i * 0.25, 4.45 + i * 0.25, (p) => op(g, p));
+  at(4.6 + i * 0.25, 4.75 + i * 0.25, (p) => op(tk, p));
+  return g;
+});
+at(4.0, 4.3, (p, raw, now) => op(CARD, now < 7.6 ? p : Math.max(0, 1 - (now - 7.6) * 3)));
+
+// 每个卫星器件：画在自己的 group 里，从卡片位置飞到最终位置
+const sats = [];
+function sat(ref, val, fx, fy, draw, refPos, valPos, idx, messy) {
+  const g = el('g', { opacity: 0 }, PARTS);
+  draw(g);
+  const from = [1250 - fx, 640 + idx * 8 - fy];
+  sats.push({ g, from, ref, val, refPos, valPos, messy, idx });
+  const t0 = 5.7 + idx * 0.17;
+  at(t0, t0 + 0.6, (p) => { op(g, Math.min(1, p * 2)); const k = 1 - easeOut(p); g.setAttribute('transform', `translate(${from[0] * k} ${from[1] * k})`); });
+  return g;
+}
+// 去耦：VDD 两颗
+sat('C1', '100nF', 690, 250, (g) => { capV(g, 690, 250); gnd(g, 690, 285); }, [700, 271], [700, 288], 0, [10, -6]);
+sat('C2', '4.7µF', 640, 250, (g) => { capV(g, 640, 250); gnd(g, 640, 285); }, [650, 271], [650, 288], 1, [-18, 4]);
+// DEC1 / DEC4
+sat('C3', '100nF', 770, 360, (g) => { capV(g, 770, 360); gnd(g, 770, 395); }, [722, 381], [722, 397], 2, [40, -2]);
+sat('C4', '1µF', 740, 430, (g) => { capV(g, 740, 430); gnd(g, 740, 465); }, [694, 451], [694, 467], 3, [36, 10]);
+// 晶体
+sat('Y1', '32MHz', 670, 575, (g) => xtalH(g, 670, 575), [688, 553], [684, 610], 4, [20, 12]);
+sat('C6', '12pF', 670, 575, (g) => { capV(g, 670, 575); gnd(g, 670, 610); }, [622, 596], [622, 612], 5, [44, -10]);
+sat('C7', '12pF', 730, 575, (g) => { capV(g, 730, 575); gnd(g, 730, 610); }, [742, 615], [742, 631], 6, [-20, -26]);
+// 射频 π 匹配与天线
+sat('C8', '1.0pF', 1080, 290, (g) => { capV(g, 1080, 290); gnd(g, 1080, 325); }, [1092, 311], [1092, 327], 7, [-30, -14]);
+sat('L1', '3.9nH', 1110, 290, (g) => indH(g, 1110, 290), [1124, 274], [1122, 312], 8, [-10, 18]);
+sat('C9', '1.0pF', 1190, 290, (g) => { capV(g, 1190, 290); gnd(g, 1190, 325); }, [1202, 311], [1202, 327], 9, [-26, -18]);
+sat('ANT1', '2.4GHz', 1250, 290, (g) => ant(g, 1250, 290), [1266, 250], [1266, 266], 10, [-40, 6]);
+// U1 的地与电源符号
+const PW = el('g', { opacity: 0 }, PARTS);
+vdd(PW, 720, 228); gnd(PW, 920, 630);
+at(7.4, 7.8, (p) => op(PW, p));
+
+// ---------- 连线 ----------
+const wires = [
+  // VDD 轨
+  'M720 228 L720 290 L790 290', 'M720 290 L720 320 L790 320', 'M720 250 L640 250',
+  // DEC
+  'M790 360 L770 360', 'M790 430 L740 430',
+  // 晶体
+  'M790 500 L670 500 L670 575', 'M790 535 L760 535 L760 575 L730 575',
+  // 射频
+  'M1050 290 L1110 290', 'M1174 290 L1250 290',
+  // IO 短线（标号在第 6 步）
+  'M1050 370 L1110 370', 'M1050 395 L1110 395', 'M1050 420 L1110 420', 'M1050 465 L1110 465', 'M1050 490 L1110 490', 'M1050 535 L1110 535',
+];
+wires.forEach((d, i) => {
+  const p = el('path', { d, class: 'wire', pathLength: 1, 'stroke-dasharray': 1, 'stroke-dashoffset': 1 }, WIRES);
+  const t0 = 8.1 + i * 0.15;
+  at(t0, t0 + 0.4, (q) => p.setAttribute('stroke-dashoffset', 1 - q));
+});
+[[720, 290], [720, 250], [690, 250], [670, 575], [730, 575], [1080, 290], [1190, 290]].forEach(([x, y], i) => {
+  const d = el('circle', { cx: x, cy: y, r: 4.5, class: 'dot', opacity: 0 }, DOTS);
+  at(10.2 + i * 0.05, 10.4 + i * 0.05, (p) => { op(d, p); d.setAttribute('r', 4.5 + (1 - p) * 6); });
+});
+// C1 接在 VDD 轨上（690,250 在 720→640 这段线上）
+
+// ---------- 网络标号与跨页端口 ----------
+const nets = [['SPI_SCK', 370], ['SPI_MOSI', 395], ['SPI_MISO', 420], ['I2C_SDA', 465], ['I2C_SCL', 490], ['IMU_INT', 535]];
+nets.forEach(([n, y], i) => {
+  const g = el('g', { opacity: 0 }, LABELS);
+  const w = n.length * 9.2 + 18;
+  el('path', { d: `M1110 ${y} L1118 ${y - 10} L${1118 + w} ${y - 10} L${1118 + w} ${y + 10} L1118 ${y + 10} Z`, class: 'netflag' }, g);
+  el('text', { x: 1124, y: y + 5, class: 'net' }, g, n);
+  at(10.7 + i * 0.16, 11.0 + i * 0.16, (p) => { op(g, p); g.setAttribute('transform', `translate(${(1 - p) * 20} 0)`); });
+});
+const toPage = el('text', { x: 1110, y: 604, 'font-size': 13, fill: '#b2551b', opacity: 0 }, LABELS, '→ 第 6 页 传感器 / 第 7 页 存储');
+at(11.6, 11.9, (p) => op(toPage, p));
+
+// ---------- 位号与参数：先挤在一起，再整理 ----------
+const refTexts = [];
+sats.forEach((s) => {
+  const r = el('text', { class: 'ref', opacity: 0 }, TEXTS, s.ref);
+  const v = el('text', { class: 'val', opacity: 0 }, TEXTS, s.val);
+  refTexts.push([r, v, s]);
+  const t0 = 6.3 + s.idx * 0.17;
+  at(t0, t0 + 0.3, (p) => { op(r, p); op(v, p); });
+  at(12.1 + s.idx * 0.05, 12.9 + s.idx * 0.05, (p) => {
+    const k = 1 - ease(p), [mx, my] = s.messy;
+    r.setAttribute('x', s.refPos[0] + mx * k * 1.6); r.setAttribute('y', s.refPos[1] + my * k * 1.6);
+    v.setAttribute('x', s.valPos[0] + mx * k * 1.3 - 6 * k); v.setAttribute('y', s.valPos[1] + my * k * 1.3 - 12 * k);
+  });
+});
+const u1ref = el('text', { x: 820, y: 240, class: 'ref', opacity: 0 }, TEXTS, 'U1');
+at(3.0, 3.3, (p) => op(u1ref, p));
+// 重叠提示框
+const clash = el('g', { opacity: 0 }, TEXTS);
+[[600, 360, 200, 120], [600, 540, 190, 110], [1070, 250, 230, 90]].forEach(([x, y, w, h]) => el('rect', { x, y, width: w, height: h, rx: 6, fill: 'none', stroke: '#e5484d', 'stroke-width': 2, 'stroke-dasharray': '4 3' }, clash));
+at(12.0, 12.2, (p, raw, now) => op(clash, now < 12.6 ? p : Math.max(0, 1 - (now - 12.6) * 3)));
+
+// ---------- 设计意图注释 ----------
+const notes = [
+  [596, 226, 214, 264, '去耦贴所服务引脚', 'b'],
+  [590, 494, 220, 170, '32 MHz 晶体 · CL 8 pF', 'b'],
+  [1050, 222, 260, 132, 'π 匹配 · 靠近天线', 't'],
+  [1104, 350, 196, 232, 'IO：跨页用标号', 'b'],
+];
+notes.forEach(([x, y, w, h, t, pos], i) => {
+  const g = el('g', { opacity: 0 }, NOTES);
+  el('rect', { x, y, width: w, height: h, rx: 8, class: 'note', fill: '#f4f1ff', 'fill-opacity': 0.35 }, g);
+  el('text', { x: x + 8, y: pos === 't' ? y + 18 : y + h - 9, class: 'notetext', 'font-size': 13 }, g, t);
+  at(13.7 + i * 0.3, 14.1 + i * 0.3, (p) => op(g, p));
+});
+
+// ---------- ERC ----------
+const scan = el('rect', { x: SX + 16, y: SY + 16, width: 160, height: SHH - 32, fill: 'url(#scan)', opacity: 0 }, SH);
+at(15.3, 16.2, (p) => { op(scan, p > 0 && p < 0.95 ? 1 : 0); scan.setAttribute('x', SX + 16 + p * (SW - 192)); });
+const erc = el('g', { opacity: 0 }, SH);
+el('rect', { x: 560, y: 712, width: 300, height: 92, rx: 12, fill: '#0f2418', stroke: '#2ecc71', 'stroke-width': 2 }, erc);
+el('text', { x: 582, y: 750, 'font-size': 20, 'font-weight': 700, fill: '#b9f6ca' }, erc, 'ERC：0 错误 · 0 警告');
+el('text', { x: 582, y: 780, 'font-size': 14, fill: '#8fd1a5' }, erc, '位号 U1 C1–C9 L1 Y1 ANT1 已标注');
+at(16.15, 16.4, (p, raw, now) => op(erc, now < 17.2 ? p : Math.max(0, 1 - (now - 17.2) * 3)));
+
+// ---------- 导出 PDF 通读：缩成一叠页面 ----------
+const HUD = $('hud');
+const pdf = el('g', { opacity: 0 }, HUD);
+for (let k = 0; k < 9; k++) {
+  const x = 520 + k * 112, y = 340;
+  const g = el('g', {}, pdf);
+  el('rect', { x, y, width: 96, height: 68, rx: 4, fill: k === 3 ? '#fff3d6' : '#fbf8f1', stroke: k === 3 ? '#ffd166' : '#8a7f6a', 'stroke-width': k === 3 ? 3 : 1.4 }, g);
+  el('text', { x: x + 48, y: y + 90, 'text-anchor': 'middle', 'font-size': 13, fill: '#cfd6e4' }, g, pages[k].slice(2));
+  for (let l = 0; l < 4; l++) el('line', { x1: x + 10, y1: y + 14 + l * 12, x2: x + 86 - (l % 2) * 26, y2: y + 14 + l * 12, stroke: '#c9bfa8', 'stroke-width': 2 }, g);
+}
+el('text', { x: 1024, y: 300, 'text-anchor': 'middle', 'font-size': 24, 'font-weight': 700, fill: '#ffe3a1' }, pdf, '导出 PDF · 逐页通读');
+const fin = el('g', { opacity: 0 }, HUD);
+el('text', { x: 1024, y: 520, 'text-anchor': 'middle', 'font-size': 30, 'font-weight': 700, fill: '#ffffff' }, fin, '让原理图先被人读懂');
+el('text', { x: 1024, y: 556, 'text-anchor': 'middle', 'font-size': 16, fill: '#8b93a7' }, fin, 'low-power-iot-hardware-design · references/09-schematic-readability.md');
+at(16.9, 17.6, (p) => { SH.setAttribute('transform', `translate(${(1024 - 975) * p} 0) translate(975 450) scale(${1 - 0.82 * ease(p)}) translate(-975 -450)`); op(SH, 1 - ease(p) * 0.999); });
+at(17.3, 17.8, (p) => op(pdf, p));
+at(18.2, 18.8, (p) => op(fin, p));
+
+// ---------------- 驱动 ----------------
+let start = null;
+function frame(now) {
+  if (start == null) start = now;
+  const t = Math.min(END, (now - start) / 1000);
+  for (const [t0, t1, fn] of TL) fn(clamp((t - t0) / (t1 - t0)), clamp((t - t0) / (t1 - t0)), t);
+  window.__t = t;
+  if (t < END) requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

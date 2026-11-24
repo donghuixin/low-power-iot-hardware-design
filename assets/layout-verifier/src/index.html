@@ -14,6 +14,10 @@
     <button data-tab="emi" role="tab" aria-selected="false">电磁</button>
     <button data-tab="thermal" role="tab" aria-selected="false">温度</button>
   </nav>
+  <div class="seg view-seg" id="view-seg" role="tablist" aria-label="视图">
+    <button data-view="2d" role="tab" aria-selected="true" title="2D 俯视（T 切换）">2D</button>
+    <button data-view="3d" role="tab" aria-selected="false" title="3D 展示（T 切换）：左键拖动旋转、右键平移、滚轮缩放、双击复位">3D</button>
+  </div>
   <div class="actions">
     <button id="btn-anim" class="tbtn" aria-pressed="true" title="开关动效">动效</button>
     <button id="btn-perf" class="tbtn" title="减少粒子数，适合较慢的电脑">性能模式</button>
@@ -27,6 +31,7 @@
   <aside id="left" aria-label="对象与假如"></aside>
   <section id="stage" aria-label="板图">
     <div id="stage-canvas"></div>
+    <div id="three-host" hidden></div>
     <div id="tip" role="status" hidden></div>
     <div id="busy" hidden><span class="spin" aria-hidden="true"></span><span id="busy-text">计算中…</span></div>
     <div id="toasts" aria-live="polite"></div>
@@ -38,11 +43,13 @@
 <script type="application/json" id="project-data"></script>
 <script type="application/json" id="copper-data"></script>
 <script type="application/json" id="example-data" data-src="../../layout-verify-example.json"></script>
+<script type="text/plain" id="three-src" data-src="../../layout-planner/vendor/three.module.min.js"></script>
 <script type="text/plain" id="worker-src" data-bundle="../../layout-planner/src/js/geometry.js ../../layout-planner/src/js/model.js js/constants.js js/solver.js js/vmodel.js js/routes.js js/vrules.js js/current.js js/thermal.js js/emi.js js/copper.js js/analysis.js js/worker.js"></script>
 <script src="../../layout-planner/src/js/geometry.js"></script>
 <script src="js/render.js"></script>
 <script src="js/particles.js"></script>
 <script src="js/client.js"></script>
+<script src="js/view3d.js"></script>
 <script src="js/app.js"></script>
 <script src="js/main.js"></script>
 </body>

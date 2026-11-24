@@ -24,7 +24,7 @@
   const store = { get(k, d) { try { const v = localStorage.getItem('lv:' + k); return v == null ? d : v; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem('lv:' + k, v); } catch (e) { /* 忽略 */ } } };
 
   const App = {
-    sum: null, tab: 'current', busy: 0, token: 0,
+    sum: null, tab: 'current', view: '2d', v3: null, busy: 0, token: 0,
     sel: { load: 0, emiSub: 'map', emiOnly: null, emiSide: 'top', mode: 0, heatRef: null },
     opt: { stack: 'project', sup: true, ret: true, heatsinks: {}, airflow: 0, ta: null, sealed: false, fullCopper: false, compare: true, split: 0.5, layer: 0 },
     res: {},
@@ -62,6 +62,7 @@
       badge.className = 'badge ' + (s.stage === 'R' ? 'r' : 'p');
       $('calc-mode').textContent = this.client.mode === 'worker' ? '' : '（主线程计算）';
       this.viewer.setBoard(s);
+      if (this.v3) this.v3.setBoard(s);
       if (s.stage === 'R') await this.loadCopperImage();
       this.renderTab();
     },
@@ -72,9 +73,11 @@
       const anim = $('btn-anim');
       const syncAnim = () => { anim.setAttribute('aria-pressed', String(this.parts.enabled)); anim.classList.toggle('on', this.parts.enabled); };
       syncAnim();
-      anim.addEventListener('click', () => { this.parts.setEnabled(!this.parts.enabled); store.set('anim', this.parts.enabled ? '1' : '0'); syncAnim(); if (this.emiAnim) this.emiAnim.setEnabled(this.parts.enabled); if (this.modeAnim) this.modeAnim.setEnabled(this.parts.enabled); });
+      anim.addEventListener('click', () => { this.parts.setEnabled(!this.parts.enabled); store.set('anim', this.parts.enabled ? '1' : '0'); syncAnim(); if (this.emiAnim) this.emiAnim.setEnabled(this.parts.enabled); if (this.modeAnim) this.modeAnim.setEnabled(this.parts.enabled); if (this.v3) { this.v3.setAnim(this.parts.enabled); if (this.view === '3d') this.renderTab(); } });
       $('btn-perf').addEventListener('click', () => { const on = this.parts.level < 2; this.parts.level = on ? 2 : 0; $('btn-perf').classList.toggle('on', on); this.parts.reset(); this.toast(on ? '性能模式：粒子减到四分之一、不画拖尾' : '已恢复默认动效'); });
       $('btn-report').addEventListener('click', () => this.exportReport());
+      document.querySelectorAll('#view-seg button').forEach((b) => b.addEventListener('click', () => this.setView(b.dataset.view)));
+      addEventListener('keydown', (e) => { if ((e.key === 't' || e.key === 'T') && !/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) this.setView(this.view === '3d' ? '2d' : '3d'); });
       $('btn-png').addEventListener('click', () => this.exportPNG());
       $('btn-open').addEventListener('click', () => $('file-in').click());
       $('file-in').addEventListener('change', (e) => this.openFiles(e.target.files));
@@ -112,6 +115,7 @@
     renderTab() {
       document.querySelectorAll('#tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === this.tab)));
       this.stopAnims();
+      if (this.v3 && this.view === '3d') this.v3.clearDyn();
       this.viewer.highlight = new Set();
       this.viewer.setHeats([]);
       this.viewer.setOverlay({});
@@ -119,6 +123,33 @@
       else if (this.tab === 'emi') this.showEmi();
       else this.showThermal();
       this.renderAssume();
+    },
+    /** 3D 视图打开时：停掉 2D 动效，把同一份结果交给 3D 展示。 */
+    sync3d(fn, d) {
+      if (this.view !== '3d' || !this.v3) return;
+      this.parts.stop();
+      if (this.emiAnim) this.emiAnim.stop();
+      if (this.modeAnim) this.modeAnim.stop();
+      $('tip').hidden = true;
+      this.v3[fn](d);
+    },
+    async setView(v) {
+      if (v === this.view) return;
+      if (v === '3d') {
+        if (!LP.View3D.supported()) { this.toast('这个浏览器不支持 WebGL，无法打开 3D 视图'); return; }
+        if (!this.v3) {
+          this.setBusy(true, '正在载入 3D…');
+          try { this.v3 = await LP.View3D.create($('three-host')); this.v3.setBoard(this.sum); }
+          catch (err) { this.toast('3D 视图载入失败：' + err.message); return; }
+          finally { this.setBusy(false); }
+        }
+        this.v3.setAnim(this.parts.enabled);
+      }
+      this.view = v;
+      document.querySelectorAll('#view-seg button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === v)));
+      $('stage-canvas').style.visibility = v === '3d' ? 'hidden' : '';
+      if (this.v3) this.v3.setActive(v === '3d');
+      this.renderTab();
     },
     stopAnims() {
       this.parts.stop();
@@ -189,6 +220,7 @@
       const lg = $('cur-legend-range');
       if (lg) lg.textContent = `${fmt(lo, 3)} – ${fmt(hi, 1)}`;
       this.drawOverlay();
+      this.sync3d('showCurrent', { r, g, lo, hi, sup: this.opt.sup, ret: this.opt.ret });
     },
     renderCurrentRight(r) {
       const l = this.sum.loads[this.sel.load];
@@ -245,6 +277,7 @@
       this.viewer.highlight = new Set(r.victims.filter((v) => v.grade !== 'low').map((v) => v.label));
       this.emiAnim = new EmiAnim(this.viewer, r.emitters.filter((e) => this.sel.emiOnly == null || e.id === this.sel.emiOnly), r.victims, this.parts.enabled);
       this.drawOverlay();
+      this.sync3d('showEmiMap', { map, g, emitters: r.emitters.filter((e) => this.sel.emiOnly == null || e.id === this.sel.emiOnly), victims: r.victims });
       put($('right'), 
         h('h3', {}, '受扰情况'),
         h('p', { class: 'muted' }, '每个敏感对象取它所在位置的受扰等级，列出贡献最大的两个干扰源。'),
@@ -274,6 +307,7 @@
       this.overlayExtra = { nodal, callout: { x: g.x0 + ((mc % g.nx) + 0.5) * g.cell, y: g.y0 + (((mc / g.nx) | 0) + 0.5) * g.cell, big: fhz(m.f), small: `第 ${k + 1} 模 · 起伏已放大${m.near.length ? ' · 接近 ' + m.near[0] : ''}` } };
       this.modeAnim = new ModeAnim(this.viewer, m.phi, g, this.parts.enabled);
       this.drawOverlay();
+      this.sync3d('showModes', { phi: m.phi, g, mask: r.mask, nodal, big: fhz(m.f), small: `第 ${k + 1} 模 · 起伏已放大${m.near.length ? ' · 接近 ' + m.near[0] : ''}` });
       put($('right'), 
         h('h3', {}, '平面谐振'),
         kv(r.modes.map((q, i) => [`第 ${i + 1} 模`, `${fhz(q.f)}${q.near.length ? ' · 接近 ' + q.near.join('、') : ''}`])),
@@ -352,6 +386,7 @@
         callout: pb && pc && it ? { x: (it.rect.x0 + it.rect.x1) / 2, y: (it.rect.y0 + it.rect.y1) / 2, big: cmp ? `${fmt(pb.tj, 0)} °C → ${fmt(pc.tj, 0)} °C` : `${fmt(pc.tj, 0)} °C`, small: `${ref} 结温 · 同样功耗${measures.length ? ' · ' + measures.join('、') : ''}` } : null };
       this.viewer.highlight = new Set(ref ? [ref] : []);
       this.drawOverlay();
+      this.sync3d('showThermal', { base, cfg, g, lo, hi, compare: cmp, split: sp, heatsinks: { ...this.opt.heatsinks }, callout: this.overlayExtra.callout });
       put($('right'), 
         h('h3', {}, '温度'),
         kv([['环境', `${fmt(base.ta, 1)} °C`], ['总功耗', `${fmt(base.P * 1000, 0)} mW`], ['板面最高', `无散热 ${fmt(base.tmax, 1)} °C · 有散热 ${fmt(cfg.tmax, 1)} °C`], ['能量核对', `散出 ${fmt(cfg.loss * 1000, 1)} mW / 输入 ${fmt(cfg.P * 1000, 1)} mW`]]),
@@ -432,6 +467,7 @@
       this.toast(`报告已导出：${['P0', 'P1', 'P2', 'P3'].filter((k) => c[k]).map((k) => `${k} ${c[k]} 条`).join('，') || '没有结论'}`);
     },
     exportPNG() {
+      if (this.view === '3d' && this.v3) { this.v3.snapshot((b) => download(`${this.tab}-3d.png`, b, 'image/png')); return; }
       const v = this.viewer, out = document.createElement('canvas');
       out.width = v.base.width; out.height = v.base.height;
       const c = out.getContext('2d');

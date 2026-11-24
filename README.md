@@ -30,6 +30,12 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 
 **扩展模块：高性能混合信号与医疗手持。** 设计满足任一门槛（持续功耗 >1 W、>50 MHz 或 LVDS、>50 V、FPGA、ADC ≥10 MSPS、接触人体的医疗用途）时自动启用，例如手持超声。启用后按"高压 / 漏电 / 温升 → 电源噪声 → 时钟 → 高速接口"的顺序评审，在原理图冻结前闭合功耗-热、数据率-存储、噪声-纹波、时钟抖动四项预算，并按混合信号顺序 bring-up。内容见 [`references/20`–`25`](references/20-hv-pulser-tr-safety.md) 和清单 E 段。
 
+## 原理图绘制流程
+
+画原理图时按 [`references/09-schematic-readability.md`](references/09-schematic-readability.md) 的十步走：先框图后分页 → 确认符号 → 按手册典型电路列出卫星器件 → 按信号流向摆放、卫星贴所服务的引脚 → 同页近处直连 → 跨页用标号与端口 → 整理文字互不重叠 → 写设计意图注释 → ERC 清零 → 导出 PDF 通读。下面用 BLE IMU 节点的"主控最小系统"一页演示：
+
+![原理图绘制流程：从框图到 ERC 清零](docs/images/schematic-drawing.gif)
+
 ## 交互式布局规划器
 
 一个可以离线打开的单文件网页（[`assets/layout-planner.html`](assets/layout-planner.html)，内置示例项目，下载后双击即可试用）。用户只摆核心器件——主控、传感器、天线、连接器、电池和板框；去耦电容、晶体、匹配网络这些小件由算法按最优策略自动贴放。每一步都告诉你这样摆对布线难度有什么影响。
@@ -120,6 +126,21 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 
 ![温度：给 0.9 W 的主控逐级加大散热片，再拖动分割线对比](docs/images/verifier-thermal.gif)
 
+### 一键切到 3D
+
+工具条上的 **2D | 3D** 按钮（快捷键 `T`）把同一份结果搬到立体视图里：左键拖动旋转、右键平移、滚轮缩放、双击复位。Three.js 只在第一次切换时载入，不影响打开速度；"动效"按钮同样控制 3D 里的动画。
+
+- **电流**：板子半透明，下方分开画出地平面，去程光点在板上流、回流光点在地平面上流，负载和电源起点的地脚用虚线连到地平面。
+- **受扰地图**：受扰电平做成起伏的地形，天线所在处隆起成峰，波纹从干扰源向外扩散，敏感器件按等级脉动。
+- **平面谐振**：模态振型做成上下起伏的曲面，节线固定不动。
+- **温度**：温度做成高度，左右对比加散热前后，加了散热器的器件上会长出散热片，热点上方飘起热气。
+
+| 电流：板上去程、地平面上的回流 | 受扰地图：电平地形与扩散波纹 |
+|---|---|
+| ![3D 电流与回流](docs/images/verifier3d-current.gif) | ![3D 受扰地图](docs/images/verifier3d-emi.gif) |
+| **平面谐振：起伏的振型** | **温度：逐级加大散热片** |
+| ![3D 平面谐振](docs/images/verifier3d-modes.gif) | ![3D 温度对比](docs/images/verifier3d-thermal.gif) |
+
 ### 布线后：从实际铜皮复核
 
 下图是一块布完线的板子：射频线下方的地平面开了槽、两侧地孔围栏太稀、模拟线贴着数字线走了 8 mm、顶层有一块没打孔的地铜，四条都被查出来并在板上定位。
@@ -177,7 +198,7 @@ assets/
   power-budget-example.json      功耗预算配置示例
 tests/                           规划器与验证器的单元测试、铜皮提取测试与合成板
 docs/images/                     README 配图与动图
-docs/record/                     动图的录制脚本（虚拟时钟逐帧截图）
+docs/record/                     动图的录制脚本（虚拟时钟逐帧截图）与原理图流程演示页
 ```
 
 ## 安装
