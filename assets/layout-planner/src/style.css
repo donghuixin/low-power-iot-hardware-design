@@ -42,11 +42,12 @@ code { font-family: var(--mono); }
 #three-host { position: absolute; inset: 0; display: none; }
 #app.is-3d #c2d { display: none; }
 #app.is-3d #three-host { display: block; }
+#motion-layer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 #overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 #overlay > * { pointer-events: auto; }
 #overlay > .labels3d { position: absolute; inset: 0; pointer-events: none; }
 #app:not(.is-3d) .labels3d { display: none; }
-.label3d { position: absolute; left: 0; top: 0; font: 700 12px var(--mono); color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75); white-space: nowrap; pointer-events: none; }
+.label3d { position: absolute; left: 0; top: 0; font: 650 11px system-ui, sans-serif; color: #fff; text-shadow: 0 0 3px #101318, 0 1px 2px #101318; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
 
 /* ---------- 面板 ---------- */
 .panel { position: absolute; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2); }
@@ -162,6 +163,8 @@ button.primary:hover { opacity: 0.88; }
 /* ---------- 托盘 ---------- */
 .tray-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; white-space: nowrap; overflow: hidden; }
 .tray-head .panel-title { margin: 0; }
+#item-search { margin-left: auto; min-width: 0; }
+#find-item { width: min(10em, 24vw); color: var(--text); background: var(--panel-solid); border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; }
 .tray-list { flex: 1; display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; scrollbar-width: thin; }
 .tray-card { flex: none; position: relative; width: 92px; height: 74px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-solid); display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding: 4px 4px 5px; touch-action: none; transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s; }
 .tray-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12); }
@@ -264,7 +267,7 @@ button.primary:hover { opacity: 0.88; }
 #btn-anim.on { color: var(--sel); }
 #app.narrow #btn-anim span { display: none; }
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
+  #app.no-anim *, #app.no-anim *::before, #app.no-anim *::after { animation: none !important; transition: none !important; }
 }
 
 /* 固定孔编辑 */

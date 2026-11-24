@@ -223,6 +223,7 @@
     }
     animate(type, data) {
       if (this.app.reducedMotion) return;
+      if (type === 'ripple' || type === 'flash') { LP.motion.pulse(type, data); return; }
       this.anims.push({ type, t0: performance.now(), ...data });
       this.requestDraw();
     }
@@ -492,13 +493,14 @@
     buildLabels() {
       this.labels.innerHTML = '';
       this.labelEls = new Map();
-      for (const x of this.app.p.parts) {
+      for (const x of [...this.app.p.parts, ...this.app.p.satellites]) {
         if (!x.placed) continue;
         const el = document.createElement('span');
         el.className = 'label3d';
-        el.textContent = x.ref;
+        el.textContent = M.faceName(x);
+        el.dataset.ref = x.ref;
         this.labels.append(el);
-        this.labelEls.set(x.ref, el);
+        this.labelEls.set(x, el);
       }
     }
     /** 选中、关联、问题、关键网络超长的轮廓：在器件四周画一圈发光的线框。 */
@@ -568,7 +570,7 @@
             } else { const k = 0.3 + 0.7 * easeOutBack(t); g.scale.set(k * Math.sign(g.scale.x || 1), k * Math.sign(g.scale.y || 1), k); }
             if (t >= 1) { this.pose(g, s.placed, 0); a.done = true; }
           } else if (t >= 1) a.done = true;
-        } else if (a.type === 'ripple' || a.type === 'flash') a.done = true;
+        }
       }
       this.renderer.render(this.scene, this.camera);
       this.placeLabels();
@@ -632,13 +634,14 @@
     placeLabels() {
       if (!this.labelEls) return;
       const app = this.app;
-      for (const [ref, el] of this.labelEls) {
-        const part = M.partByRef(app.p, ref);
-        const hidden = !part || !part.placed || (app.drag && app.drag.ref === ref && app.drag.visible) || !this.onSide(part.through ? 'both' : part.placed.side);
+      for (const [part, el] of this.labelEls) {
+        const ref = part.ref;
+        const hidden = !part || !part.placed || (part.kind && (!app.layers.sats || !part._active)) || (app.drag && app.drag.ref === ref && app.drag.visible) || !this.onSide(part.through ? 'both' : part.placed.side);
         if (hidden) { el.style.display = 'none'; continue; }
-        const r = this.screenRect(M.footprint(part), part.z * HZ);
+        const r = this.screenRect(part.kind ? M.satFootprint(part) : M.footprint(part), (part.z || 0.6) * HZ);
         if (Math.min(r.w, r.h) < 16) { el.style.display = 'none'; continue; }
         el.style.display = '';
+        el.style.maxWidth = Math.max(0, r.w - 3) + 'px';
         el.style.transform = `translate(${Math.round(r.x + r.w / 2)}px, ${Math.round(r.y + r.h / 2)}px) translate(-50%, -50%)`;
       }
     }

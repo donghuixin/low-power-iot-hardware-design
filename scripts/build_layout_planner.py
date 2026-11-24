@@ -61,7 +61,8 @@ def main():
         print("构建后仍有外部引用，请检查 index.html", file=sys.stderr)
         return 1
     out = Path(args.output)
-    out.write_text(html, encoding="utf-8")
+    with out.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write(html)
     print(f"已写入 {out}（{out.stat().st_size / 1024:.0f} KB）")
     return 0
 

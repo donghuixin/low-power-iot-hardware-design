@@ -213,6 +213,23 @@
     return p;
   }
 
+  /** Viewed names may change; reference designators remain the electrical identity. */
+  function faceName(item) {
+    const passive = !!item.kind || /^(?:R|C|L|FB|RT)\d/i.test(item.ref);
+    const candidates = [item.display_name, passive && item.value, item.name, item.mpn,
+      item.model, item.label, item.value, (SAT_KINDS[item.kind] || ROLES[item.role] || {}).label];
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string') continue;
+      let name = candidate.trim();
+      if (name.startsWith(item.ref)) {
+        const suffix = name.slice(item.ref.length);
+        if (/^(?:\s+|[·:：|—–-])/.test(suffix)) name = suffix.replace(/^[\s·:：|—–-]+/, '');
+      }
+      if (name && name !== item.ref) return name.trim();
+    }
+    return '器件';
+  }
+
   // ---------- 坐标变换 ----------
   function dims(w, h, rot) { return rot === 90 || rot === 270 ? [h, w] : [w, h]; }
   function footprint(part, pl) {
@@ -543,7 +560,7 @@
 
   LP.model = {
     TOOL_VERSION, ROLES, SAT_KINDS, NET_CLASSES, SIDES, ROTS, SENSOR_ROLES,
-    validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint,
+    validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint, faceName,
     partByRef, satByRef, itemByRef, placedParts, partTags, satTags, connectedParts, parseCap,
     snapshot, restore, definitionHash, exportLayout, resultObject, exportCSV, r2, remapBoardFeatures, partsArea, BOARD_SHAPES, outlineFromShape, shapeOf, toEditablePolygon, exportDXF,
     HOLE_SIZES, HOLE_EDGE, holeFits, cornerHoles, suggestHole,

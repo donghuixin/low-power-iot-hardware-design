@@ -50,11 +50,12 @@ code { font-family: var(--mono); }
 #three-host { position: absolute; inset: 0; display: none; }
 #app.is-3d #c2d { display: none; }
 #app.is-3d #three-host { display: block; }
+#motion-layer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 #overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 #overlay > * { pointer-events: auto; }
 #overlay > .labels3d { position: absolute; inset: 0; pointer-events: none; }
 #app:not(.is-3d) .labels3d { display: none; }
-.label3d { position: absolute; left: 0; top: 0; font: 700 12px var(--mono); color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75); white-space: nowrap; pointer-events: none; }
+.label3d { position: absolute; left: 0; top: 0; font: 650 11px system-ui, sans-serif; color: #fff; text-shadow: 0 0 3px #101318, 0 1px 2px #101318; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
 
 /* ---------- 面板 ---------- */
 .panel { position: absolute; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2); }
@@ -170,6 +171,8 @@ button.primary:hover { opacity: 0.88; }
 /* ---------- 托盘 ---------- */
 .tray-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; white-space: nowrap; overflow: hidden; }
 .tray-head .panel-title { margin: 0; }
+#item-search { margin-left: auto; min-width: 0; }
+#find-item { width: min(10em, 24vw); color: var(--text); background: var(--panel-solid); border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; }
 .tray-list { flex: 1; display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; scrollbar-width: thin; }
 .tray-card { flex: none; position: relative; width: 92px; height: 74px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-solid); display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding: 4px 4px 5px; touch-action: none; transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s; }
 .tray-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12); }
@@ -272,7 +275,7 @@ button.primary:hover { opacity: 0.88; }
 #btn-anim.on { color: var(--sel); }
 #app.narrow #btn-anim span { display: none; }
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
+  #app.no-anim *, #app.no-anim *::before, #app.no-anim *::after { animation: none !important; transition: none !important; }
 }
 
 /* 固定孔编辑 */
@@ -299,6 +302,7 @@ button.primary:hover { opacity: 0.88; }
   <main id="stage" aria-label="电路板画布">
     <canvas id="c2d"></canvas>
     <div id="three-host"></div>
+    <canvas id="motion-layer" hidden aria-hidden="true"></canvas>
     <div id="overlay"></div>
   </main>
 
@@ -355,6 +359,7 @@ button.primary:hover { opacity: 0.88; }
     <div class="tray-head">
       <span class="panel-title">器件托盘</span>
       <span id="tray-count" class="muted small"></span>
+      <form id="item-search" role="search"><input id="find-item" type="search" list="item-options" placeholder="查位号或名称" aria-label="按位号或名称查找器件"><datalist id="item-options"></datalist></form>
       <span class="muted small tray-hint">拖到板上；当前步骤要放的器件已高亮</span>
       <span id="tray-sats" class="small" hidden></span>
     </div>
@@ -692,9 +697,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       theme: '主题', theme_light: '浅色', theme_dark: '深色',
       help: '帮助', star: 'Star', star_title: '在 GitHub 上 Star 或 Fork 这个 skill，获取后续更新',
       anim_off: '动效', anim_on: '动效开',
-      anim_title_off: '开启动画效果：拾取时卫星环绕、落地回弹与飞落、波纹等',
+      anim_title_off: '开启网络关联或板框的动态提示，也可显示放置反馈',
       anim_title_on: '关闭动画效果（卫星仍静止排在器件周围）',
-      anim_title_system: '系统已开启"减少动态效果"，动画不会播放',
       storage_off: '未自动保存，请手动导出', restored: '已恢复上次的摆放',
       panel_steps: '步骤', panel_eval: '评估',
 
@@ -1149,6 +1153,23 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     return p;
   }
 
+  /** Viewed names may change; reference designators remain the electrical identity. */
+  function faceName(item) {
+    const passive = !!item.kind || /^(?:R|C|L|FB|RT)\d/i.test(item.ref);
+    const candidates = [item.display_name, passive && item.value, item.name, item.mpn,
+      item.model, item.label, item.value, (SAT_KINDS[item.kind] || ROLES[item.role] || {}).label];
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string') continue;
+      let name = candidate.trim();
+      if (name.startsWith(item.ref)) {
+        const suffix = name.slice(item.ref.length);
+        if (/^(?:\s+|[·:：|—–-])/.test(suffix)) name = suffix.replace(/^[\s·:：|—–-]+/, '');
+      }
+      if (name && name !== item.ref) return name.trim();
+    }
+    return '器件';
+  }
+
   // ---------- 坐标变换 ----------
   function dims(w, h, rot) { return rot === 90 || rot === 270 ? [h, w] : [w, h]; }
   function footprint(part, pl) {
@@ -1479,7 +1500,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
 
   LP.model = {
     TOOL_VERSION, ROLES, SAT_KINDS, NET_CLASSES, SIDES, ROTS, SENSOR_ROLES,
-    validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint,
+    validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint, faceName,
     partByRef, satByRef, itemByRef, placedParts, partTags, satTags, connectedParts, parseCap,
     snapshot, restore, definitionHash, exportLayout, resultObject, exportCSV, r2, remapBoardFeatures, partsArea, BOARD_SHAPES, outlineFromShape, shapeOf, toEditablePolygon, exportDXF,
     HOLE_SIZES, HOLE_EDGE, holeFits, cornerHoles, suggestHole,
@@ -3225,7 +3246,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       if (!isSat) this.drawOrbit(item, pl, now, 'below');
       this.drawAt(item, isSat ? M.satFootprint(item, pl) : M.footprint(item, pl), pl, isSat, { lift: 1, scale: 1.04 });
       if (!isSat) {
-        // 悬浮中的器件也显示位号
+        // 拾取时保留器件名称。
         const sr = this.screenRect(M.footprint(item, pl));
         const m = Math.min(sr.w, sr.h);
         if (m >= 14) {
@@ -3234,7 +3255,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           const light = ['chip_antenna', 'module', 'coin', 'usb_c', 'pouch', 'fpc', 'mic'].includes(item.shape);
           ctx.fillStyle = light ? 'rgba(30,32,36,0.85)' : 'rgba(255,255,255,0.92)';
-          ctx.fillText(item.ref, sr.x + sr.w / 2, sr.y + sr.h / 2 - 4);
+          this.faceText(item, sr, sr.y + sr.h / 2 - 4);
           ctx.restore();
         }
         this.drawOrbit(item, pl, now, 'above');
@@ -3380,6 +3401,20 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       ctx.fillText('mm', xl - 10, y0 + 18);
       ctx.textAlign = 'left';
     }
+    faceText(item, rect, y) {
+      const ctx = this.ctx, width = Math.max(0, rect.w - 3);
+      const name = M.faceName(item);
+      if (ctx.measureText(name).width <= width) {
+        ctx.fillText(name, rect.x + rect.w / 2, y);
+        return;
+      }
+      let compact = '';
+      for (const ch of name) {
+        if (ctx.measureText(compact + ch + '…').width > width) break;
+        compact += ch;
+      }
+      if (compact) ctx.fillText(compact + '…', rect.x + rect.w / 2, y);
+    }
     drawLabels(parts) {
       const ctx = this.ctx, app = this.app;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -3392,15 +3427,18 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         const light = ['chip_antenna', 'module', 'coin', 'usb_c', 'pouch', 'fpc', 'mic'].includes(x.shape);
         ctx.fillStyle = light ? 'rgba(30,32,36,0.85)' : 'rgba(255,255,255,0.92)';
         const cy = x.shape === 'button' ? r.y + r.h - fs * 0.7 : r.y + r.h / 2;
-        ctx.fillText(x.ref, r.x + r.w / 2, cy);
+        this.faceText(x, r, cy);
       }
-      if (app.layers.sats && this.s > 26) {
-        ctx.font = `500 ${Math.min(10, this.s * 0.28)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+      if (app.layers.sats) {
+        ctx.font = '600 9px system-ui, sans-serif';
         for (const s of app.p.satellites) {
           if (!s.placed || !s._active || !this.onSide(s.placed.side)) continue;
           const r = this.screenRect(M.satFootprint(s));
-          ctx.fillStyle = 'rgba(255,255,255,0.85)';
-          ctx.fillText(s.ref, r.x + r.w / 2, r.y - 6);
+          if (r.h < 12 || r.w < 16) continue;
+          ctx.fillStyle = '#fff';
+          ctx.shadowColor = '#111'; ctx.shadowBlur = 3;
+          this.faceText(s, r, r.y + r.h / 2);
+          ctx.shadowBlur = 0;
         }
       }
       ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
@@ -3689,6 +3727,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     }
     animate(type, data) {
       if (this.app.reducedMotion) return;
+      if (type === 'ripple' || type === 'flash') { LP.motion.pulse(type, data); return; }
       this.anims.push({ type, t0: performance.now(), ...data });
       this.requestDraw();
     }
@@ -3958,13 +3997,14 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     buildLabels() {
       this.labels.innerHTML = '';
       this.labelEls = new Map();
-      for (const x of this.app.p.parts) {
+      for (const x of [...this.app.p.parts, ...this.app.p.satellites]) {
         if (!x.placed) continue;
         const el = document.createElement('span');
         el.className = 'label3d';
-        el.textContent = x.ref;
+        el.textContent = M.faceName(x);
+        el.dataset.ref = x.ref;
         this.labels.append(el);
-        this.labelEls.set(x.ref, el);
+        this.labelEls.set(x, el);
       }
     }
     /** 选中、关联、问题、关键网络超长的轮廓：在器件四周画一圈发光的线框。 */
@@ -4034,7 +4074,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
             } else { const k = 0.3 + 0.7 * easeOutBack(t); g.scale.set(k * Math.sign(g.scale.x || 1), k * Math.sign(g.scale.y || 1), k); }
             if (t >= 1) { this.pose(g, s.placed, 0); a.done = true; }
           } else if (t >= 1) a.done = true;
-        } else if (a.type === 'ripple' || a.type === 'flash') a.done = true;
+        }
       }
       this.renderer.render(this.scene, this.camera);
       this.placeLabels();
@@ -4098,13 +4138,14 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     placeLabels() {
       if (!this.labelEls) return;
       const app = this.app;
-      for (const [ref, el] of this.labelEls) {
-        const part = M.partByRef(app.p, ref);
-        const hidden = !part || !part.placed || (app.drag && app.drag.ref === ref && app.drag.visible) || !this.onSide(part.through ? 'both' : part.placed.side);
+      for (const [part, el] of this.labelEls) {
+        const ref = part.ref;
+        const hidden = !part || !part.placed || (part.kind && (!app.layers.sats || !part._active)) || (app.drag && app.drag.ref === ref && app.drag.visible) || !this.onSide(part.through ? 'both' : part.placed.side);
         if (hidden) { el.style.display = 'none'; continue; }
-        const r = this.screenRect(M.footprint(part), part.z * HZ);
+        const r = this.screenRect(part.kind ? M.satFootprint(part) : M.footprint(part), (part.z || 0.6) * HZ);
         if (Math.min(r.w, r.h) < 16) { el.style.display = 'none'; continue; }
         el.style.display = '';
+        el.style.maxWidth = Math.max(0, r.w - 3) + 'px';
         el.style.transform = `translate(${Math.round(r.x + r.w / 2)}px, ${Math.round(r.y + r.h / 2)}px) translate(-50%, -50%)`;
       }
     }
@@ -4138,8 +4179,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     theme: 'light',
     animOn: false,          // 动效开关，默认关闭
     systemReduced: false,   // 系统"减少动态效果"
-    /** 动效关闭或系统要求减少动态效果时，不播放动画（卫星仍静止排在器件周围）。 */
-    get reducedMotion() { return this.systemReduced || !this.animOn; },
+    /** 初次打开静止，用户可显式开启并随时停止。 */
+    get reducedMotion() { return !this.animOn; },
     undoStack: [], redoStack: [],
     drag: null, suggestion: null, delta: null, focusIssue: null,
     storageOk: true,
@@ -4428,7 +4469,13 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     setAnim(on) {
       this.animOn = !!on;
       try { localStorage.setItem('lp:anim', on ? '1' : '0'); } catch (e) { /* 存储不可用 */ }
-      if (!on && this.renderer) this.renderer.anims = this.renderer.anims.filter((x) => x.type === 'view' || x.type === 'flip');
+      if (!on && LP.ui) {
+        for (const renderer of [LP.ui.r2, LP.ui.r3]) {
+          if (!renderer) continue;
+          renderer.anims = [];
+          if (renderer === this.renderer && renderer === LP.ui.r3) renderer.rebuild();
+        }
+      }
       this.emit('anim');
       this.redraw();
     },
@@ -4881,6 +4928,115 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
 
 </script>
 <script>
+/* ---- js/motion.js ---- */
+/* 共享的屏幕反馈层，只投影本视面的真实端点或板框，不修改工程坐标。 */
+(function (LP) {
+  'use strict';
+  const M = LP.model;
+  let app, canvas, ctx, frame = 0, world, screen, face, pulses = [];
+
+  function trace() {
+    const p = app.p, renderer = app.renderer, selected = app.sel && app.sel.ref;
+    const visible = new Map(p.parts.filter(x => x.placed &&
+      renderer.onSide(x.through ? 'both' : x.placed.side)).map(x => [x.ref, x]));
+    let best = null, score = -1;
+    for (const net of p.nets) {
+      const pins = net.pins.filter(([ref]) => visible.has(ref));
+      if (pins.length < 2) continue;
+      const start = pins.find(([ref]) => ref === selected) || pins[0];
+      const end = pins.find(([ref]) => ref !== start[0]);
+      if (!end) continue;
+      const rank = (selected && start[0] === selected ? 4 : 0) + (net.class === 'power' ? 0 : 1);
+      if (rank <= score) continue;
+      const points = [start, end].map(([ref, id]) => M.pinWorld(visible.get(ref), id));
+      if (!points.every(Boolean) || Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y) < 0.1) continue;
+      best = { name: net.name, points }; score = rank;
+    }
+    if (best) return best;
+    const outline = LP.geometry.outlinePolygon(p.board.outline);
+    return { name: '板框', points: [...outline, outline[0]] };
+  }
+
+  function project() {
+    const projected = world.points.map(p => app.renderer.boardToScreen(p.x, p.y));
+    let length = 0;
+    const segments = [];
+    for (let i = 1; i < projected.length; i++) {
+      const a = projected[i - 1], b = projected[i], d = Math.hypot(b.x - a.x, b.y - a.y);
+      if (d > 0) { segments.push({ a, b, d, start: length }); length += d; }
+    }
+    return { projected, segments, length };
+  }
+
+  function draw(now) {
+    frame = 0;
+    if (!app.animOn || document.hidden || !app.renderer || !app.p) return;
+    canvas.hidden = false;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (w < 1 || h < 1) return;
+    const scale = Math.min(window.devicePixelRatio || 1, 2);
+    if (canvas.width !== Math.round(w * scale) || canvas.height !== Math.round(h * scale)) {
+      canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale); screen = null;
+    }
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    if (!world || face !== app.flipped) { world = trace(); face = app.flipped; screen = null; }
+    if (!screen) screen = project();
+    const { projected, segments, length } = screen;
+    canvas.dataset.trace = world.name;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    projected.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+    ctx.strokeStyle = 'rgba(8,44,55,.72)'; ctx.lineWidth = 3; ctx.stroke();
+    ctx.setLineDash([7, 8]); ctx.lineDashOffset = -(now * 0.025) % 15;
+    ctx.strokeStyle = '#67f7ee'; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]);
+    if (length) for (let i = 0; i < 3; i++) {
+      const distance = length * (0.5 - 0.47 * Math.cos(now / 810 + i * 2.095));
+      const seg = segments.find(s => s.start + s.d >= distance) || segments[segments.length - 1];
+      const t = (distance - seg.start) / seg.d;
+      const x = seg.a.x + (seg.b.x - seg.a.x) * t, y = seg.a.y + (seg.b.y - seg.a.y) * t;
+      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff6af'; ctx.fill(); ctx.strokeStyle = '#11696a'; ctx.lineWidth = 1.8; ctx.stroke();
+    }
+    pulses = pulses.filter(p => now - p.start < 650);
+    for (const p of pulses) {
+      const pos = app.renderer.boardToScreen(p.x, p.y, 0.7), t = (now - p.start) / 650;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, 5 + 26 * t, 0, 2 * Math.PI);
+      ctx.strokeStyle = 'rgba(255,211,63,' + (1 - t) + ')'; ctx.lineWidth = 3; ctx.stroke();
+    }
+    frame = requestAnimationFrame(draw);
+  }
+
+  function reset() {
+    if (frame) cancelAnimationFrame(frame);
+    world = screen = null; frame = 0; pulses = [];
+    canvas.hidden = true;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (app.animOn && !document.hidden) frame = requestAnimationFrame(draw);
+  }
+
+  LP.motion = {
+    init(application, layer) {
+      app = application; canvas = layer; ctx = canvas.getContext('2d');
+      for (const name of ['anim', 'load', 'select', 'view']) app.on(name, reset);
+      app.on('change', () => { world = screen = null; });
+      app.on('boardlive', () => { world = screen = null; });
+      app.on('drawn', () => { screen = null; });
+      document.addEventListener('visibilitychange', reset);
+    },
+    pulse(type, data) {
+      if (!app.animOn) return;
+      const points = type === 'ripple' ? [data] : data.refs.map(ref => M.itemByRef(app.p, ref))
+        .filter(item => item && item.placed && app.renderer.onSide(item.placed.side)).map(item => item.placed);
+      const start = performance.now();
+      pulses.push(...points.map(p => ({ x: p.x, y: p.y, start })));
+    },
+  };
+})(globalThis.LP = globalThis.LP || {});
+
+</script>
+<script>
 /* ---- js/ui.js ---- */
 /*
  * ui.js — 浮层面板与界面：工具条、步骤引导、评估面板、托盘、选中器件的操作按钮、朝向建议、移动差值卡片、提示与菜单。
@@ -4931,6 +5087,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       this.overlay = $('#overlay');
       this.buildToolbar();
       this.buildFloat();
+      this.bindSearch();
+      LP.motion.init(App, $('#motion-layer'));
       App.on('load', () => { this.renderAll(true); const d = $('#board-setup'); if (d && d.open && App.boardConfirmed) d.close(); });
       App.on('change', (d) => { this.renderAll(); this.showDeltaCard(d); });
       App.on('select', () => { this.renderSelection(); this.renderSteps(); });
@@ -4949,6 +5107,31 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       try { App.animOn = localStorage.getItem('lp:anim') === '1'; } catch (e) { App.animOn = false; }
       App.on('anim', () => this.renderToolbar());
       this.onResize(true);
+    },
+
+    bindSearch() {
+      const app = this.App, input = $('#find-item'), options = $('#item-options');
+      app.on('load', () => {
+        input.value = '';
+        options.replaceChildren(...[...app.p.parts, ...app.p.satellites].map(item =>
+          h('option', { value: item.ref, label: M.faceName(item) })));
+      });
+      $('#item-search').addEventListener('submit', event => {
+        event.preventDefault();
+        const query = input.value.trim().toLowerCase();
+        if (!query) return;
+        const items = [...app.p.parts, ...app.p.satellites];
+        const exact = items.find(item => item.ref.toLowerCase() === query);
+        const matches = exact ? [exact] : items.filter(item => M.faceName(item).toLowerCase().includes(query));
+        if (matches.length !== 1) {
+          app.toast(matches.length ? '有多个匹配器件，请选择位号。' : '没有找到该器件。', 'info');
+          return;
+        }
+        const item = matches[0];
+        app.select({ type: item.kind ? 'sat' : 'part', ref: item.ref });
+        if (item.placed) app.focusOn([item.ref]);
+        else this.highlightTray(item.kind ? item.parent[0] : item.ref);
+      });
     },
 
     // ---------- 布局 ----------
@@ -5075,7 +5258,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       an.classList.toggle('on', App.animOn);
       an.setAttribute('aria-pressed', String(App.animOn));
       an.querySelector('span').textContent = App.animOn ? t('anim_on') : t('anim_off');
-      an.title = App.systemReduced ? t('anim_title_system') : App.animOn ? t('anim_title_on') : t('anim_title_off');
+      an.title = App.animOn ? t('anim_title_on') : t('anim_title_off');
       this.root.classList.toggle('no-anim', App.reducedMotion);
       for (const [k, v] of Object.entries(App.layers)) { const el = $(`#layer-${k}`); if (el) el.checked = v; }
       const es = $('#opt-editsats'); if (es) es.checked = App.editSats;
@@ -5175,7 +5358,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         chips.append(h('button', {
           class: `chip ${part.placed ? 'placed' : ''}`,
           onclick: () => { if (part.placed) { App.select({ type: 'part', ref }); App.focusOn([ref]); } else this.highlightTray(ref); },
-        }, part.placed ? '✓ ' : '', ref, h('span', { class: 'muted' }, ` ${part.label}`)));
+          }, part.placed ? '✓ ' : '', M.faceName(part)));
       }
       body.append(chips);
       const issues = App.ev.issues.filter((i) => i.refs.some((r) => st.parts.includes(r)) && i.severity !== 'P3');
@@ -5410,9 +5593,11 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       $('#tray-count').textContent = t('tray_count', { n: unplaced, total: parts.length });
       for (const x of parts) {
         const hot = !x.placed && LP.engine.stepOfRole(x.role) === cur;
-        const card = h('button', { class: `tray-card ${x.placed ? 'placed' : ''} ${hot ? 'hot' : ''}`, 'data-ref': x.ref, title: `${x.ref} · ${x.label} · ${x.w}×${x.h} mm`, 'aria-label': `${x.ref} ${x.label}${x.placed ? ' ' + t('tray_placed') : ''}` });
+        const name = M.faceName(x);
+        const card = h('button', { class: `tray-card ${x.placed ? 'placed' : ''} ${hot ? 'hot' : ''}`, 'data-ref': x.ref, title: `${x.ref} · ${name} · ${x.w}×${x.h} mm`, 'aria-label': `${name} ${x.ref}${x.placed ? ' ' + t('tray_placed') : ''}` });
         const cv = h('canvas', { class: 'thumb', width: 64, height: 44, 'aria-hidden': 'true' });
-        card.append(cv, h('span', { class: 'tray-ref' }, x.ref), h('span', { class: 'tray-label' }, x.label));
+        card.append(cv, h('span', { class: 'tray-ref' }, name));
+        if (x.label !== name && x.label !== x.ref) card.append(h('span', { class: 'tray-label' }, x.label));
         if (x.placed) card.append(h('span', { class: 'tray-badge' }, '✓'));
         card.addEventListener('pointerdown', (e) => {
           if (x.placed) return;
@@ -5471,7 +5656,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       if (sel.type === 'part') {
         const part = M.partByRef(App.p, sel.ref);
         if (!part || !part.placed) { a.hidden = true; this.suggestChip.hidden = true; return; }
-        a.append(h('span', { class: 'act-ref' }, part.ref),
+        a.append(h('span', { class: 'act-ref' }, `${part.ref} · ${M.faceName(part)}`),
           btn('rotate', t('act_rotate') + ' (R)', () => App.rotatePart(part.ref)),
           btn('flip', t('act_flip') + ' (F)', () => App.flipPart(part.ref)),
           btn('lock', (part.locked ? t('act_unlock') : t('act_lock')) + ' (L)', () => App.toggleLock(part.ref), part.locked ? 'on' : ''),
@@ -5567,7 +5752,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       let text;
       if (d.type === 'part') {
         const x = M.partByRef(App.p, d.ref);
-        text = t('tip_part', { ref: x.ref, label: x.label, w: x.w, h: x.h }) + (d.backside ? t('tip_backside') : '');
+        text = t('tip_part', { ref: x.ref, label: M.faceName(x), w: x.w, h: x.h }) + (d.backside ? t('tip_backside') : '');
       } else {
         const s = M.satByRef(App.p, d.ref);
         const r = App.ev.satResults[s.ref] || {};

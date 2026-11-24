@@ -583,7 +583,7 @@
       if (!isSat) this.drawOrbit(item, pl, now, 'below');
       this.drawAt(item, isSat ? M.satFootprint(item, pl) : M.footprint(item, pl), pl, isSat, { lift: 1, scale: 1.04 });
       if (!isSat) {
-        // 悬浮中的器件也显示位号
+        // 拾取时保留器件名称。
         const sr = this.screenRect(M.footprint(item, pl));
         const m = Math.min(sr.w, sr.h);
         if (m >= 14) {
@@ -592,7 +592,7 @@
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           const light = ['chip_antenna', 'module', 'coin', 'usb_c', 'pouch', 'fpc', 'mic'].includes(item.shape);
           ctx.fillStyle = light ? 'rgba(30,32,36,0.85)' : 'rgba(255,255,255,0.92)';
-          ctx.fillText(item.ref, sr.x + sr.w / 2, sr.y + sr.h / 2 - 4);
+          this.faceText(item, sr, sr.y + sr.h / 2 - 4);
           ctx.restore();
         }
         this.drawOrbit(item, pl, now, 'above');
@@ -738,6 +738,20 @@
       ctx.fillText('mm', xl - 10, y0 + 18);
       ctx.textAlign = 'left';
     }
+    faceText(item, rect, y) {
+      const ctx = this.ctx, width = Math.max(0, rect.w - 3);
+      const name = M.faceName(item);
+      if (ctx.measureText(name).width <= width) {
+        ctx.fillText(name, rect.x + rect.w / 2, y);
+        return;
+      }
+      let compact = '';
+      for (const ch of name) {
+        if (ctx.measureText(compact + ch + '…').width > width) break;
+        compact += ch;
+      }
+      if (compact) ctx.fillText(compact + '…', rect.x + rect.w / 2, y);
+    }
     drawLabels(parts) {
       const ctx = this.ctx, app = this.app;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -750,15 +764,18 @@
         const light = ['chip_antenna', 'module', 'coin', 'usb_c', 'pouch', 'fpc', 'mic'].includes(x.shape);
         ctx.fillStyle = light ? 'rgba(30,32,36,0.85)' : 'rgba(255,255,255,0.92)';
         const cy = x.shape === 'button' ? r.y + r.h - fs * 0.7 : r.y + r.h / 2;
-        ctx.fillText(x.ref, r.x + r.w / 2, cy);
+        this.faceText(x, r, cy);
       }
-      if (app.layers.sats && this.s > 26) {
-        ctx.font = `500 ${Math.min(10, this.s * 0.28)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+      if (app.layers.sats) {
+        ctx.font = '600 9px system-ui, sans-serif';
         for (const s of app.p.satellites) {
           if (!s.placed || !s._active || !this.onSide(s.placed.side)) continue;
           const r = this.screenRect(M.satFootprint(s));
-          ctx.fillStyle = 'rgba(255,255,255,0.85)';
-          ctx.fillText(s.ref, r.x + r.w / 2, r.y - 6);
+          if (r.h < 12 || r.w < 16) continue;
+          ctx.fillStyle = '#fff';
+          ctx.shadowColor = '#111'; ctx.shadowBlur = 3;
+          this.faceText(s, r, r.y + r.h / 2);
+          ctx.shadowBlur = 0;
         }
       }
       ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';

@@ -38,6 +38,18 @@ python scripts/make_layout_project.py my-project.json --check     # 只校验
 
 `assets/layout-planner.html` 本身内置示例项目，可以直接打开试用。修改页面源码（`assets/layout-planner/src/`）后需重新构建：`python scripts/build_layout_planner.py`。
 
+### 器件名称与动态反馈
+
+2D 和 3D 器件表面默认使用可读名称。主器件填写 `display_name`、`name`、`mpn` 或原有的 `label`，如 AD9273 或 USB-C。无源件填写 `value`，如 100 nF；用户提供的 `display_name` 优先。缺少名称与数值时显示器件类型。小封装在当前比例下会缩略或隐藏文字，放大、选取器件或在托盘中输入板内位号定位。项目主键、详情、引脚、BOM 和位置导出继续使用原位号。
+
+动效初次关闭，显式开启后两种视图都会立即沿当前面的真实网络端点显示往返光点；空板或没有可见端点对时沿真实板框显示。同一网络的运动只指示连接关系，线路方向、走线和电流应从原生 PCB 或电气分析取得。停止或页面进入后台后释放动画帧。在两种视图中核对真实名称、缩放和翻面，分别比较开启后不同时刻的画面和关闭后的静止画面。
+
+### 布局候选与 CADET 的复核方法
+
+同一板框、相同网络表和锁定器件下比较候选，记录各关键网端点距离、可用走线通道、密集区域与冲突。按电路约束单列必须满足的条件，如连接器对插、器件至去耦距离和禁布区。规划器的连线和分数是布线前估计；将候选放回原生 PCB，在相同制造规则下重放，分别记录未连通、违规、线长和过孔。可借用 CADET 对候选与独立回放分开记账的方法。其训练数据规模和两层板基准适用边界见本技能的布线实操及设计规则章节。[CADET 回放源码](https://github.com/LGAI-Research/CADET/blob/main/cadet/search/replay_shard.py) · [布线实操](14-routing-practice.md) · [制造规则](15-design-rules-and-process.md)
+
+修改交互后运行 `node tests/browser_layout_smoke.mjs`。设置 `CHROME_BIN` 可指定 Chromium 浏览器，该用例在独立临时配置中读取两种视图的画面像素并验证关闭后的清屏。
+
 ## 3. 从原理图写出项目 JSON
 
 这是工具的输入来源，按以下步骤从原理图和器件手册整理。

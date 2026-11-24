@@ -19,8 +19,8 @@
     theme: 'light',
     animOn: false,          // 动效开关，默认关闭
     systemReduced: false,   // 系统"减少动态效果"
-    /** 动效关闭或系统要求减少动态效果时，不播放动画（卫星仍静止排在器件周围）。 */
-    get reducedMotion() { return this.systemReduced || !this.animOn; },
+    /** 初次打开静止，用户可显式开启并随时停止。 */
+    get reducedMotion() { return !this.animOn; },
     undoStack: [], redoStack: [],
     drag: null, suggestion: null, delta: null, focusIssue: null,
     storageOk: true,
@@ -309,7 +309,13 @@
     setAnim(on) {
       this.animOn = !!on;
       try { localStorage.setItem('lp:anim', on ? '1' : '0'); } catch (e) { /* 存储不可用 */ }
-      if (!on && this.renderer) this.renderer.anims = this.renderer.anims.filter((x) => x.type === 'view' || x.type === 'flip');
+      if (!on && LP.ui) {
+        for (const renderer of [LP.ui.r2, LP.ui.r3]) {
+          if (!renderer) continue;
+          renderer.anims = [];
+          if (renderer === this.renderer && renderer === LP.ui.r3) renderer.rebuild();
+        }
+      }
       this.emit('anim');
       this.redraw();
     },

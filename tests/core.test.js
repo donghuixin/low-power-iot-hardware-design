@@ -13,6 +13,15 @@ const G = LP.geometry, M = LP.model;
 const ROOT = path.join(__dirname, '..');
 const EXAMPLE = path.join(ROOT, 'assets', 'layout-project-example.json');
 
+test('表面显示名称或无源值，位号只用于定位', () => {
+  assert.equal(M.faceName({ ref: 'U1', mpn: 'AD9273', role: 'afe' }), 'AD9273');
+  assert.equal(M.faceName({ ref: 'R2', value: '10 kΩ', label: 'R2' }), '10 kΩ');
+  assert.equal(M.faceName({ ref: 'C1', kind: 'decoupling', value: '100 nF', display_name: '输入旁路' }), '输入旁路');
+  assert.equal(M.faceName({ ref: 'U1', label: 'U1 · 接收前端' }), '接收前端');
+  assert.equal(M.faceName({ ref: 'U1', mpn: 'U100' }), 'U100');
+  assert.equal(M.faceName({ ref: 'R1', role: 'other', label: 'R1' }), M.ROLES.other.label);
+});
+
 test('几何：重叠、距离、线段相交', () => {
   const a = G.rect(0, 0, 2, 2), b = G.rect(2, 0, 4, 2), c = G.rect(1, 1, 3, 3);
   assert.equal(G.overlaps(a, b), false, '共边不算重叠');
@@ -96,14 +105,15 @@ test('指标：生成树、线长、交叉', () => {
 });
 
 test('脚本：make_layout_project.py 校验', () => {
-  const ok = spawnSync('python3', [path.join(ROOT, 'scripts', 'make_layout_project.py'), EXAMPLE, '--check'], { encoding: 'utf8' });
+  const python = process.env.PYTHON || 'python3';
+  const ok = spawnSync(python, [path.join(ROOT, 'scripts', 'make_layout_project.py'), EXAMPLE, '--check'], { encoding: 'utf8' });
   assert.equal(ok.status, 0, ok.stderr);
   const raw = JSON.parse(fs.readFileSync(EXAMPLE, 'utf8'));
   raw.nets[0].pins[1] = ['ANT9', 'FEED'];
   raw.parts[0].pins[0].pos = 1.5;
   const tmp = path.join(require('node:os').tmpdir(), 'lp-broken.json');
   fs.writeFileSync(tmp, JSON.stringify(raw));
-  const bad = spawnSync('python3', [path.join(ROOT, 'scripts', 'make_layout_project.py'), tmp, '--check'], { encoding: 'utf8' });
+  const bad = spawnSync(python, [path.join(ROOT, 'scripts', 'make_layout_project.py'), tmp, '--check'], { encoding: 'utf8' });
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /nets\[0\]\.pins\[1\]: 位号 ANT9 不存在/);
   assert.match(bad.stderr, /parts\[0\]\.pins\[0\]\.pos/);

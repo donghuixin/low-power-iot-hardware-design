@@ -47,6 +47,8 @@
       this.overlay = $('#overlay');
       this.buildToolbar();
       this.buildFloat();
+      this.bindSearch();
+      LP.motion.init(App, $('#motion-layer'));
       App.on('load', () => { this.renderAll(true); const d = $('#board-setup'); if (d && d.open && App.boardConfirmed) d.close(); });
       App.on('change', (d) => { this.renderAll(); this.showDeltaCard(d); });
       App.on('select', () => { this.renderSelection(); this.renderSteps(); });
@@ -65,6 +67,31 @@
       try { App.animOn = localStorage.getItem('lp:anim') === '1'; } catch (e) { App.animOn = false; }
       App.on('anim', () => this.renderToolbar());
       this.onResize(true);
+    },
+
+    bindSearch() {
+      const app = this.App, input = $('#find-item'), options = $('#item-options');
+      app.on('load', () => {
+        input.value = '';
+        options.replaceChildren(...[...app.p.parts, ...app.p.satellites].map(item =>
+          h('option', { value: item.ref, label: M.faceName(item) })));
+      });
+      $('#item-search').addEventListener('submit', event => {
+        event.preventDefault();
+        const query = input.value.trim().toLowerCase();
+        if (!query) return;
+        const items = [...app.p.parts, ...app.p.satellites];
+        const exact = items.find(item => item.ref.toLowerCase() === query);
+        const matches = exact ? [exact] : items.filter(item => M.faceName(item).toLowerCase().includes(query));
+        if (matches.length !== 1) {
+          app.toast(matches.length ? '有多个匹配器件，请选择位号。' : '没有找到该器件。', 'info');
+          return;
+        }
+        const item = matches[0];
+        app.select({ type: item.kind ? 'sat' : 'part', ref: item.ref });
+        if (item.placed) app.focusOn([item.ref]);
+        else this.highlightTray(item.kind ? item.parent[0] : item.ref);
+      });
     },
 
     // ---------- 布局 ----------
@@ -191,7 +218,7 @@
       an.classList.toggle('on', App.animOn);
       an.setAttribute('aria-pressed', String(App.animOn));
       an.querySelector('span').textContent = App.animOn ? t('anim_on') : t('anim_off');
-      an.title = App.systemReduced ? t('anim_title_system') : App.animOn ? t('anim_title_on') : t('anim_title_off');
+      an.title = App.animOn ? t('anim_title_on') : t('anim_title_off');
       this.root.classList.toggle('no-anim', App.reducedMotion);
       for (const [k, v] of Object.entries(App.layers)) { const el = $(`#layer-${k}`); if (el) el.checked = v; }
       const es = $('#opt-editsats'); if (es) es.checked = App.editSats;
@@ -291,7 +318,7 @@
         chips.append(h('button', {
           class: `chip ${part.placed ? 'placed' : ''}`,
           onclick: () => { if (part.placed) { App.select({ type: 'part', ref }); App.focusOn([ref]); } else this.highlightTray(ref); },
-        }, part.placed ? '✓ ' : '', ref, h('span', { class: 'muted' }, ` ${part.label}`)));
+          }, part.placed ? '✓ ' : '', M.faceName(part)));
       }
       body.append(chips);
       const issues = App.ev.issues.filter((i) => i.refs.some((r) => st.parts.includes(r)) && i.severity !== 'P3');
@@ -526,9 +553,11 @@
       $('#tray-count').textContent = t('tray_count', { n: unplaced, total: parts.length });
       for (const x of parts) {
         const hot = !x.placed && LP.engine.stepOfRole(x.role) === cur;
-        const card = h('button', { class: `tray-card ${x.placed ? 'placed' : ''} ${hot ? 'hot' : ''}`, 'data-ref': x.ref, title: `${x.ref} · ${x.label} · ${x.w}×${x.h} mm`, 'aria-label': `${x.ref} ${x.label}${x.placed ? ' ' + t('tray_placed') : ''}` });
+        const name = M.faceName(x);
+        const card = h('button', { class: `tray-card ${x.placed ? 'placed' : ''} ${hot ? 'hot' : ''}`, 'data-ref': x.ref, title: `${x.ref} · ${name} · ${x.w}×${x.h} mm`, 'aria-label': `${name} ${x.ref}${x.placed ? ' ' + t('tray_placed') : ''}` });
         const cv = h('canvas', { class: 'thumb', width: 64, height: 44, 'aria-hidden': 'true' });
-        card.append(cv, h('span', { class: 'tray-ref' }, x.ref), h('span', { class: 'tray-label' }, x.label));
+        card.append(cv, h('span', { class: 'tray-ref' }, name));
+        if (x.label !== name && x.label !== x.ref) card.append(h('span', { class: 'tray-label' }, x.label));
         if (x.placed) card.append(h('span', { class: 'tray-badge' }, '✓'));
         card.addEventListener('pointerdown', (e) => {
           if (x.placed) return;
@@ -587,7 +616,7 @@
       if (sel.type === 'part') {
         const part = M.partByRef(App.p, sel.ref);
         if (!part || !part.placed) { a.hidden = true; this.suggestChip.hidden = true; return; }
-        a.append(h('span', { class: 'act-ref' }, part.ref),
+        a.append(h('span', { class: 'act-ref' }, `${part.ref} · ${M.faceName(part)}`),
           btn('rotate', t('act_rotate') + ' (R)', () => App.rotatePart(part.ref)),
           btn('flip', t('act_flip') + ' (F)', () => App.flipPart(part.ref)),
           btn('lock', (part.locked ? t('act_unlock') : t('act_lock')) + ' (L)', () => App.toggleLock(part.ref), part.locked ? 'on' : ''),
@@ -683,7 +712,7 @@
       let text;
       if (d.type === 'part') {
         const x = M.partByRef(App.p, d.ref);
-        text = t('tip_part', { ref: x.ref, label: x.label, w: x.w, h: x.h }) + (d.backside ? t('tip_backside') : '');
+        text = t('tip_part', { ref: x.ref, label: M.faceName(x), w: x.w, h: x.h }) + (d.backside ? t('tip_backside') : '');
       } else {
         const s = M.satByRef(App.p, d.ref);
         const r = App.ev.satResults[s.ref] || {};

@@ -12,6 +12,7 @@
   <main id="stage" aria-label="电路板画布">
     <canvas id="c2d"></canvas>
     <div id="three-host"></div>
+    <canvas id="motion-layer" hidden aria-hidden="true"></canvas>
     <div id="overlay"></div>
   </main>
 
@@ -68,6 +69,7 @@
     <div class="tray-head">
       <span class="panel-title">器件托盘</span>
       <span id="tray-count" class="muted small"></span>
+      <form id="item-search" role="search"><input id="find-item" type="search" list="item-options" placeholder="查位号或名称" aria-label="按位号或名称查找器件"><datalist id="item-options"></datalist></form>
       <span class="muted small tray-hint">拖到板上；当前步骤要放的器件已高亮</span>
       <span id="tray-sats" class="small" hidden></span>
     </div>
@@ -147,6 +149,7 @@
 <script src="js/render3d.js"></script>
 <script src="js/app.js"></script>
 <script src="js/interaction.js"></script>
+<script src="js/motion.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/main.js"></script>
 </body>
