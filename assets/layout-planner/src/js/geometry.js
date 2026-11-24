@@ -202,4 +202,58 @@
     outlinePolygon, outlineBBox, outlineArea, pointInPolygon, pointInBoard, distToBoardEdge,
     rectInBoard, rectEdgeDistance, faceOutside,
   };
+
+  // Optional mechanical and circuit clearances from the layout being edited, in board mm.
+  const compiledLimits = new WeakMap();
+  function limitsFor(spec) {
+    if (compiledLimits.has(spec)) return compiledLimits.get(spec);
+    const regions = (spec.regions || []).map(region => {
+      const [x0, y0, x1, y1] = region.box;
+      return { ...region, rect: {x0, y0, x1, y1}, except: new Set(region.except) };
+    });
+    const separation = new Map();
+    function add(refs, against, rule) {
+      const entry = { against: new Set(against), gap: rule.gap, name: rule.name };
+      for (const ref of refs) {
+        if (!separation.has(ref)) separation.set(ref, []);
+        separation.get(ref).push(entry);
+      }
+    }
+    for (const rule of spec.separation || []) {
+      add(rule.a, rule.b, rule);
+      add(rule.b, rule.a, rule);
+    }
+    const limits = {regions, separation, edgeExempt:new Set(spec.edgeExempt)};
+    compiledLimits.set(spec, limits);
+    return limits;
+  }
+  function placementViolation(project, item, pose, box, occupied) {
+    const spec = project.placementLimits;
+    if (!spec) return null;
+    const {regions, separation, edgeExempt} = limitsFor(spec);
+    if (spec.edgeMm > 0 && !edgeExempt.has(item.ref) && !rectInBoard(project.board.outline, expand(box, spec.edgeMm))) {
+      return {reason:'outside', with:'板边退让'};
+    }
+    for (const region of regions) {
+      if (!item.through && region.side && region.side !== 'both' && region.side !== pose.side) continue;
+      if (!region.except.has(item.ref) && overlaps(box, region.rect, region.gap)) {
+        return {reason:'keepout', with:region.name || '禁布区'};
+      }
+    }
+    const rules = separation.get(item.ref) || [];
+    for (const other of occupied) {
+      if (other.item.ref === item.ref) continue;
+      const sameSide = item.through || other.item.through || other.side === 'both' || other.side === pose.side;
+      if (spec.gapMm > 0 && sameSide && overlaps(box, other.rect, spec.gapMm)) {
+        return {reason:'overlap', with:other.item.ref};
+      }
+      for (const rule of rules) {
+        if (rule.against.has(other.item.ref) && rectDist(box,other.rect) + EPS < rule.gap) {
+          return {reason:'keepout', with:(rule.name || '器件间距') + ' · ' + other.item.ref};
+        }
+      }
+    }
+    return null;
+  }
+  LP.placementLimits = {violation:placementViolation};
 })(globalThis.LP = globalThis.LP || {});

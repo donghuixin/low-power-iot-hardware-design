@@ -333,7 +333,7 @@
       if (app.layers.sats) {
         for (const s of p.satellites) if (s.placed && s._active && this.onSide(s.placed.side) && hit(M.satFootprint(s))) return { type: 'sat', ref: s.ref };
       }
-      const parts = p.parts.filter((x) => x.placed).sort((a, b) => b.z - a.z);
+      const parts = p.parts.filter((x) => x.placed && (app.layers.sats || !M.placementOwner(x))).sort((a, b) => b.z - a.z);
       for (const x of parts) if (this.onSide(x.through ? 'both' : x.placed.side) && hit(M.footprint(x))) return { type: 'part', ref: x.ref };
       for (const x of parts) if (hit(M.footprint(x))) return { type: 'part', ref: x.ref, backside: true };
       return null;
@@ -421,13 +421,15 @@
 
       const side = this.viewSide();
       const drag = this.opts.noInsets ? null : app.drag;
+      const carried = new Set(drag?.visible && drag.kind === 'part' ? orbitSats(p, drag.ref).map(x => x.ref) : []);
+      this.orbitPos = null;
       // 背面（或正面，翻板时）器件：半透明轮廓
       for (const x of p.parts) {
-        if (!x.placed || (drag && drag.ref === x.ref)) continue;
+        if (!x.placed || carried.has(x.ref) || (drag && drag.ref === x.ref) || (!app.layers.sats && M.placementOwner(x))) continue;
         if (this.onSide(x.through ? 'both' : x.placed.side)) continue;
         this.drawAt(x, M.footprint(x), x.placed, false, { ghost: true });
       }
-      if (app.layers.sats) for (const s of p.satellites) if (s.placed && s._active && !this.onSide(s.placed.side)) this.drawAt(s, M.satFootprint(s), s.placed, true, { ghost: true });
+      if (app.layers.sats) for (const s of p.satellites) if (s.placed && s._active && !carried.has(s.ref) && !this.onSide(s.placed.side)) this.drawAt(s, M.satFootprint(s), s.placed, true, { ghost: true });
       // 外晕
       if (app.layers.halo && app.ev) {
         for (const hl of app.ev.halos) {
@@ -439,12 +441,11 @@
           ctx.setLineDash([4, 4]); ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
         }
       }
-      // 卫星
+      const landed = new Map();
       if (app.layers.sats) {
-        for (const s of p.satellites) {
-          if (!s.placed || !s._active || !this.onSide(s.placed.side)) continue;
-          if (app.animOn && drag && drag.kind === 'part' && drag.visible && s.parent[0] === drag.ref && !s.pinned) continue;
-          let sc = 1, alpha = 1, off = null;
+        for (const s of [...p.satellites, ...p.parts.filter(M.placementOwner)]) {
+          if (!s.placed || (s.kind && !s._active) || !this.onSide(s.placed.side) || carried.has(s.ref) || drag?.ref === s.ref) continue;
+          let sc = 1, alpha = 1, off = null, lift = 0, rot = s.placed.rot;
           const pop = this.anims.find((a) => a.type === 'pop' && a.ref === s.ref);
           if (pop) {
             const t = Math.max(0, Math.min(1, (now - pop.t0 - pop.delay) / pop.dur));
@@ -452,6 +453,8 @@
               // 从轨道飞落：先保持悬浮，再沿弧线落到贴放位置
               const e = easeOut(t);
               sc = 1.15 - 0.15 * easeOutBack(t);
+              rot = landingRotation(pop.from.rot, rot, e);
+              lift = (pop.from.lift || 0) * (1 - e);
               off = { x: (pop.from.x - s.placed.x) * (1 - e), y: (pop.from.y - s.placed.y) * (1 - e) + Math.sin(Math.PI * t) * 0.8 };
             } else {
               sc = 0.3 + 0.7 * easeOutBack(t); alpha = t > 0 ? 1 : 0;
@@ -460,11 +463,14 @@
             if (t >= 1) pop.done = true;
           }
           const res = app.ev && app.ev.satResults[s.ref];
-          this.drawAt(s, M.satFootprint(s), s.placed, true, { scale: sc, alpha, off, bad: res && !res.ok, pinned: s.pinned, selected: app.sel && app.sel.ref === s.ref });
+          const pose = off ? { ...s.placed, rot, x:s.placed.x + off.x, y:s.placed.y + off.y } : s.placed;
+          if (alpha > 0) landed.set(s, pose);
+          this.drawAt(s, s.kind ? M.satFootprint(s,pose) : M.footprint(s,pose), pose, !!s.kind,
+            { scale: sc, alpha, lift, floating:!!pop && !pop.done, bad:res && !res.ok, pinned:s.pinned || s.locked, selected:app.sel?.ref === s.ref });
         }
       }
       // 主器件（低的先画）
-      const parts = p.parts.filter((x) => x.placed && this.onSide(x.through ? 'both' : x.placed.side) && !(drag && drag.ref === x.ref)).sort((a, b) => a.z - b.z);
+      const parts = p.parts.filter((x) => x.placed && !M.placementOwner(x) && this.onSide(x.through ? 'both' : x.placed.side) && !(drag && drag.ref === x.ref)).sort((a, b) => a.z - b.z);
       const related = this.relatedMap();
       const critical = this.criticalRefs();
       for (const x of parts) {
@@ -510,10 +516,11 @@
         }
         if (t >= 1) a.done = true;
       }
-      this.drawLabels(parts);
+      for (const x of parts) this.drawPartLabel(x, this.screenRect(M.faceRect(x)));
+      for (const [s, pose] of landed) this.drawPartLabel(s, this.screenRect(M.faceRect(s, pose)));
       if (app.boardEditing && !drag) this.drawHandles();
 
-      this.anims = this.anims.filter((a) => !a.done);
+      this.anims = this.anims.filter(a => !a.done && (a.type !== 'pop' || now < a.t0 + (a.delay || 0) + (a.dur || 300)));
       const blinking = critical.size > 0 && !app.reducedMotion;
       const orbiting = drag && drag.visible && drag.kind === 'part' && !app.reducedMotion && orbitSats(p, drag.ref).length;
       if (this.anims.length || blinking || orbiting || (drag && drag.status === 'bad')) this.requestDraw();
@@ -632,7 +639,7 @@
      * 位置记入 this.orbitPos，落地时卫星从这里飞向自动贴放的位置。
      */
     drawOrbit(part, pl, now, layer) {
-      if (!this.app.animOn || !this.app.layers.sats) return;
+      if (!this.app.layers.sats) return;
       const sats = orbitSats(this.app.p, part.ref);
       if (!sats.length) return;
       const pos = orbitPositions(part, pl, sats, this.app.reducedMotion ? 0 : now);
@@ -653,9 +660,11 @@
       }
       for (const q of pos.items) {
         if ((layer === 'above') !== q.front) continue;
-        this.orbitPos[q.sat.ref] = { x: q.x, y: q.y };
+        this.orbitPos[q.sat.ref] = { x: q.x, y: q.y, rot:q.rot, lift:0.8 + q.depth*0.4 };
         const spl = { x: q.x, y: q.y, rot: q.rot, side: pl.side };
-        this.drawAt(q.sat, M.satFootprint(q.sat, { ...spl, rot: 0 }), spl, true, { lift: 0.8 + q.depth * 0.4, scale: 1.05 + q.depth * 0.12, alpha: q.front ? 1 : 0.75 });
+        const rect = M.faceRect(q.sat, spl), lift = 0.8 + q.depth * 0.4;
+        this.drawAt(q.sat, rect, spl, !!q.sat.kind, {floating:true, lift, scale:1.05 + q.depth*0.12, alpha:q.front ? 1 : 0.75});
+        this.drawPartLabel(q.sat, this.screenRect(rect), lift*4);
       }
     }
 
@@ -768,33 +777,18 @@
       ctx.textAlign = 'left';
     }
     faceText(item, rect, y) { drawFaceText(this.ctx, item, rect, y); }
-    drawLabels(parts) {
-      const ctx = this.ctx, app = this.app;
+    drawPartLabel(x, r, yOffset = 0) {
+      const ctx = this.ctx, m = Math.min(r.w, r.h);
+      if (m < 14) return;
+      const fs = Math.max(9, Math.min(13, m * 0.28));
+      ctx.save();
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      for (const x of parts) {
-        const r = this.screenRect(M.faceRect(x));
-        const m = Math.min(r.w, r.h);
-        if (m < 14) continue;
-        const fs = Math.max(9, Math.min(13, m * 0.28));
-        ctx.font = `600 ${fs}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-        const light = M.passiveGeometry(x)?.kind === 'capacitor' || ['chip_antenna', 'module', 'coin', 'usb_c', 'pouch', 'fpc', 'mic'].includes(x.shape);
-        ctx.fillStyle = light ? 'rgba(30,32,36,0.85)' : 'rgba(255,255,255,0.92)';
-        const cy = x.shape === 'button' ? r.y + r.h - fs * 0.7 : r.y + r.h / 2;
-        this.faceText(x, r, cy);
-      }
-      if (app.layers.sats) {
-        ctx.font = '600 9px system-ui, sans-serif';
-        for (const s of app.p.satellites) {
-          if (!s.placed || !s._active || !this.onSide(s.placed.side)) continue;
-          const r = this.screenRect(M.faceRect(s));
-          if (r.h < 12 || r.w < 16) continue;
-          ctx.fillStyle = '#fff';
-          ctx.shadowColor = '#111'; ctx.shadowBlur = 3;
-          this.faceText(s, r, r.y + r.h / 2);
-          ctx.shadowBlur = 0;
-        }
-      }
-      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.font = `600 ${fs}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+      const light = M.passiveGeometry(x)?.kind === 'capacitor' || ['chip_antenna', 'module', 'coin', 'usb_c', 'pouch', 'fpc', 'mic'].includes(x.shape);
+      ctx.fillStyle = light ? 'rgba(30,32,36,0.85)' : 'rgba(255,255,255,0.92)';
+      const cy = x.shape === 'button' ? r.y + r.h - fs * 0.7 : r.y + r.h / 2;
+      this.faceText(x, r, cy - yOffset);
+      ctx.restore();
     }
     drawHandles() {
       const ctx = this.ctx;
@@ -806,7 +800,9 @@
   }
 
   /** 跟随被拾取器件一起悬浮的卫星：该器件的全部未固定卫星（未摆放的器件也有）。 */
-  function orbitSats(p, ref) { return p.satellites.filter((s) => s.parent[0] === ref && !s.pinned); }
+  function orbitSats(p, ref) {
+    return [...p.satellites.filter(s => s.parent[0] === ref && !s.pinned), ...M.placementChildren(p, ref).filter(s => !s.locked)];
+  }
   /**
    * 轨道位置（毫米，板面坐标）。两条轨道：内圈放小件，外圈放晶体、电感等较大的卫星；
    * 椭圆略扁，模拟俯视下倾斜的轨道；depth ∈ [-1, 1] 表示在轨道近侧(+)还是远侧(−)。
@@ -814,22 +810,42 @@
   function orbitPositions(part, pl, sats, now) {
     const [w, h] = M.dims(part.w, part.h, pl.rot || 0);
     const base = Math.max(w, h) / 2;
-    const big = (s) => Math.max(s.w, s.h) >= 1.6;
-    const ringOf = sats.map((s) => (sats.length > 4 && big(s) ? 1 : 0));
-    const counts = [ringOf.filter((r) => r === 0).length, ringOf.filter((r) => r === 1).length];
-    const rings = [0, 1].map((k) => (counts[k] ? { rx: base + 1.4 + k * 1.8, ry: (base + 1.4 + k * 1.8) * 0.78 } : null));
-    const idx = [0, 0];
+    // A full imported package can carry dozens of parts. Reserve each body its own arc.
+    const spans = sats.map(s => {
+      const body = M.passiveGeometry(s)?.body || s;
+      return Math.hypot(body.w, body.h) + 0.35;
+    });
+    const sorted = [...spans].sort((a,b)=>a-b);
+    const split = sats.length > 16 ? sorted[Math.floor(sats.length*0.5)] : 2.0;
+    const loads = [0,0], ranks = [];
+    for (const size of spans) {
+      const k = sats.length > 4 && (size > split || (size === split && loads[0] > loads[1])) ? 1 : 0;
+      ranks.push(k); loads[k] += size;
+    }
+    const traveled = [0,0];
+    const rings = loads.map((length,k) => {
+      if (!length) return null;
+      const rx = Math.max(base + 1.4 + k*1.8, length / (2*Math.PI*0.78));
+      return {rx, ry:rx*0.78};
+    });
+    if (rings[0] && rings[1]) {
+      rings[1].rx = Math.max(rings[1].rx, rings[0].rx + 1.8);
+      rings[1].ry = rings[1].rx*0.78;
+    }
     const t = now / 1000;
     const items = sats.map((s, i) => {
-      const k = ringOf[i];
-      const j = idx[k]++;
-      const speed = k === 0 ? 1.15 : -0.8;
-      const ang = (j / counts[k]) * Math.PI * 2 + t * speed + k * 0.6;
+      const k = ranks[i], offset = traveled[k] + spans[i]*0.5;
+      traveled[k] += spans[i];
+      const ang = offset / loads[k] * Math.PI * 2 + t * (k === 0 ? 1.15 : -0.8) + k * 0.6;
       const o = rings[k];
       const depth = -Math.sin(ang);   // 屏幕下方为近侧
       return { sat: s, x: pl.x + o.rx * Math.cos(ang), y: pl.y + o.ry * Math.sin(ang), rot: ((ang * 180) / Math.PI + 90) % 360, depth, front: depth > -0.15, ang, ring: k };
     });
     return { items, rings };
+  }
+
+  function landingRotation(from, to, progress) {
+    return Number.isFinite(from) ? from + (((to - from + 540) % 360) - 180) * progress : to;
   }
 
   function drawFaceText(ctx, item, rect, y) {
@@ -864,5 +880,5 @@
   }
 
   LP.Renderer2D = Renderer2D;
-  LP.render2d = { drawItem, drawThumb, drawFaceText, roundRectPath, MASK, ACCENT, CHIP_COLORS, orbitSats, orbitPositions };
+  LP.render2d = { drawItem, drawThumb, drawFaceText, roundRectPath, MASK, ACCENT, CHIP_COLORS, orbitSats, orbitPositions, landingRotation };
 })(globalThis.LP = globalThis.LP || {});

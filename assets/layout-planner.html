@@ -360,7 +360,7 @@ button.primary:hover { opacity: 0.88; }
       <span class="panel-title">器件托盘</span>
       <span id="tray-count" class="muted small"></span>
       <form id="item-search" role="search"><input id="find-item" type="search" list="item-options" placeholder="查位号或名称" aria-label="按位号或名称查找器件"><datalist id="item-options"></datalist></form>
-      <span class="muted small tray-hint">拖到板上；当前步骤要放的器件已高亮</span>
+      <span class="muted small tray-hint">点取主器件，再点板面放下；周边件自动就位</span>
       <span id="tray-sats" class="small" hidden></span>
     </div>
     <div id="tray-list" class="tray-list"></div>
@@ -697,12 +697,13 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       theme: '主题', theme_light: '浅色', theme_dark: '深色',
       help: '帮助', star: 'Star', star_title: '在 GitHub 上 Star 或 Fork 这个 skill，获取后续更新',
       anim_off: '动效', anim_on: '动效开',
-      anim_title_off: '查看当前核心的关联器件环绕预览。点选其他核心可切换。',
-      anim_title_on: '停止环绕预览，查看实际摆位。',
+      anim_title_off: '开启拾取时的环绕与放下时的飞落动画',
+      anim_title_on: '关闭拾取与落地动画',
+      anim_reduced: '本页临时播放拾取与落地动画；刷新后恢复系统的减少动态效果偏好。',
       storage_off: '未自动保存，请手动导出', restored: '已恢复上次的摆放',
       panel_steps: '步骤', panel_eval: '评估',
 
-      tray: '器件托盘', tray_hint: '拖到板上；当前步骤要放的器件已高亮', tray_count: '待放 {n} / {total}',
+      tray: '器件托盘', tray_hint: '点取主器件，再点板面放下；周边件自动就位', tray_count: '待放 {n} / {total}',
       tray_placed: '已摆放', tray_unplaced_sats: '未能放置的卫星器件',
 
       act_toolbar: '选中器件的操作', act_rotate: '旋转', act_flip: '换面', act_lock: '锁定', act_unlock: '解锁',
@@ -933,6 +934,60 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     outlinePolygon, outlineBBox, outlineArea, pointInPolygon, pointInBoard, distToBoardEdge,
     rectInBoard, rectEdgeDistance, faceOutside,
   };
+
+  // Optional mechanical and circuit clearances from the layout being edited, in board mm.
+  const compiledLimits = new WeakMap();
+  function limitsFor(spec) {
+    if (compiledLimits.has(spec)) return compiledLimits.get(spec);
+    const regions = (spec.regions || []).map(region => {
+      const [x0, y0, x1, y1] = region.box;
+      return { ...region, rect: {x0, y0, x1, y1}, except: new Set(region.except) };
+    });
+    const separation = new Map();
+    function add(refs, against, rule) {
+      const entry = { against: new Set(against), gap: rule.gap, name: rule.name };
+      for (const ref of refs) {
+        if (!separation.has(ref)) separation.set(ref, []);
+        separation.get(ref).push(entry);
+      }
+    }
+    for (const rule of spec.separation || []) {
+      add(rule.a, rule.b, rule);
+      add(rule.b, rule.a, rule);
+    }
+    const limits = {regions, separation, edgeExempt:new Set(spec.edgeExempt)};
+    compiledLimits.set(spec, limits);
+    return limits;
+  }
+  function placementViolation(project, item, pose, box, occupied) {
+    const spec = project.placementLimits;
+    if (!spec) return null;
+    const {regions, separation, edgeExempt} = limitsFor(spec);
+    if (spec.edgeMm > 0 && !edgeExempt.has(item.ref) && !rectInBoard(project.board.outline, expand(box, spec.edgeMm))) {
+      return {reason:'outside', with:'板边退让'};
+    }
+    for (const region of regions) {
+      if (!item.through && region.side && region.side !== 'both' && region.side !== pose.side) continue;
+      if (!region.except.has(item.ref) && overlaps(box, region.rect, region.gap)) {
+        return {reason:'keepout', with:region.name || '禁布区'};
+      }
+    }
+    const rules = separation.get(item.ref) || [];
+    for (const other of occupied) {
+      if (other.item.ref === item.ref) continue;
+      const sameSide = item.through || other.item.through || other.side === 'both' || other.side === pose.side;
+      if (spec.gapMm > 0 && sameSide && overlaps(box, other.rect, spec.gapMm)) {
+        return {reason:'overlap', with:other.item.ref};
+      }
+      for (const rule of rules) {
+        if (rule.against.has(other.item.ref) && rectDist(box,other.rect) + EPS < rule.gap) {
+          return {reason:'keepout', with:(rule.name || '器件间距') + ' · ' + other.item.ref};
+        }
+      }
+    }
+    return null;
+  }
+  LP.placementLimits = {violation:placementViolation};
 })(globalThis.LP = globalThis.LP || {});
 
 </script>
@@ -1308,6 +1363,21 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
   function partByRef(p, ref) { return p.parts.find((x) => x.ref === ref) || null; }
   function satByRef(p, ref) { return p.satellites.find((x) => x.ref === ref) || null; }
   function itemByRef(p, ref) { return partByRef(p, ref) || satByRef(p, ref); }
+  function isChipPeripheral(item) {
+    return /^(res|cap|ferrite|thermistor)$/.test(item.shape) ||
+      ['resistor', 'capacitor', 'ferrite', 'thermistor'].includes(item.visualPackage?.kind) ||
+      /^[RC](?:\d{4}|_\d{4}_\d{4}Metric)$/i.test((item.footprint || '').split(':').pop());
+  }
+  function placementOwner(item) {
+    if (!item) return null;
+    if (item.placementRole) return item.placementRole === 'satellite' ? item.placementParent?.[0] || null : null;
+    return isChipPeripheral(item) ? item.orbitParent || item.associatedParent || null : null;
+  }
+  function placementChildren(p, ref) { return p.parts.filter(x => placementOwner(x) === ref); }
+  function isTrayPart(item) {
+    if (item.placementRole) return item.placementRole === 'primary' || item.placementRole === 'main';
+    return !item.kind && !isChipPeripheral(item);
+  }
   function placedParts(p) { return p.parts.filter((x) => x.placed); }
   function partTags(pt) {
     const t = new Set([pt.role, 'part']);
@@ -1471,7 +1541,11 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     const d = clone(p);
     delete d.result;
     delete d.orbitFocus;
-    for (const x of d.parts || []) { delete x.placed; delete x.locked; delete x.orbitParent; delete x.visualPackage; }
+    delete d.placementLimits;
+    for (const x of d.parts || []) {
+      delete x.placed; delete x.locked; delete x.orbitParent; delete x.visualPackage;
+      delete x.placementRole; delete x.placementParent; delete x.placementOffset;
+    }
     for (const x of d.satellites || []) { delete x.placed; delete x.pinned; delete x.visualPackage; }
     if (d.board) { delete d.board.outline; delete d.board.mask; delete d.board.holes; }
     const s = stableStringify(d);
@@ -1577,7 +1651,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
   LP.model = {
     TOOL_VERSION, ROLES, SAT_KINDS, NET_CLASSES, SIDES, ROTS, SENSOR_ROLES,
     validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint, faceName, faceRect, passiveGeometry, bgaMark,
-    partByRef, satByRef, itemByRef, placedParts, partTags, satTags, connectedParts, parseCap,
+    partByRef, satByRef, itemByRef, placementOwner, placementChildren, isTrayPart, placedParts, partTags, satTags, connectedParts, parseCap,
     snapshot, restore, definitionHash, exportLayout, resultObject, exportCSV, r2, remapBoardFeatures, partsArea, BOARD_SHAPES, outlineFromShape, shapeOf, toEditablePolygon, exportDXF,
     HOLE_SIZES, HOLE_EDGE, holeFits, cornerHoles, suggestHole,
   };
@@ -1707,12 +1781,22 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     for (const k of p.board.keepouts || []) if (G.overlaps(r, { x0: k.x, y0: k.y, x1: k.x + k.w, y1: k.y + k.h })) return { ok: false, reason: 'keepout', with: k.reason || '禁布区' };
     for (const h of p.board.holes || []) if (G.overlaps(r, G.expand(holeRect(h), 0.3))) return { ok: false, reason: 'hole' };
     const side = part.through ? 'both' : pl.side;
+    const occupied = [];
     for (const q of p.parts) {
-      if (q === part || !q.placed) continue;
+      if (q === part || !q.placed || (!q.locked && M.placementOwner(q) === part.ref)) continue;
       const qs = q.through ? 'both' : q.placed.side;
+      const rect = M.footprint(q);
+      occupied.push({item:q,rect,side:qs});
       if (side !== 'both' && qs !== 'both' && qs !== side) continue;
-      if (G.overlaps(r, M.footprint(q))) return { ok: false, reason: 'overlap', with: q.ref };
+      if (G.overlaps(r, rect)) return { ok: false, reason: 'overlap', with: q.ref };
     }
+    for (const sat of p.satellites) {
+      if (sat.placed && (sat.pinned || sat.parent[0] !== part.ref)) occupied.push({item:sat,rect:M.satFootprint(sat),side:sat.placed.side});
+      if (sat.pinned && sat.placed && (side === 'both' || sat.placed.side === side) && G.overlaps(r,M.satFootprint(sat)))
+        return { ok: false, reason: 'overlap', with:sat.ref };
+    }
+    const violation = LP.placementLimits?.violation(p,part,pl,r,occupied);
+    if (violation) return {ok:false,...violation};
     return { ok: true };
   }
   /** 拖动反馈：bad 不可放；warn 可放但会挤占卫星位置或进入天线净空区。 */
@@ -1999,6 +2083,140 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     ];
   }
 
+  // Imported electrical parts retain their own pads, nets and editable poses. Only a
+  // committed move of their owner changes them; evaluating or opening a file never does.
+  function seedOffset(child, previous) {
+    // Translate the live group, including restored user edits. A first placement
+    // or a tray round-trip uses the imported footprint's relative seed instead.
+    if (!previous || !child.placed) return child.placementOffset || null;
+    const dx = child.placed.x - previous.x, dy = child.placed.y - previous.y;
+    const xAxis = M.dirToWorld(1, 0, previous), yAxis = M.dirToWorld(0, 1, previous);
+    return { x: dx*xAxis.x + dy*xAxis.y, y: dx*yAxis.x + dy*yAxis.y,
+      rot: (child.placed.rot - previous.rot) * (previous.side === 'bottom' ? -1 : 1),
+      side: child.placed.side === previous.side ? 'same' : 'opposite' };
+  }
+
+  function placementPin(core, child, hint) {
+    const pin = child.placementParent?.[1];
+    const copper = pin && core.physicalPads?.find(pad => pad.n === pin);
+    if (copper?.xy?.length) {
+      const closest = copper.xy.map(([x,y]) => M.toWorld(x,y,core.placed))
+        .sort((a,b) => distance(a,hint) - distance(b,hint))[0];
+      return {...closest, net:copper.net};
+    }
+    return (pin && M.pinWorld(core,pin)) || hint;
+  }
+  function distance(a, b) { return Math.hypot(a.x-b.x, a.y-b.y); }
+
+  function findImportedSlot(p, core, child, offset, obstacles, occupied, search) {
+    const pose = core.placed;
+    const requestedSide = offset?.side === 'opposite' ? (pose.side === 'top' ? 'bottom' : 'top') : pose.side;
+    const allowed = child.sides.filter(side => side === 'top' || p.board.two_sided);
+    const side = allowed.includes(requestedSide) ? requestedSide : allowed[0];
+    if (!side) return null;
+    const rot = ((pose.rot + (offset?.rot || 0) * (pose.side === 'bottom' ? -1 : 1)) % 360 + 360) % 360;
+    const hint = offset ? M.toWorld(offset.x, offset.y, pose) : pose;
+    const pin = placementPin(core, child, hint);
+    const matchingPads = (child.physicalPads || []).find(pad => pin.net && pad.net === pin.net)?.xy || [];
+    const target = offset ? hint : pin;
+    const accepts = pl => {
+      const rect = M.footprint(child,pl);
+      return feasible(p,rect,side,obstacles) &&
+        (!child.through || feasible(p,rect,side === 'top' ? 'bottom' : 'top',obstacles)) &&
+        !LP.placementLimits?.violation(p,child,pl,rect,occupied);
+    };
+    const seed = {x:target.x, y:target.y, rot, side};
+    if (accepts(seed)) return seed;
+    if (!search) return null;
+
+    // Expand around the intended footprint. Test alternate angles at each location.
+    // Search the vicinity of this core, so an unrelated vacant corner cannot silently
+    // become the location of a decoupler or termination.
+    const step = 0.5, rings = Math.ceil(Math.max(6,core.w,core.h,child.w,child.h) / step);
+    for (let ring = 0; ring <= rings; ring++) {
+      let best = null, bestCost = Infinity;
+      const trySite = (origin,dx,dy) => {
+        const x = origin.x + dx*step, y = origin.y + dy*step;
+        for (const delta of [0,90,180,270]) {
+          const pl = { x, y, rot:(rot+delta)%360, side };
+          const toPin = matchingPads.length
+            ? Math.min(...matchingPads.map(([px,py])=>distance(M.toWorld(px,py,pl),pin)))
+            : distance(pl,pin);
+          const cost = distance(pl,target) + toPin + (delta ? 0.01 : 0);
+          if (cost < bestCost && accepts(pl)) { best = pl; bestCost = cost; }
+        }
+      };
+      const origins = distance(pin,target) > step ? [target,pin] : [target];
+      for (const origin of origins) for (let i = -ring; i <= ring; i++) {
+        trySite(origin,i,ring);
+        if (ring) trySite(origin,i,-ring);
+        if (Math.abs(i) < ring) { trySite(origin,ring,i); trySite(origin,-ring,i); }
+      }
+      if (best) return best;
+    }
+    return null;
+  }
+
+  function placeImported(p, core, previous) {
+    const movable = M.placementChildren(p,core.ref).filter(x=>!x.locked);
+    if (!movable.length) return [];
+    if (!core.placed) { for (const child of movable) child.placed = null; return []; }
+    p._safe = safeRect(p.board.outline);
+    const moving = new Set(movable.map(x=>x.ref));
+    const obstacles = buildObstacles(p).filter(o=>!moving.has(o.ref));
+    for (const sat of p.satellites) if (sat.placed && (sat.pinned || sat.parent[0] !== core.ref))
+      obstacles.push({rect:M.satFootprint(sat),side:sat.placed.side,ref:sat.ref,gap:true});
+    const occupied = obstacles.filter(o=>o.gap).map(o=>({item:M.itemByRef(p,o.ref),rect:o.rect,side:o.side}));
+    const group = movable.map(child=>({child,offset:seedOffset(child,previous),old:child.placed}));
+    const fixedObstacles = obstacles.length, fixedOccupied = occupied.length;
+    const reserve = child => {
+      const rect = M.footprint(child), side = child.through?'both':child.placed.side;
+      obstacles.push({rect,side,ref:child.ref,gap:true});
+      occupied.push({item:child,rect,side});
+    };
+    const seat = ({child,offset},search) => {
+      child.placed = findImportedSlot(p,core,child,offset,obstacles,occupied,search);
+      if (child.placed) reserve(child);
+      return !!child.placed;
+    };
+    const solve = entries => {
+      // Reserve every usable design seed before a displaced sibling can consume it.
+      const displaced = entries.filter(s=>!seat(s,false));
+      displaced.sort((a,b)=>b.child.w*b.child.h-a.child.w*a.child.h);
+      return displaced.filter(s=>!seat(s,true));
+    };
+    const pending = solve(group);
+    const localRange = Math.max(core.w,core.h,...movable.map(s=>Math.max(s.w,s.h))) * 1.5;
+    if (!pending.length || !previous || previous.side !== core.placed.side ||
+        distance(previous,core.placed) > localRange) return pending.map(s=>s.child.ref);
+
+    // A small owner move can displace a tightly packed power component. If the first
+    // arrangement failed, preserve the group's still-legal sites, then improve them.
+    const first = group.map(s=>s.child.placed);
+    obstacles.length = fixedObstacles; occupied.length = fixedOccupied;
+    const reserved = new Set();
+    for (const entry of group) {
+      const {child,old} = entry;
+      if (!old) continue;
+      const savedOffset = seedOffset({...child,placed:old},core.placed);
+      if (seat({child,offset:savedOffset},false)) reserved.add(child.ref);
+    }
+    if (reserved.size) {
+      const retry = solve(group.filter(entry=>!reserved.has(entry.child.ref)));
+      if (retry.length < pending.length) {
+        for (const entry of group.filter(s=>reserved.has(s.child.ref))) {
+          const child = entry.child, old = child.placed;
+          obstacles.splice(obstacles.findIndex(o=>o.ref===child.ref),1);
+          occupied.splice(occupied.findIndex(o=>o.item===child),1);
+          if (!seat(entry,false)) { child.placed=old; reserve(child); }
+        }
+        return retry.map(s=>s.child.ref);
+      }
+    }
+    group.forEach((s,i)=>{ s.child.placed=first[i]; });
+    return pending.map(s=>s.child.ref);
+  }
+
   /** 卫星的锚点：父引脚组位置与朝外法向；BGA 中心出线的器件改为四边。 */
   function anchorOf(p, sat) {
     const part = M.partByRef(p, sat.parent[0]);
@@ -2245,7 +2463,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     return out;
   }
 
-  LP.satellites = { CONFIG, satsOf, placeAll, halos, anchorOf, candidates };
+  LP.satellites = { CONFIG, satsOf, placeAll, placeImported, halos, anchorOf, candidates };
 })(globalThis.LP = globalThis.LP || {});
 
 </script>
@@ -2709,7 +2927,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         const blocking = issues.filter((i) => i.severity === 'P0' || i.severity === 'P1').length;
         return { id: s.id, state: allPlaced && !blocking ? 'done' : 'todo', parts: [], blocking };
       }
-      const parts = p.parts.filter((x) => s.roles.includes(x.role)).map((x) => x.ref);
+      const parts = p.parts.filter((x) => M.isTrayPart(x) && s.roles.includes(x.role)).map((x) => x.ref);
       if (!parts.length) return { id: s.id, state: 'skip', parts };
       const placed = parts.every((r) => M.partByRef(p, r).placed);
       return { id: s.id, state: placed && !bad(parts) ? 'done' : placed ? 'issues' : 'todo', parts };
@@ -2721,12 +2939,19 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     const satResults = LP.satellites.placeAll(p);
     const zones = LP.rules.zones(p);
     const issues = LP.rules.check(p, satResults);
+    const importedMissing = p.parts.filter(x=>!x.placed && M.placementOwner(x) && M.partByRef(p,M.placementOwner(x))?.placed);
+    for (const child of importedMissing) {
+      const owner = M.placementOwner(child);
+      issues.push({id:'satellite_slot:'+child.ref, rule:'satellite_slot', severity:'P1', check:'卫星贴放',
+        refs:[child.ref,owner], msg:`${child.ref}（${M.faceName(child)}）在 ${owner} 周边尚无落点。`,
+        fix:'移开阻挡器件，再拾起主器件重新放置。'});
+    }
     const metrics = LP.metrics.evaluate(p, satResults, zones);
     const halos = LP.satellites.halos(p);
     return {
       satResults, zones, issues, metrics, halos,
-      unplacedParts: p.parts.filter((x) => !x.placed).map((x) => x.ref),
-      unplacedSats: Object.entries(satResults).filter(([, r]) => r.considered && !r.placed).map(([k]) => k),
+      unplacedParts: p.parts.filter((x) => !x.placed && !M.placementOwner(x)).map((x) => x.ref),
+      unplacedSats: Object.entries(satResults).filter(([, r]) => r.considered && !r.placed).map(([k]) => k).concat(importedMissing.map(x=>x.ref)),
       steps: stepStatus(p, issues, opts),
     };
   }
@@ -3072,7 +3297,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       if (app.layers.sats) {
         for (const s of p.satellites) if (s.placed && s._active && this.onSide(s.placed.side) && hit(M.satFootprint(s))) return { type: 'sat', ref: s.ref };
       }
-      const parts = p.parts.filter((x) => x.placed).sort((a, b) => b.z - a.z);
+      const parts = p.parts.filter((x) => x.placed && (app.layers.sats || !M.placementOwner(x))).sort((a, b) => b.z - a.z);
       for (const x of parts) if (this.onSide(x.through ? 'both' : x.placed.side) && hit(M.footprint(x))) return { type: 'part', ref: x.ref };
       for (const x of parts) if (hit(M.footprint(x))) return { type: 'part', ref: x.ref, backside: true };
       return null;
@@ -3160,13 +3385,15 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
 
       const side = this.viewSide();
       const drag = this.opts.noInsets ? null : app.drag;
+      const carried = new Set(drag?.visible && drag.kind === 'part' ? orbitSats(p, drag.ref).map(x => x.ref) : []);
+      this.orbitPos = null;
       // 背面（或正面，翻板时）器件：半透明轮廓
       for (const x of p.parts) {
-        if (!x.placed || (drag && drag.ref === x.ref)) continue;
+        if (!x.placed || carried.has(x.ref) || (drag && drag.ref === x.ref) || (!app.layers.sats && M.placementOwner(x))) continue;
         if (this.onSide(x.through ? 'both' : x.placed.side)) continue;
         this.drawAt(x, M.footprint(x), x.placed, false, { ghost: true });
       }
-      if (app.layers.sats) for (const s of p.satellites) if (s.placed && s._active && !this.onSide(s.placed.side)) this.drawAt(s, M.satFootprint(s), s.placed, true, { ghost: true });
+      if (app.layers.sats) for (const s of p.satellites) if (s.placed && s._active && !carried.has(s.ref) && !this.onSide(s.placed.side)) this.drawAt(s, M.satFootprint(s), s.placed, true, { ghost: true });
       // 外晕
       if (app.layers.halo && app.ev) {
         for (const hl of app.ev.halos) {
@@ -3178,12 +3405,11 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
           ctx.setLineDash([4, 4]); ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
         }
       }
-      // 卫星
+      const landed = new Map();
       if (app.layers.sats) {
-        for (const s of p.satellites) {
-          if (!s.placed || !s._active || !this.onSide(s.placed.side)) continue;
-          if (app.animOn && drag && drag.kind === 'part' && drag.visible && s.parent[0] === drag.ref && !s.pinned) continue;
-          let sc = 1, alpha = 1, off = null;
+        for (const s of [...p.satellites, ...p.parts.filter(M.placementOwner)]) {
+          if (!s.placed || (s.kind && !s._active) || !this.onSide(s.placed.side) || carried.has(s.ref) || drag?.ref === s.ref) continue;
+          let sc = 1, alpha = 1, off = null, lift = 0, rot = s.placed.rot;
           const pop = this.anims.find((a) => a.type === 'pop' && a.ref === s.ref);
           if (pop) {
             const t = Math.max(0, Math.min(1, (now - pop.t0 - pop.delay) / pop.dur));
@@ -3191,6 +3417,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
               // 从轨道飞落：先保持悬浮，再沿弧线落到贴放位置
               const e = easeOut(t);
               sc = 1.15 - 0.15 * easeOutBack(t);
+              rot = landingRotation(pop.from.rot, rot, e);
+              lift = (pop.from.lift || 0) * (1 - e);
               off = { x: (pop.from.x - s.placed.x) * (1 - e), y: (pop.from.y - s.placed.y) * (1 - e) + Math.sin(Math.PI * t) * 0.8 };
             } else {
               sc = 0.3 + 0.7 * easeOutBack(t); alpha = t > 0 ? 1 : 0;
@@ -3199,11 +3427,14 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
             if (t >= 1) pop.done = true;
           }
           const res = app.ev && app.ev.satResults[s.ref];
-          this.drawAt(s, M.satFootprint(s), s.placed, true, { scale: sc, alpha, off, bad: res && !res.ok, pinned: s.pinned, selected: app.sel && app.sel.ref === s.ref });
+          const pose = off ? { ...s.placed, rot, x:s.placed.x + off.x, y:s.placed.y + off.y } : s.placed;
+          if (alpha > 0) landed.set(s, pose);
+          this.drawAt(s, s.kind ? M.satFootprint(s,pose) : M.footprint(s,pose), pose, !!s.kind,
+            { scale: sc, alpha, lift, floating:!!pop && !pop.done, bad:res && !res.ok, pinned:s.pinned || s.locked, selected:app.sel?.ref === s.ref });
         }
       }
       // 主器件（低的先画）
-      const parts = p.parts.filter((x) => x.placed && this.onSide(x.through ? 'both' : x.placed.side) && !(drag && drag.ref === x.ref)).sort((a, b) => a.z - b.z);
+      const parts = p.parts.filter((x) => x.placed && !M.placementOwner(x) && this.onSide(x.through ? 'both' : x.placed.side) && !(drag && drag.ref === x.ref)).sort((a, b) => a.z - b.z);
       const related = this.relatedMap();
       const critical = this.criticalRefs();
       for (const x of parts) {
@@ -3249,10 +3480,11 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         }
         if (t >= 1) a.done = true;
       }
-      this.drawLabels(parts);
+      for (const x of parts) this.drawPartLabel(x, this.screenRect(M.faceRect(x)));
+      for (const [s, pose] of landed) this.drawPartLabel(s, this.screenRect(M.faceRect(s, pose)));
       if (app.boardEditing && !drag) this.drawHandles();
 
-      this.anims = this.anims.filter((a) => !a.done);
+      this.anims = this.anims.filter(a => !a.done && (a.type !== 'pop' || now < a.t0 + (a.delay || 0) + (a.dur || 300)));
       const blinking = critical.size > 0 && !app.reducedMotion;
       const orbiting = drag && drag.visible && drag.kind === 'part' && !app.reducedMotion && orbitSats(p, drag.ref).length;
       if (this.anims.length || blinking || orbiting || (drag && drag.status === 'bad')) this.requestDraw();
@@ -3371,7 +3603,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
      * 位置记入 this.orbitPos，落地时卫星从这里飞向自动贴放的位置。
      */
     drawOrbit(part, pl, now, layer) {
-      if (!this.app.animOn || !this.app.layers.sats) return;
+      if (!this.app.layers.sats) return;
       const sats = orbitSats(this.app.p, part.ref);
       if (!sats.length) return;
       const pos = orbitPositions(part, pl, sats, this.app.reducedMotion ? 0 : now);
@@ -3392,9 +3624,11 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       }
       for (const q of pos.items) {
         if ((layer === 'above') !== q.front) continue;
-        this.orbitPos[q.sat.ref] = { x: q.x, y: q.y };
+        this.orbitPos[q.sat.ref] = { x: q.x, y: q.y, rot:q.rot, lift:0.8 + q.depth*0.4 };
         const spl = { x: q.x, y: q.y, rot: q.rot, side: pl.side };
-        this.drawAt(q.sat, M.satFootprint(q.sat, { ...spl, rot: 0 }), spl, true, { lift: 0.8 + q.depth * 0.4, scale: 1.05 + q.depth * 0.12, alpha: q.front ? 1 : 0.75 });
+        const rect = M.faceRect(q.sat, spl), lift = 0.8 + q.depth * 0.4;
+        this.drawAt(q.sat, rect, spl, !!q.sat.kind, {floating:true, lift, scale:1.05 + q.depth*0.12, alpha:q.front ? 1 : 0.75});
+        this.drawPartLabel(q.sat, this.screenRect(rect), lift*4);
       }
     }
 
@@ -3507,33 +3741,18 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       ctx.textAlign = 'left';
     }
     faceText(item, rect, y) { drawFaceText(this.ctx, item, rect, y); }
-    drawLabels(parts) {
-      const ctx = this.ctx, app = this.app;
+    drawPartLabel(x, r, yOffset = 0) {
+      const ctx = this.ctx, m = Math.min(r.w, r.h);
+      if (m < 14) return;
+      const fs = Math.max(9, Math.min(13, m * 0.28));
+      ctx.save();
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      for (const x of parts) {
-        const r = this.screenRect(M.faceRect(x));
-        const m = Math.min(r.w, r.h);
-        if (m < 14) continue;
-        const fs = Math.max(9, Math.min(13, m * 0.28));
-        ctx.font = `600 ${fs}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-        const light = M.passiveGeometry(x)?.kind === 'capacitor' || ['chip_antenna', 'module', 'coin', 'usb_c', 'pouch', 'fpc', 'mic'].includes(x.shape);
-        ctx.fillStyle = light ? 'rgba(30,32,36,0.85)' : 'rgba(255,255,255,0.92)';
-        const cy = x.shape === 'button' ? r.y + r.h - fs * 0.7 : r.y + r.h / 2;
-        this.faceText(x, r, cy);
-      }
-      if (app.layers.sats) {
-        ctx.font = '600 9px system-ui, sans-serif';
-        for (const s of app.p.satellites) {
-          if (!s.placed || !s._active || !this.onSide(s.placed.side)) continue;
-          const r = this.screenRect(M.faceRect(s));
-          if (r.h < 12 || r.w < 16) continue;
-          ctx.fillStyle = '#fff';
-          ctx.shadowColor = '#111'; ctx.shadowBlur = 3;
-          this.faceText(s, r, r.y + r.h / 2);
-          ctx.shadowBlur = 0;
-        }
-      }
-      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.font = `600 ${fs}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+      const light = M.passiveGeometry(x)?.kind === 'capacitor' || ['chip_antenna', 'module', 'coin', 'usb_c', 'pouch', 'fpc', 'mic'].includes(x.shape);
+      ctx.fillStyle = light ? 'rgba(30,32,36,0.85)' : 'rgba(255,255,255,0.92)';
+      const cy = x.shape === 'button' ? r.y + r.h - fs * 0.7 : r.y + r.h / 2;
+      this.faceText(x, r, cy - yOffset);
+      ctx.restore();
     }
     drawHandles() {
       const ctx = this.ctx;
@@ -3545,7 +3764,9 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
   }
 
   /** 跟随被拾取器件一起悬浮的卫星：该器件的全部未固定卫星（未摆放的器件也有）。 */
-  function orbitSats(p, ref) { return p.satellites.filter((s) => s.parent[0] === ref && !s.pinned); }
+  function orbitSats(p, ref) {
+    return [...p.satellites.filter(s => s.parent[0] === ref && !s.pinned), ...M.placementChildren(p, ref).filter(s => !s.locked)];
+  }
   /**
    * 轨道位置（毫米，板面坐标）。两条轨道：内圈放小件，外圈放晶体、电感等较大的卫星；
    * 椭圆略扁，模拟俯视下倾斜的轨道；depth ∈ [-1, 1] 表示在轨道近侧(+)还是远侧(−)。
@@ -3553,22 +3774,42 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
   function orbitPositions(part, pl, sats, now) {
     const [w, h] = M.dims(part.w, part.h, pl.rot || 0);
     const base = Math.max(w, h) / 2;
-    const big = (s) => Math.max(s.w, s.h) >= 1.6;
-    const ringOf = sats.map((s) => (sats.length > 4 && big(s) ? 1 : 0));
-    const counts = [ringOf.filter((r) => r === 0).length, ringOf.filter((r) => r === 1).length];
-    const rings = [0, 1].map((k) => (counts[k] ? { rx: base + 1.4 + k * 1.8, ry: (base + 1.4 + k * 1.8) * 0.78 } : null));
-    const idx = [0, 0];
+    // A full imported package can carry dozens of parts. Reserve each body its own arc.
+    const spans = sats.map(s => {
+      const body = M.passiveGeometry(s)?.body || s;
+      return Math.hypot(body.w, body.h) + 0.35;
+    });
+    const sorted = [...spans].sort((a,b)=>a-b);
+    const split = sats.length > 16 ? sorted[Math.floor(sats.length*0.5)] : 2.0;
+    const loads = [0,0], ranks = [];
+    for (const size of spans) {
+      const k = sats.length > 4 && (size > split || (size === split && loads[0] > loads[1])) ? 1 : 0;
+      ranks.push(k); loads[k] += size;
+    }
+    const traveled = [0,0];
+    const rings = loads.map((length,k) => {
+      if (!length) return null;
+      const rx = Math.max(base + 1.4 + k*1.8, length / (2*Math.PI*0.78));
+      return {rx, ry:rx*0.78};
+    });
+    if (rings[0] && rings[1]) {
+      rings[1].rx = Math.max(rings[1].rx, rings[0].rx + 1.8);
+      rings[1].ry = rings[1].rx*0.78;
+    }
     const t = now / 1000;
     const items = sats.map((s, i) => {
-      const k = ringOf[i];
-      const j = idx[k]++;
-      const speed = k === 0 ? 1.15 : -0.8;
-      const ang = (j / counts[k]) * Math.PI * 2 + t * speed + k * 0.6;
+      const k = ranks[i], offset = traveled[k] + spans[i]*0.5;
+      traveled[k] += spans[i];
+      const ang = offset / loads[k] * Math.PI * 2 + t * (k === 0 ? 1.15 : -0.8) + k * 0.6;
       const o = rings[k];
       const depth = -Math.sin(ang);   // 屏幕下方为近侧
       return { sat: s, x: pl.x + o.rx * Math.cos(ang), y: pl.y + o.ry * Math.sin(ang), rot: ((ang * 180) / Math.PI + 90) % 360, depth, front: depth > -0.15, ang, ring: k };
     });
     return { items, rings };
+  }
+
+  function landingRotation(from, to, progress) {
+    return Number.isFinite(from) ? from + (((to - from + 540) % 360) - 180) * progress : to;
   }
 
   function drawFaceText(ctx, item, rect, y) {
@@ -3603,7 +3844,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
   }
 
   LP.Renderer2D = Renderer2D;
-  LP.render2d = { drawItem, drawThumb, drawFaceText, roundRectPath, MASK, ACCENT, CHIP_COLORS, orbitSats, orbitPositions };
+  LP.render2d = { drawItem, drawThumb, drawFaceText, roundRectPath, MASK, ACCENT, CHIP_COLORS, orbitSats, orbitPositions, landingRotation };
 })(globalThis.LP = globalThis.LP || {});
 
 </script>
@@ -3748,14 +3989,18 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     }
     boardToScreen(x, y, h) {
       this.updateCamera();
-      this.board.updateMatrixWorld();
+      this.board.updateWorldMatrix(true, false);
+      return this.projectBoardPoint(x,y,h);
+    }
+    projectBoardPoint(x, y, h) {
       const side = this.viewSide();
       const v = this.local(x, y, this.surfaceY(side) + (side === 'bottom' ? -(h || 0) : (h || 0)));
       v.applyMatrix4(this.board.matrixWorld).project(this.camera);
       return { x: (v.x + 1) / 2 * this.W, y: (1 - v.y) / 2 * this.H };
     }
-    screenRect(r, h) {
-      const pts = [[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]].map(([x, y]) => this.boardToScreen(x, y, h || 0));
+    screenRect(r, h, currentMatrices = false) {
+      if (!currentMatrices) { this.updateCamera(); this.board.updateWorldMatrix(true, false); }
+      const pts = [[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]].map(([x, y]) => this.projectBoardPoint(x, y, h || 0));
       const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
       return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
     }
@@ -3767,7 +4012,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         let o = hit.object;
         while (o && !o.userData.ref) o = o.parent;
         if (!o) continue;
-        if (o.userData.type === 'sat' && !this.app.layers.sats) continue;
+        if (!o.visible || (o.userData.type === 'sat' && !this.app.layers.sats)) continue;
         return { type: o.userData.type, ref: o.userData.ref, backside: !this.onSide(o.userData.side) };
       }
       return null;
@@ -3901,9 +4146,9 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     }
 
     /** 主器件模型（局部坐标：中心为原点、底面在 y=0、板面 x 向右、板面 y 向 −z）。 */
-    partModel(part) {
+    partModel(part, floating = false) {
       const pkg = M.passiveGeometry(part);
-      if (pkg) return this.passiveModel(pkg);
+      if (pkg) return this.passiveModel(pkg, floating);
       const T = this.T, g = new T.Group();
       const w = part.w, d = part.h, H = Math.max(0.5, part.z * HZ);
       const gold = this.std(0xd8b66a, { metalness: 0.3, roughness: 0.45 });
@@ -3973,9 +4218,9 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       }
       return g;
     }
-    satModel(s) {
+    satModel(s, floating = false) {
       const pkg = M.passiveGeometry(s);
-      if (pkg) return this.passiveModel(pkg);
+      if (pkg) return this.passiveModel(pkg, floating);
       const T = this.T, g = new T.Group();
       const w = s.w, d = s.h, H = Math.max(0.35, Math.min(w, d) * 0.7) * HZ;
       const shape = M.SAT_KINDS[s.kind].shape;
@@ -4076,7 +4321,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       for (const x of p.parts) {
         if (!x.placed) continue;
         const grp = this.partModel(x);
-        grp.userData = { type: 'part', ref: x.ref, side: x.placed.side };
+        grp.userData = { type: 'part', ref: x.ref, side: x.placed.side, satellite:!!M.placementOwner(x) };
         this.pose(grp, x.placed, 0);
         if (drag && drag.ref === x.ref && drag.visible) grp.visible = false;
         this.board.add(grp);
@@ -4144,7 +4389,6 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       this.labels.innerHTML = '';
       this.labelEls = new Map();
       for (const x of [...this.app.p.parts, ...this.app.p.satellites]) {
-        if (!x.placed) continue;
         const el = document.createElement('span');
         el.className = 'label3d';
         el.textContent = M.faceName(x);
@@ -4210,13 +4454,17 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
           if (g && part && part.placed) this.pose(g, part.placed, (1 - easeOutBack(t)) * LIFT * 0.4);
           if (t >= 1) a.done = true;
         } else if (a.type === 'pop') {
-          const g = this.satMeshes.get(a.ref), s = M.satByRef(p, a.ref);
+          const g = this.satMeshes.get(a.ref) || this.partGroups.get(a.ref), s = M.itemByRef(p, a.ref);
           const t = Math.max(0, Math.min(1, (now - a.t0 - (a.delay || 0)) / (a.dur || 300)));
           if (g && s && s.placed) {
+            for (const child of g.children) if (child.name.startsWith('pad:')) child.visible = t>=1;
             if (a.from) {
               const e = easeOut(t);
-              const pl = { ...s.placed, x: a.from.x + (s.placed.x - a.from.x) * e, y: a.from.y + (s.placed.y - a.from.y) * e };
-              this.pose(g, pl, (a.orbit ? LIFT * 0.8 : 1) * (1 - e) + Math.sin(Math.PI * t) * 0.6);
+              const pl = { ...s.placed, x:a.from.x+(s.placed.x-a.from.x)*e, y:a.from.y+(s.placed.y-a.from.y)*e,
+                rot:LP.render2d.landingRotation(a.from.rot,s.placed.rot,e) };
+              const height = (a.orbit ? (a.from.lift ?? LIFT * 0.8) : 1) * (1 - e) + Math.sin(Math.PI * t) * 0.6;
+              this.pose(g, pl, height);
+              this.movingFaces.set(s.ref, {...pl, lift:height});
             } else { const k = 0.3 + 0.7 * easeOutBack(t); g.scale.set(k * Math.sign(g.scale.x || 1), k * Math.sign(g.scale.y || 1), k); }
             if (t >= 1) { this.pose(g, s.placed, 0); a.done = true; }
           } else if (t >= 1) a.done = true;
@@ -4232,10 +4480,22 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     /** 拖动中的器件、它的环绕卫星和落点轮廓。 */
     updateDynamic(now) {
       const T = this.T, app = this.app, p = app.p, d = app.drag;
-      for (let i = this.dyn.children.length - 1; i >= 0; i--) this.dyn.remove(this.dyn.children[i]);
-      for (const [ref, g] of this.partGroups) g.visible = !(d && d.ref === ref && d.visible);
-      for (const [ref, g] of this.satMeshes) { const s = M.satByRef(p, ref); g.visible = !(app.animOn && d && d.kind === 'part' && d.visible && s.parent[0] === d.ref && !s.pinned); }
-      if (!d || !d.visible || !d.pl) { this.orbitPos = this.orbitPos || null; return; }
+      this.dyn.clear();
+      this.movingFaces = new Map();
+      this.orbitPos = null;
+      const sats = d?.visible && d.kind === 'part' && app.layers.sats ? LP.render2d.orbitSats(p,d.ref) : [];
+      const carried = new Set(sats.map(s => s.ref));
+      for (const [ref, g] of this.partGroups) {
+        g.visible = !(d?.visible && d.ref === ref) && !carried.has(ref) && (app.layers.sats || !g.userData.satellite);
+      }
+      for (const [ref, g] of this.satMeshes) g.visible = app.layers.sats && !carried.has(ref) && !(d?.visible && d.ref === ref);
+      if (!d || !d.visible || !d.pl) { this.dragModels = null; return; }
+      if (!this.dragModels || this.dragModels.drag !== d) this.dragModels = {drag:d, models:new Map()};
+      const floatingModel = item => {
+        const cache = this.dragModels.models;
+        if (!cache.has(item.ref)) cache.set(item.ref,item.kind ? this.satModel(item,true) : this.partModel(item,true));
+        return cache.get(item.ref);
+      };
       const item = M.itemByRef(p, d.ref);
       const isSat = d.kind === 'sat';
       const raw = { ...d.pl, x: (d.raw || d.pl).x, y: (d.raw || d.pl).y };
@@ -4243,42 +4503,47 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       const fp = isSat ? M.satFootprint(item, d.pl) : M.footprint(item, d.pl);
       const color = d.status === 'bad' ? 0xef4444 : d.status === 'warn' ? 0xf59e0b : 0x14b8a6;
       const c = G.center(fp);
-      const fill = new T.Mesh(new T.PlaneGeometry(fp.x1 - fp.x0, fp.y1 - fp.y0), new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.25, depthWrite: false, side: T.DoubleSide }));
+      const width = fp.x1-fp.x0, depth = fp.y1-fp.y0;
+      if (!this.dragPlane) {
+        this.dragPlane = new T.PlaneGeometry(1,1);
+        this.dragEdges = new T.EdgesGeometry(this.dragPlane);
+        this.orbitRing = new T.BufferGeometry().setFromPoints(
+          new T.EllipseCurve(0,0,1,1,0,Math.PI*2).getPoints(64).map(q=>new T.Vector3(q.x,0,-q.y)));
+      }
+      const fill = new T.Mesh(this.dragPlane, this.mat('drop:'+color, () => new T.MeshBasicMaterial({color,transparent:true,opacity:0.25,depthWrite:false,side:T.DoubleSide})));
       fill.rotation.x = -Math.PI / 2;
-      fill.position.copy(this.local(c.x, c.y, d.pl.side === 'bottom' ? -0.05 : this.thick + 0.05));
-      const edge = new T.LineSegments(new T.EdgesGeometry(new T.PlaneGeometry(fp.x1 - fp.x0, fp.y1 - fp.y0)), new T.LineBasicMaterial({ color }));
-      edge.rotation.copy(fill.rotation); edge.position.copy(fill.position);
-      this.dyn.add(fill, edge);
-      // 悬浮的器件
-      const model = isSat ? this.satModel(item) : this.partModel(item);
+      fill.scale.set(width,depth,1);
+      fill.position.copy(this.local(c.x,c.y,d.pl.side==='bottom' ? -0.05 : this.thick+0.05));
+      const edge = new T.LineSegments(this.dragEdges, this.mat('drop-edge:'+color,()=>new T.LineBasicMaterial({color})));
+      edge.rotation.copy(fill.rotation); edge.position.copy(fill.position); edge.scale.copy(fill.scale);
+      this.dyn.add(fill,edge);
+      const model = floatingModel(item);
       const bob = app.reducedMotion ? 0 : Math.sin(now / 260) * 0.25;
       this.pose(model, raw, LIFT + bob);
       model.scale.multiplyScalar(1.04);
       this.dyn.add(model);
+      this.movingFaces.set(item.ref,{...raw,lift:LIFT+bob});
       // 卫星环绕
       this.orbitPos = {};
-      if (!isSat && app.animOn && app.layers.sats) {
-        const sats = LP.render2d.orbitSats(p, item.ref);
-        if (sats.length) {
+      if (sats.length) {
           const pos = LP.render2d.orbitPositions(item, raw, sats, app.reducedMotion ? 0 : now);
           for (const ring of pos.rings) {
             if (!ring) continue;
-            const curve = new T.EllipseCurve(0, 0, ring.rx, ring.ry, 0, Math.PI * 2);
-            const pts = curve.getPoints(64).map((q) => new T.Vector3(q.x, 0, -q.y));
-            const line = new T.LineLoop(new T.BufferGeometry().setFromPoints(pts), new T.LineDashedMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, dashSize: 0.6, gapSize: 0.5 }));
-            line.computeLineDistances();
+            const line = new T.LineLoop(this.orbitRing,this.mat('orbit-guide',()=>new T.LineBasicMaterial({color:0xffffff,transparent:true,opacity:0.28})));
+            line.scale.set(ring.rx,1,ring.ry);
             line.position.copy(this.local(raw.x, raw.y, raw.side === 'bottom' ? -(LIFT + 0.6) : this.thick + LIFT + 0.6));
             this.dyn.add(line);
           }
           for (const q of pos.items) {
-            this.orbitPos[q.sat.ref] = { x: q.x, y: q.y };
-            const m = this.satModel(q.sat);
+            const m = floatingModel(q.sat);
             const h = LIFT + 0.6 + q.depth * 0.6 + bob;
-            this.pose(m, { x: q.x, y: q.y, rot: q.rot, side: raw.side }, h);
+            const pose = { x:q.x, y:q.y, rot:q.rot, side:raw.side, lift:h };
+            this.orbitPos[q.sat.ref] = pose;
+            this.movingFaces.set(q.sat.ref, pose);
+            this.pose(m, pose, h);
             m.rotation.x = 0.25 * Math.cos(q.ang);
             this.dyn.add(m);
           }
-        }
       }
     }
     placeLabels() {
@@ -4286,10 +4551,13 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       const app = this.app;
       for (const [part, el] of this.labelEls) {
         const ref = part.ref;
-        const hidden = !part || !part.placed || (part.kind && (!app.layers.sats || !part._active)) || (app.drag && app.drag.ref === ref && app.drag.visible) || !this.onSide(part.through ? 'both' : part.placed.side);
+        const moving = this.movingFaces?.get(ref);
+        const pose = moving || part.placed;
+        const hidden = !pose || (!moving && part.kind && !part._active) ||
+          (!app.layers.sats && (part.kind || M.placementOwner(part))) || !this.onSide(part.through ? 'both' : pose.side);
         if (hidden) { el.style.display = 'none'; continue; }
         const pkg = M.passiveGeometry(part);
-        const r = this.screenRect(M.faceRect(part), (pkg?.height || part.z || 0.6) * HZ + (pkg?.pads.length ? 0.025 : 0));
+        const r = this.screenRect(M.faceRect(part,pose), (moving?.lift || 0) + (pkg?.height || part.z || 0.6) * HZ + (pkg?.pads.length ? 0.025 : 0), true);
         if (Math.min(r.w, r.h) < 16) { el.style.display = 'none'; continue; }
         el.style.display = '';
         el.style.maxWidth = Math.max(0, r.w - 3) + 'px';
@@ -4325,7 +4593,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     editSats: false,
     theme: 'light',
     animOn: false,
-    animPreference: null,   // null 表示尚未手动选择，推荐布局可首开预览
+    animPreference: null,
+    motionOverride: null,    // Temporary explicit playback on a reduced-motion page.
     systemReduced: false,   // 系统"减少动态效果"
     get reducedMotion() { return !this.animOn; },
     undoStack: [], redoStack: [],
@@ -4346,7 +4615,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       const errors = M.validate(raw);
       if (errors.length) return { ok: false, errors };
       this.p = M.normalize(raw);
-      this.animOn = this.animPreference ?? (!!this.p.orbitFocus && !this.systemReduced);
+      this.animOn = this.systemReduced ? this.motionOverride === true : !!this.animPreference;
       this.boardConfirmed = !!(raw.result || this.p.parts.some((x) => x.placed));
       this.undoStack = []; this.redoStack = [];
       this.sel = null; this.suggestion = null; this.delta = null; this.focusIssue = null;
@@ -4366,10 +4635,18 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       opts = opts || {};
       const before = M.snapshot(this.p);
       const mBefore = this.ev ? this.ev.metrics : null;
-      const satBefore = new Map(this.p.satellites.filter((s) => s.placed && s._active).map((s) => [s.ref, { x: s.placed.x, y: s.placed.y }]));
+      const parent = opts.ref && M.partByRef(this.p,opts.ref);
+      const oldPose = parent?.placed ? {...parent.placed} : null;
+      const children = parent ? M.placementChildren(this.p,parent.ref) : [];
+      const satBefore = new Map([...this.p.satellites.filter(s=>s._active), ...children]
+        .filter(s=>s.placed).map(s=>[s.ref,{...s.placed}]));
       const stepsBefore = this.ev ? this.ev.steps.map((s) => s.state) : [];
       const res = fn();
       if (res === false) return false;
+      if (parent && children.length && (opts.reflow || JSON.stringify(oldPose) !== JSON.stringify(parent.placed))) {
+        const missing = LP.satellites.placeImported(this.p,parent,oldPose);
+        if (missing.length) this.toast(`${parent.ref} 周边有 ${missing.length} 个器件未找到合法落点，详见规则问题。`,'warn');
+      }
       if (M.snapshot(this.p) === before) return false;
       this.undoStack.push(before);
       if (this.undoStack.length > UNDO_LIMIT) this.undoStack.shift();
@@ -4385,13 +4662,15 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       if (r && opts.ref && !opts.noAnim) {
         const parent = M.partByRef(this.p, opts.ref);
         let k = 0;
-        for (const s of this.p.satellites) {
-          if (!s.placed || !s._active || s.pinned || s.parent[0] !== opts.ref) continue;
+        const landing = [...this.p.satellites.filter(s=>s._active && s.parent[0] === opts.ref),
+          ...M.placementChildren(this.p,opts.ref)];
+        for (const s of landing) {
+          if (!s.placed || s.locked || s.pinned) continue;
           const b = satBefore.get(s.ref);
-          if (b && Math.hypot(b.x - s.placed.x, b.y - s.placed.y) < 0.01) continue;
           const orbit = opts.orbitFrom && opts.orbitFrom[s.ref];
-          if (orbit) r.animate('pop', { ref: s.ref, delay: 60 + 35 * k++, dur: 420, from: orbit, orbit: true });
-          else r.animate('pop', { ref: s.ref, delay: 140 + 20 * k++, dur: 260, from: parent && parent.placed ? { x: parent.placed.x, y: parent.placed.y } : null });
+          if (!orbit && b && Math.hypot(b.x - s.placed.x, b.y - s.placed.y) < 0.01) continue;
+          if (orbit) r.animate('pop', { ref: s.ref, delay: 60 + Math.min(8,k++) * 35, dur: 420, from: orbit, orbit: true });
+          else r.animate('pop', { ref: s.ref, delay: 140 + Math.min(8,k++) * 20, dur: 260, from: parent && parent.placed ? { x: parent.placed.x, y: parent.placed.y } : null });
         }
         if (parent && parent.placed) {
           r.animate('drop', { ref: opts.ref });
@@ -4435,6 +4714,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     updateSuggestion() {
       this.suggestion = null;
       if (!this.sel || this.sel.type !== 'part') return;
+      const item = M.partByRef(this.p,this.sel.ref);
+      if (!item || item.locked || M.placementOwner(item)) return;
       this.suggestion = LP.metrics.orientationSuggestion(this.p, this.sel.ref, (part, pl) => LP.rules.quickLegal(this.p, part, pl).ok);
     },
     acceptSuggestion() {
@@ -4461,7 +4742,12 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     },
     placePart(ref, pl, extra) {
       const part = M.partByRef(this.p, ref);
-      return this.commit(LP.t('ui.op_place'), () => { part.placed = { ...pl }; }, { ref, ...(extra || {}) });
+      if (!part || part.locked || !LP.rules.quickLegal(this.p,part,pl).ok) return false;
+      const reflow = M.placementChildren(this.p,ref).some(child=>!child.placed && !child.locked);
+      return this.commit(LP.t('ui.op_place'), () => {
+        part.placed = { ...pl };
+        if (M.placementOwner(part)) part.locked = true;
+      }, { ref, reflow, ...(extra || {}) });
     },
     tryTransform(ref, fn, label) {
       const part = M.partByRef(this.p, ref);
@@ -4471,7 +4757,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       if (!pl) return false;
       const q = LP.rules.quickLegal(this.p, part, pl);
       if (!q.ok) { this.toast(LP.t(`ui.toast_illegal_${q.reason}`, { ref, with: q.with || '' }), 'bad'); this.emit('shake', ref); return false; }
-      return this.commit(label, () => { part.placed = pl; }, { ref });
+      return this.commit(label, () => { part.placed = pl; if (M.placementOwner(part)) part.locked = true; }, { ref });
     },
     rotatePart(ref) { return this.tryTransform(ref, (pl) => ({ ...pl, rot: (pl.rot + 90) % 360 }), LP.t('ui.op_rotate')); },
     flipPart(ref) {
@@ -4565,7 +4851,11 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     },
     resetLayout() {
       this.commit(LP.t('ui.op_reset'), () => {
-        for (const x of this.p.parts) { x.placed = null; x.locked = false; }
+        const fixed = new Set(this.p.parts.filter(x=>x.placementRole === 'board_feature').map(x=>x.ref));
+        for (const x of this.p.parts) {
+          if (fixed.has(x.ref) || fixed.has(M.placementOwner(x))) continue;
+          x.placed = null; x.locked = false;
+        }
         for (const s of this.p.satellites) { s.placed = null; s.pinned = false; }
       }, { noAnim: true });
       this.select(null);
@@ -4615,9 +4905,16 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     exportCSV() { this.download(`${this.slug()}-placement.csv`, '﻿' + M.exportCSV(this.p), 'text/csv'); },
 
     setAnim(on) {
-      this.animOn = this.animPreference = !!on;
-      try { localStorage.setItem('lp:anim', on ? '1' : '0'); } catch (e) { /* 存储不可用 */ }
-      if (!on && LP.ui) {
+      if (this.systemReduced) this.motionOverride = !!on;
+      else {
+        this.animPreference = !!on;
+        try { localStorage.setItem('lp:anim', on ? '1' : '0'); } catch (e) { /* 存储不可用 */ }
+      }
+      this.applyAnimPreference();
+    },
+    applyAnimPreference() {
+      this.animOn = this.systemReduced ? this.motionOverride === true : !!this.animPreference;
+      if (!this.animOn && LP.ui) {
         for (const renderer of [LP.ui.r2, LP.ui.r3]) {
           if (!renderer) continue;
           renderer.anims = [];
@@ -4668,7 +4965,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         const thr = ALIGN_PX / Math.max(R().s || 20, 1);
         const xs = [], ys = [];
         for (const q of App.p.parts) {
-          if (q === item || !q.placed) continue;
+          if (q === item || !q.placed || (!q.locked && M.placementOwner(q) === item.ref)) continue;
           const r = M.footprint(q);
           xs.push(r.x0, (r.x0 + r.x1) / 2, r.x1); ys.push(r.y0, (r.y0 + r.y1) / 2, r.y1);
         }
@@ -4704,7 +5001,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       const pl0 = orig ? { ...orig } : { x: bp.x, y: bp.y, rot: 0, side: App.defaultSide(item) };
       App.drag = {
         kind, ref, fromTray: !!fromTray, orig, pl: pl0, raw: pl0, lastLegal: orig, guides: [], status: 'ok', moved: false,
-        dx: orig ? bp.x - orig.x : 0, dy: orig ? bp.y - orig.y : 0, visible: !fromTray,
+        dx: orig && !fromTray ? bp.x - orig.x : 0, dy: orig && !fromTray ? bp.y - orig.y : 0, visible: !fromTray,
       };
       App.select({ type: kind, ref });
       return true;
@@ -4779,13 +5076,17 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     function cancelDrag() {
       if (carry) carry.cleanup();
       const d = App.drag;
+      const orbitFrom = R()?.orbitPos;
       App.drag = null;
       setCarrying(false);
       if (R()) R().orbitPos = null;
       App.emit('dragend');
       if (d && d.orig) {
         // 取消：卫星落回原位
-        LP.satellites.satsOf(App.p, d.ref).forEach((s, k) => { if (s.placed && s._active && !s.pinned) R().animate('pop', { ref: s.ref, delay: 30 * k, dur: 260 }); });
+        if (orbitFrom) for (const [ref,from] of Object.entries(orbitFrom)) {
+          const s = M.itemByRef(App.p,ref);
+          if (s?.placed && !s.pinned && !s.locked) R().animate('pop',{ref,from,orbit:true,dur:260});
+        }
       }
       App.redraw();
     }
@@ -4801,6 +5102,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     }
     function endDrag(dropOnStage) {
       const d = App.drag;
+      const orbitFrom = d?.kind === 'part' && R()?.orbitPos ? {...R().orbitPos} : null;
+      if (R()) R().orbitPos = null;
       App.drag = null;
       setCarrying(false);
       App.emit('dragend');
@@ -4812,15 +5115,15 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         const why = d.reason ? LP.t(`ui.toast_illegal_${d.reason.reason}`, { ref: d.ref, with: d.reason.with || '' }) : LP.t('ui.toast_illegal_overlap', { ref: d.ref, with: '' });
         App.toast(why + (target ? LP.t('ui.toast_reverted') : ''), 'bad');
       }
-      const orbitFrom = d.kind === 'part' && R().orbitPos ? { ...R().orbitPos } : null;
-      if (R()) R().orbitPos = null;
       if (!target || (d.orig && target.x === d.orig.x && target.y === d.orig.y && target.rot === d.orig.rot && target.side === d.orig.side)) {
+        if (target && d.status !== 'bad' && d.kind === 'part' &&
+            M.placementChildren(App.p,d.ref).some(s=>!s.locked && !s.placed) && App.placePart(d.ref,target,{orbitFrom})) return;
         // 没有移动：卫星从轨道飞回原位
         if (orbitFrom && d.orig) {
           let k = 0;
           for (const [ref, from] of Object.entries(orbitFrom)) {
-            const s = M.satByRef(App.p, ref);
-            if (s && s.placed && s._active) R().animate('pop', { ref, delay: 40 + 30 * k++, dur: 380, from, orbit: true });
+            const s = M.itemByRef(App.p, ref);
+            if (s?.placed && !s.pinned && !s.locked) R().animate('pop', { ref, delay: 40 + 30 * Math.min(8,k++), dur: 380, from, orbit: true });
           }
         }
         App.redraw(); return;
@@ -4856,7 +5159,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       const sp = local(e);
       ptrs.set(e.pointerId, sp);
       if (ptrs.size === 2) {
-        if (App.drag) { App.drag = null; App.emit('dragend'); }
+        if (App.drag) cancelDrag();
         const [a, b] = [...ptrs.values()];
         gesture = { type: 'pinch', dist: Math.hypot(a.x - b.x, a.y - b.y), mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
         return;
@@ -4875,7 +5178,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       if (e.button === 1 || (e.button === 0 && spaceDown)) { gesture = { type: 'pan', last: sp }; return; }
       if (e.button === 2) { gesture = { type: R().kind === '3d' ? 'orbit' : 'pan', last: sp }; return; }
       const hit = R().pick(sp.x, sp.y);
-      if (hit && (hit.type === 'part' || (hit.type === 'sat' && App.editSats))) {
+      if (hit && ((hit.type === 'part' && (App.editSats || !M.placementOwner(M.partByRef(App.p,hit.ref)))) ||
+                  (hit.type === 'sat' && App.editSats))) {
         gesture = { type: 'press', start: sp, hit };
         return;
       }
@@ -4968,7 +5272,10 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       if (g.type === 'press') {
         const hit = R().pick(sp.x, sp.y);
         App.focusIssue = null;
-        if (hit && hit.type === 'part' && e.button === 0 && !M.partByRef(App.p, hit.ref).locked) { startCarry(hit.ref, g.start, false); return; }
+        if (hit && hit.type === 'part' && e.button === 0) {
+          const part = M.partByRef(App.p,hit.ref);
+          if (!part.locked && !M.placementOwner(part)) { startCarry(hit.ref, g.start, false); return; }
+        }
         App.select(hit ? { type: hit.type, ref: hit.ref } : null);
       }
     };
@@ -5012,7 +5319,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     // ---------- 托盘拖出 ----------
     function trayDrag(ref, e) {
       const part = M.partByRef(App.p, ref);
-      if (!part || part.placed) return;
+      if (!part || !M.isTrayPart(part)) return;
       let started = false;
       const sx = e.clientX, sy = e.clientY;
       const move = (ev) => {
@@ -5053,6 +5360,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       if (App.drag && (k === 'r' || k === 'R')) { rotateDrag(); return; }
       if (!sel) return;
       if (sel.type === 'part') {
+        if (M.placementOwner(M.partByRef(App.p,sel.ref)) && !App.editSats) return;
         if (k === 'r' || k === 'R') { App.rotatePart(sel.ref); return; }
         if (k === 'f' || k === 'F') { App.flipPart(sel.ref); return; }
         if (k === 'l' || k === 'L') { App.toggleLock(sel.ref); return; }
@@ -5078,278 +5386,49 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
 </script>
 <script>
 /* ---- js/motion.js ---- */
-/* 在独立画布上投影关联器件的环绕预览；命中、撤销与导出始终使用板上的实位。 */
+/* Screen-space feedback for brief 3D location pulses. Pickup and landing use board-space geometry in each renderer. */
 (function (LP) {
   'use strict';
-  const M = LP.model;
-  let app, canvas, ctx, frame = 0, world, screen, face, pulses = [];
-  let parents, groups, group, groupKey, orbitFrame;
-
-  function indexGroups() {
-    parents = new Map();
-    groups = new Map();
-    const parts = new Map(app.p.parts.map(part => [part.ref, part]));
-    const add = (item, owner, native) => {
-      const core = parts.get(owner);
-      if (!core || core === item) return;
-      parents.set(item.ref, owner);
-      if (!groups.has(owner)) groups.set(owner, { core, members: [] });
-      groups.get(owner).members.push({ item, native });
-    };
-    for (const part of parts.values()) add(part, part.orbitParent || part.associatedParent, false);
-    for (const sat of app.p.satellites) add(sat, sat.parent[0], true);
+  let app, canvas, ctx, frame = 0, pulses = [];
+  function stop() {
+    if (frame) cancelAnimationFrame(frame);
+    frame = 0;
+    pulses = [];
+    canvas.hidden = true;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
-
-  function visibleGroup() {
-    if (!app.layers.sats || app.boardEditing || (app.drag && !app.drag.visible)) return null;
-    if (!groups) indexGroups();
-    const drag = app.drag, side = app.renderer.viewSide();
-    const selected = drag ? drag.ref : app.sel && app.sel.ref;
-    const key = JSON.stringify([selected, !!drag, drag && drag.pl && drag.pl.side, side]);
-    if (key === groupKey) return group;
-    groupKey = key;
-    group = null;
-    function consider(candidate) {
-      if (!candidate) return null;
-      const {core, members} = candidate;
-      const pose = drag && drag.ref === core.ref ? drag.pl : core.placed;
-      if (!pose || (!core.through && pose.side !== side)) return null;
-      const visible = members.filter(({item, native}) => item.placed && item.placed.side === side &&
-        !item.locked && !item.pinned && (!native || (item._active && !drag)));
-      if (!visible.length) return null;
-      const dist = ({item}) => Math.hypot(item.placed.x - pose.x, item.placed.y - pose.y);
-      visible.sort((a, b) => Number(b.item.ref === selected) - Number(a.item.ref === selected) || dist(a) - dist(b));
-      return { core, members: visible.slice(0, 8), total: visible.length };
-    }
-    if (selected) {
-      // 拖动普通器件时只显示该器件本身的反馈。点选卫星可单独查看所属核心。
-      group = consider(groups.get(selected) || (!drag && groups.get(parents.get(selected))));
-    } else {
-      group = consider(groups.get(app.p.orbitFocus));
-      if (!group) for (const candidate of groups.values()) {
-        const next = consider(candidate);
-        if (next && (!group || next.total > group.total)) group = next;
-      }
-    }
-    return group;
-  }
-
-  function drawOrbitLabel(item, pkg, body, origin, ax, ay, bx, by) {
-    let horizontal = body.w >= body.h;
-    let length = horizontal ? body.w : body.h;
-    if (pkg && pkg.terminals.length === 2) {
-      const [a, b] = pkg.terminals;
-      horizontal = Math.abs(a.x - b.x) >= Math.abs(a.y - b.y);
-      length = horizontal ? Math.abs(a.x - b.x) - (a.w + b.w) / 2 : Math.abs(a.y - b.y) - (a.h + b.h) / 2;
-    }
-    const across = horizontal ? body.h : body.w;
-    const ux = horizontal ? ax : bx, uy = horizontal ? ay : by;
-    const vx = horizontal ? bx : ax, vy = horizontal ? by : ay;
-    const unit = Math.hypot(ux, uy);
-    if (unit < 0.01) return;
-    // 只使用投影后本体中段可容纳的矩形，给金属端头留白。
-    const width = length * unit - across * Math.abs(ux * vx + uy * vy) / unit;
-    const height = across * Math.abs(ux * vy - uy * vx) / unit;
-    if (width < 14 || height < 9) return;
-    let angle = Math.atan2(uy, ux);
-    if (angle > Math.PI / 2) angle -= Math.PI;
-    if (angle <= -Math.PI / 2) angle += Math.PI;
-    ctx.save();
-    ctx.translate(origin.x + ax * body.x + bx * body.y, origin.y + ay * body.x + by * body.y);
-    ctx.rotate(angle);
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = '600 ' + Math.min(13, Math.max(8, height * 0.58)) + 'px ui-monospace, monospace';
-    const light = pkg?.kind === 'capacitor' || ['module', 'coin', 'usb_c', 'fpc', 'mic'].includes(item.shape);
-    ctx.fillStyle = light ? '#282b2f' : '#f5f7f8';
-    LP.render2d.drawFaceText(ctx, item, { x: -width / 2, w: width }, 0);
-    ctx.restore();
-  }
-
-  function drawGroup(group, now) {
-    const {core, members, total} = group, renderer = app.renderer;
-    const drag = app.drag, pl = drag ? { ...drag.pl, ...(drag.raw || {}) } : core.placed;
-    const height = (core.z || 1) + (drag ? 3.0 : 0.8);
-    const project = (x, y, z) => renderer.boardToScreen(x, y, z);
-    const center = project(pl.x, pl.y, height);
-    // 两个绘制器都采用平行投影。每帧只需四个投影点，即可让导轨和封装随翻面、缩放、相机旋转。
-    const px = project(pl.x + 1, pl.y, height), py = project(pl.x, pl.y + 1, height);
-    const pz = project(pl.x, pl.y, height + 1);
-    const ex = {x:px.x-center.x, y:px.y-center.y}, ey = {x:py.x-center.x, y:py.y-center.y};
-    const ez = {x:pz.x-center.x, y:pz.y-center.y};
-    const scale = Math.max(0.01, Math.hypot(ex.x, ex.y), Math.hypot(ey.x, ey.y));
-    const pos = LP.render2d.orbitPositions(core, pl, members.map(m => m.item), now);
-    const modelAt = (x, y, z = 0) => ({
-      x: center.x + ex.x * (x-pl.x) + ey.x * (y-pl.y) + ez.x * z,
-      y: center.y + ex.y * (x-pl.x) + ey.y * (y-pl.y) + ez.y * z
-    });
-    ctx.save();
-    ctx.beginPath();
-    let top = Infinity;
-    for (const ring of pos.rings.filter(Boolean)) {
-      for (let i = 0; i <= 64; i++) {
-        const a = Math.PI * 2 * i / 64;
-        const q = modelAt(pl.x + ring.rx * Math.cos(a), pl.y + ring.ry * Math.sin(a));
-        top = Math.min(top, q.y);
-        if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y);
-      }
-    }
-    ctx.strokeStyle = 'rgba(8,45,49,.75)'; ctx.lineWidth = 3; ctx.stroke();
-    ctx.setLineDash([4, 5]); ctx.strokeStyle = '#71e8d2'; ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]);
-    const painted = [];
-    for (let i = 0; i < pos.items.length; i++) {
-      const q = pos.items[i], item = q.sat;
-      const pkg = M.passiveGeometry(item), body = pkg ? pkg.body : {x:0, y:0, w:item.w, h:item.h};
-      const z = Math.min(pkg ? pkg.height : (item.z || 0.45), 2), origin = modelAt(q.x, q.y, z);
-      const cos = Math.cos(q.ang + Math.PI/2), sin = Math.sin(q.ang + Math.PI/2);
-      const k = Math.min(1.8, Math.max(1, 13 / (scale * Math.max(body.w, body.h))));
-      ctx.save();
-      const ax = (ex.x*cos+ey.x*sin)*k, ay = (ex.y*cos+ey.y*sin)*k;
-      const bx = (ey.x*cos-ex.x*sin)*k, by = (ey.y*cos-ex.y*sin)*k;
-      if (renderer.kind === '3d') {
-        const corners = [[-1,-1], [1,-1], [1,1], [-1,1]].map(([sx,sy]) => {
-          const x = body.x + sx*body.w/2, y = body.y + sy*body.h/2;
-          return { x:origin.x + ax*x + bx*y, y:origin.y + ay*x + by*y };
-        });
-        ctx.fillStyle = '#596165';
-        for (let j = 0; j < corners.length; j++) {
-          const a = corners[j], b = corners[(j+1)%4];
-          ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y);
-          ctx.lineTo(b.x-ez.x*z,b.y-ez.y*z); ctx.lineTo(a.x-ez.x*z,a.y-ez.y*z); ctx.closePath(); ctx.fill();
-        }
-      }
-      ctx.transform(ax, ay, bx, by, origin.x, origin.y);
-      LP.render2d.roundRectPath(ctx, body.x-body.w/2, body.y-body.h/2, body.w, body.h, Math.min(body.w,body.h)*0.1);
-      ctx.lineWidth = 4/(scale*k); ctx.strokeStyle = '#16545a'; ctx.stroke();
-      ctx.lineWidth = 2/(scale*k); ctx.strokeStyle = '#9affdf'; ctx.stroke();
-      LP.render2d.drawItem(ctx, item, members[i].native, {floating:true});
-      ctx.restore();
-      drawOrbitLabel(item, pkg, body, origin, ax, ay, bx, by);
-      painted.push({ref:item.ref, x:origin.x, y:origin.y, angle:q.ang, home:modelAt(item.placed.x, item.placed.y, -height)});
-    }
-    const label = M.faceName(core) + ' · 关联预览 ' + members.length + (members.length < total ? '/' + total : '');
-    ctx.font = '600 11px system-ui, sans-serif';
-    const width = ctx.measureText(label).width + 14;
-    const cx = Math.max(width/2+2, Math.min(canvas.clientWidth-width/2-2, center.x));
-    const cy = Math.max(13, top-13);
-    LP.render2d.roundRectPath(ctx,cx-width/2,cy-9,width,18,5);
-    ctx.fillStyle = 'rgba(13,53,56,.94)'; ctx.fill();
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#c7ffed'; ctx.fillText(label,cx,cy);
-    ctx.restore();
-    orbitFrame = { core:core.ref, center, members:painted, total };
-    canvas.dataset.orbitCore = core.ref;
-  }
-
-  function trace() {
-    const p = app.p, renderer = app.renderer, selected = app.sel && app.sel.ref;
-    const visible = new Map(p.parts.filter(x => x.placed &&
-      renderer.onSide(x.through ? 'both' : x.placed.side)).map(x => [x.ref, x]));
-    let best = null, score = -1;
-    for (const net of p.nets) {
-      const pins = net.pins.filter(([ref]) => visible.has(ref));
-      if (pins.length < 2) continue;
-      const start = pins.find(([ref]) => ref === selected) || pins[0];
-      const end = pins.find(([ref]) => ref !== start[0]);
-      if (!end) continue;
-      const rank = (selected && start[0] === selected ? 4 : 0) + (net.class === 'power' ? 0 : 1);
-      if (rank <= score) continue;
-      const points = [start, end].map(([ref, id]) => M.pinWorld(visible.get(ref), id));
-      if (!points.every(Boolean) || Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y) < 0.1) continue;
-      best = { name: net.name, points }; score = rank;
-    }
-    if (best) return best;
-    const outline = LP.geometry.outlinePolygon(p.board.outline);
-    return { name: '板框', points: [...outline, outline[0]] };
-  }
-
-  function project() {
-    const projected = world.points.map(p => app.renderer.boardToScreen(p.x, p.y));
-    let length = 0;
-    const segments = [];
-    for (let i = 1; i < projected.length; i++) {
-      const a = projected[i - 1], b = projected[i], d = Math.hypot(b.x - a.x, b.y - a.y);
-      if (d > 0) { segments.push({ a, b, d, start: length }); length += d; }
-    }
-    return { projected, segments, length };
-  }
-
   function draw(now) {
     frame = 0;
-    if (!app.animOn || document.hidden || !app.renderer || !app.p) return;
-    canvas.hidden = false;
-    const w = canvas.clientWidth, h = canvas.clientHeight;
-    if (w < 1 || h < 1) return;
-    const scale = Math.min(window.devicePixelRatio || 1, 2);
-    if (canvas.width !== Math.round(w * scale) || canvas.height !== Math.round(h * scale)) {
-      canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale); screen = null;
-    }
-    ctx.setTransform(scale, 0, 0, scale, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-    const activeGroup = visibleGroup();
-    if (activeGroup) {
-      drawGroup(activeGroup, now);
-      canvas.dataset.trace = '';
-    } else {
-      orbitFrame = null;
-      delete canvas.dataset.orbitCore;
-      if (!world || face !== app.flipped) { world = trace(); face = app.flipped; screen = null; }
-      if (!screen) screen = project();
-      drawTrace(now);
-    }
     pulses = pulses.filter(p => now - p.start < 650);
+    if (!pulses.length || app.reducedMotion || document.hidden) { stop(); return; }
+    canvas.hidden = false;
+    const scale = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.round(canvas.clientWidth * scale), h = Math.round(canvas.clientHeight * scale);
+    if (!w || !h) { stop(); return; }
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
     for (const p of pulses) {
-      const pos = app.renderer.boardToScreen(p.x, p.y, 0.7), t = (now - p.start) / 650;
+      const pos = app.renderer.boardToScreen(p.x, p.y, 0.7), t = Math.max(0, (now - p.start) / 650);
       ctx.beginPath(); ctx.arc(pos.x, pos.y, 5 + 26 * t, 0, 2 * Math.PI);
       ctx.strokeStyle = 'rgba(255,211,63,' + (1 - t) + ')'; ctx.lineWidth = 3; ctx.stroke();
     }
     frame = requestAnimationFrame(draw);
   }
-
-  function drawTrace(now) {
-    const { projected, segments, length } = screen;
-    canvas.dataset.trace = world.name;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    projected.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
-    ctx.strokeStyle = 'rgba(8,44,55,.72)'; ctx.lineWidth = 3; ctx.stroke();
-    ctx.setLineDash([7, 8]); ctx.lineDashOffset = -(now * 0.025) % 15;
-    ctx.strokeStyle = '#67f7ee'; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]);
-    if (length) for (let i = 0; i < 3; i++) {
-      const distance = length * (0.5 - 0.47 * Math.cos(now / 810 + i * 2.095));
-      const seg = segments.find(s => s.start + s.d >= distance) || segments[segments.length - 1];
-      const t = (distance - seg.start) / seg.d;
-      const x = seg.a.x + (seg.b.x - seg.a.x) * t, y = seg.a.y + (seg.b.y - seg.a.y) * t;
-      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
-      ctx.fillStyle = '#fff6af'; ctx.fill(); ctx.strokeStyle = '#11696a'; ctx.lineWidth = 1.8; ctx.stroke();
-    }
-  }
-
-  function reset() {
-    if (frame) cancelAnimationFrame(frame);
-    groups = group = groupKey = orbitFrame = world = screen = null; frame = 0; pulses = [];
-    delete canvas.dataset.orbitCore; delete canvas.dataset.trace;
-    canvas.hidden = true;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (app.animOn && !document.hidden) frame = requestAnimationFrame(draw);
-  }
-
   LP.motion = {
-    get orbitFrame() { return orbitFrame; },
     init(application, layer) {
       app = application; canvas = layer; ctx = canvas.getContext('2d');
-      for (const name of ['anim', 'load', 'select', 'view']) app.on(name, reset);
-      app.on('change', () => { groups = groupKey = world = screen = null; });
-      app.on('boardlive', () => { groups = groupKey = world = screen = null; });
-      app.on('drawn', () => { screen = null; });
-      document.addEventListener('visibilitychange', reset);
+      for (const name of ['load','anim','view']) app.on(name, stop);
+      document.addEventListener('visibilitychange', stop);
     },
     pulse(type, data) {
-      if (!app.animOn) return;
-      const points = type === 'ripple' ? [data] : data.refs.map(ref => M.itemByRef(app.p, ref))
+      if (app.reducedMotion || document.hidden) return;
+      const points = type === 'ripple' ? [data] : data.refs.map(ref => LP.model.itemByRef(app.p, ref))
         .filter(item => item && item.placed && app.renderer.onSide(item.placed.side)).map(item => item.placed);
       const start = performance.now();
-      pulses.push(...points.map(p => ({ x: p.x, y: p.y, start })));
+      pulses.push(...points.map(p => ({x:p.x, y:p.y, start})));
+      if (pulses.length && !frame) frame = requestAnimationFrame(draw);
     },
   };
 })(globalThis.LP = globalThis.LP || {});
@@ -5424,10 +5503,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       App.systemReduced = mq.matches;
       mq.addEventListener && mq.addEventListener('change', (e) => {
         App.systemReduced = e.matches;
-        if (App.animPreference === null && App.p) {
-          App.animOn = !!App.p.orbitFocus && !App.systemReduced;
-          App.emit('anim'); App.redraw();
-        }
+        App.motionOverride = null;
+        if (App.p) App.applyAnimPreference();
       });
       try {
         const stored = localStorage.getItem('lp:anim');
@@ -5458,7 +5535,9 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         const item = matches[0];
         app.select({ type: item.kind ? 'sat' : 'part', ref: item.ref });
         if (item.placed) app.focusOn([item.ref]);
-        else this.highlightTray(item.kind ? item.parent[0] : item.ref);
+        else if (item.kind || M.placementOwner(item)) this.highlightTray(item.parent?.[0] || M.placementOwner(item));
+        else if (M.isTrayPart(item)) this.highlightTray(item.ref);
+        else LP.interactionApi.startCarry(item.ref, app.renderer.boardToScreen(0, 0), true);
       });
     },
 
@@ -5586,7 +5665,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       an.classList.toggle('on', App.animOn);
       an.setAttribute('aria-pressed', String(App.animOn));
       an.querySelector('span').textContent = App.animOn ? t('anim_on') : t('anim_off');
-      an.title = App.animOn ? t('anim_title_on') : t('anim_title_off');
+      an.title = App.animOn ? t('anim_title_on') : App.systemReduced ? t('anim_reduced') : t('anim_title_off');
+      an.setAttribute('aria-label', an.title);
       this.root.classList.toggle('no-anim', App.reducedMotion);
       for (const [k, v] of Object.entries(App.layers)) { const el = $(`#layer-${k}`); if (el) el.checked = v; }
       const es = $('#opt-editsats'); if (es) es.checked = App.editSats;
@@ -5916,7 +5996,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       const App = this.App, list = $('#tray-list');
       list.innerHTML = '';
       const cur = this.currentStep();
-      const parts = [...App.p.parts].sort((a, b) => LP.engine.stepOfRole(a.role) - LP.engine.stepOfRole(b.role) || a.ref.localeCompare(b.ref, 'en', { numeric: true }));
+      const parts = App.p.parts.filter(M.isTrayPart).sort((a, b) => LP.engine.stepOfRole(a.role) - LP.engine.stepOfRole(b.role) || a.ref.localeCompare(b.ref, 'en', { numeric: true }));
       const unplaced = parts.filter((x) => !x.placed).length;
       $('#tray-count').textContent = t('tray_count', { n: unplaced, total: parts.length });
       for (const x of parts) {
@@ -5928,12 +6008,17 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
         if (x.label !== name && x.label !== x.ref) card.append(h('span', { class: 'tray-label' }, x.label));
         if (x.placed) card.append(h('span', { class: 'tray-badge' }, '✓'));
         card.addEventListener('pointerdown', (e) => {
-          if (x.placed) return;
+          if (e.button !== 0) return;
+          if (x.locked) { App.select({ type: 'part', ref: x.ref }); App.focusOn([x.ref]); return; }
           e.preventDefault();
           LP.interactionApi.trayDrag(x.ref, e);
         });
-        card.addEventListener('click', () => { if (x.placed) { App.select({ type: 'part', ref: x.ref }); App.focusOn([x.ref]); } });
-        card.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && !x.placed) { e.preventDefault(); this.placeByKeyboard(x.ref); } });
+        card.addEventListener('keydown', (e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          e.preventDefault();
+          if (x.placed) { App.select({ type: 'part', ref: x.ref }); App.focusOn([x.ref]); }
+          else this.placeByKeyboard(x.ref);
+        });
         list.append(card);
         requestAnimationFrame(() => LP.render2d.drawThumb(cv, x));
       }
@@ -5984,7 +6069,11 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       if (sel.type === 'part') {
         const part = M.partByRef(App.p, sel.ref);
         if (!part || !part.placed) { a.hidden = true; this.suggestChip.hidden = true; return; }
-        a.append(h('span', { class: 'act-ref' }, `${part.ref} · ${M.faceName(part)}`),
+        const owner = M.placementOwner(part);
+        if (owner && !App.editSats) {
+          a.append(h('span', {class:'act-ref'}, `${part.ref} · ${M.faceName(part)} → ${owner}`),
+            h('span', {class:'muted small act-note'}, t('act_sat_hint')));
+        } else a.append(h('span', { class: 'act-ref' }, `${part.ref} · ${M.faceName(part)}`),
           btn('rotate', t('act_rotate') + ' (R)', () => App.rotatePart(part.ref)),
           btn('flip', t('act_flip') + ' (F)', () => App.flipPart(part.ref)),
           btn('lock', (part.locked ? t('act_unlock') : t('act_lock')) + ' (L)', () => App.toggleLock(part.ref), part.locked ? 'on' : ''),

@@ -137,14 +137,18 @@
     }
     boardToScreen(x, y, h) {
       this.updateCamera();
-      this.board.updateMatrixWorld();
+      this.board.updateWorldMatrix(true, false);
+      return this.projectBoardPoint(x,y,h);
+    }
+    projectBoardPoint(x, y, h) {
       const side = this.viewSide();
       const v = this.local(x, y, this.surfaceY(side) + (side === 'bottom' ? -(h || 0) : (h || 0)));
       v.applyMatrix4(this.board.matrixWorld).project(this.camera);
       return { x: (v.x + 1) / 2 * this.W, y: (1 - v.y) / 2 * this.H };
     }
-    screenRect(r, h) {
-      const pts = [[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]].map(([x, y]) => this.boardToScreen(x, y, h || 0));
+    screenRect(r, h, currentMatrices = false) {
+      if (!currentMatrices) { this.updateCamera(); this.board.updateWorldMatrix(true, false); }
+      const pts = [[r.x0, r.y0], [r.x1, r.y0], [r.x1, r.y1], [r.x0, r.y1]].map(([x, y]) => this.projectBoardPoint(x, y, h || 0));
       const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
       return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
     }
@@ -156,7 +160,7 @@
         let o = hit.object;
         while (o && !o.userData.ref) o = o.parent;
         if (!o) continue;
-        if (o.userData.type === 'sat' && !this.app.layers.sats) continue;
+        if (!o.visible || (o.userData.type === 'sat' && !this.app.layers.sats)) continue;
         return { type: o.userData.type, ref: o.userData.ref, backside: !this.onSide(o.userData.side) };
       }
       return null;
@@ -290,9 +294,9 @@
     }
 
     /** 主器件模型（局部坐标：中心为原点、底面在 y=0、板面 x 向右、板面 y 向 −z）。 */
-    partModel(part) {
+    partModel(part, floating = false) {
       const pkg = M.passiveGeometry(part);
-      if (pkg) return this.passiveModel(pkg);
+      if (pkg) return this.passiveModel(pkg, floating);
       const T = this.T, g = new T.Group();
       const w = part.w, d = part.h, H = Math.max(0.5, part.z * HZ);
       const gold = this.std(0xd8b66a, { metalness: 0.3, roughness: 0.45 });
@@ -362,9 +366,9 @@
       }
       return g;
     }
-    satModel(s) {
+    satModel(s, floating = false) {
       const pkg = M.passiveGeometry(s);
-      if (pkg) return this.passiveModel(pkg);
+      if (pkg) return this.passiveModel(pkg, floating);
       const T = this.T, g = new T.Group();
       const w = s.w, d = s.h, H = Math.max(0.35, Math.min(w, d) * 0.7) * HZ;
       const shape = M.SAT_KINDS[s.kind].shape;
@@ -465,7 +469,7 @@
       for (const x of p.parts) {
         if (!x.placed) continue;
         const grp = this.partModel(x);
-        grp.userData = { type: 'part', ref: x.ref, side: x.placed.side };
+        grp.userData = { type: 'part', ref: x.ref, side: x.placed.side, satellite:!!M.placementOwner(x) };
         this.pose(grp, x.placed, 0);
         if (drag && drag.ref === x.ref && drag.visible) grp.visible = false;
         this.board.add(grp);
@@ -533,7 +537,6 @@
       this.labels.innerHTML = '';
       this.labelEls = new Map();
       for (const x of [...this.app.p.parts, ...this.app.p.satellites]) {
-        if (!x.placed) continue;
         const el = document.createElement('span');
         el.className = 'label3d';
         el.textContent = M.faceName(x);
@@ -599,13 +602,17 @@
           if (g && part && part.placed) this.pose(g, part.placed, (1 - easeOutBack(t)) * LIFT * 0.4);
           if (t >= 1) a.done = true;
         } else if (a.type === 'pop') {
-          const g = this.satMeshes.get(a.ref), s = M.satByRef(p, a.ref);
+          const g = this.satMeshes.get(a.ref) || this.partGroups.get(a.ref), s = M.itemByRef(p, a.ref);
           const t = Math.max(0, Math.min(1, (now - a.t0 - (a.delay || 0)) / (a.dur || 300)));
           if (g && s && s.placed) {
+            for (const child of g.children) if (child.name.startsWith('pad:')) child.visible = t>=1;
             if (a.from) {
               const e = easeOut(t);
-              const pl = { ...s.placed, x: a.from.x + (s.placed.x - a.from.x) * e, y: a.from.y + (s.placed.y - a.from.y) * e };
-              this.pose(g, pl, (a.orbit ? LIFT * 0.8 : 1) * (1 - e) + Math.sin(Math.PI * t) * 0.6);
+              const pl = { ...s.placed, x:a.from.x+(s.placed.x-a.from.x)*e, y:a.from.y+(s.placed.y-a.from.y)*e,
+                rot:LP.render2d.landingRotation(a.from.rot,s.placed.rot,e) };
+              const height = (a.orbit ? (a.from.lift ?? LIFT * 0.8) : 1) * (1 - e) + Math.sin(Math.PI * t) * 0.6;
+              this.pose(g, pl, height);
+              this.movingFaces.set(s.ref, {...pl, lift:height});
             } else { const k = 0.3 + 0.7 * easeOutBack(t); g.scale.set(k * Math.sign(g.scale.x || 1), k * Math.sign(g.scale.y || 1), k); }
             if (t >= 1) { this.pose(g, s.placed, 0); a.done = true; }
           } else if (t >= 1) a.done = true;
@@ -621,10 +628,22 @@
     /** 拖动中的器件、它的环绕卫星和落点轮廓。 */
     updateDynamic(now) {
       const T = this.T, app = this.app, p = app.p, d = app.drag;
-      for (let i = this.dyn.children.length - 1; i >= 0; i--) this.dyn.remove(this.dyn.children[i]);
-      for (const [ref, g] of this.partGroups) g.visible = !(d && d.ref === ref && d.visible);
-      for (const [ref, g] of this.satMeshes) { const s = M.satByRef(p, ref); g.visible = !(app.animOn && d && d.kind === 'part' && d.visible && s.parent[0] === d.ref && !s.pinned); }
-      if (!d || !d.visible || !d.pl) { this.orbitPos = this.orbitPos || null; return; }
+      this.dyn.clear();
+      this.movingFaces = new Map();
+      this.orbitPos = null;
+      const sats = d?.visible && d.kind === 'part' && app.layers.sats ? LP.render2d.orbitSats(p,d.ref) : [];
+      const carried = new Set(sats.map(s => s.ref));
+      for (const [ref, g] of this.partGroups) {
+        g.visible = !(d?.visible && d.ref === ref) && !carried.has(ref) && (app.layers.sats || !g.userData.satellite);
+      }
+      for (const [ref, g] of this.satMeshes) g.visible = app.layers.sats && !carried.has(ref) && !(d?.visible && d.ref === ref);
+      if (!d || !d.visible || !d.pl) { this.dragModels = null; return; }
+      if (!this.dragModels || this.dragModels.drag !== d) this.dragModels = {drag:d, models:new Map()};
+      const floatingModel = item => {
+        const cache = this.dragModels.models;
+        if (!cache.has(item.ref)) cache.set(item.ref,item.kind ? this.satModel(item,true) : this.partModel(item,true));
+        return cache.get(item.ref);
+      };
       const item = M.itemByRef(p, d.ref);
       const isSat = d.kind === 'sat';
       const raw = { ...d.pl, x: (d.raw || d.pl).x, y: (d.raw || d.pl).y };
@@ -632,42 +651,47 @@
       const fp = isSat ? M.satFootprint(item, d.pl) : M.footprint(item, d.pl);
       const color = d.status === 'bad' ? 0xef4444 : d.status === 'warn' ? 0xf59e0b : 0x14b8a6;
       const c = G.center(fp);
-      const fill = new T.Mesh(new T.PlaneGeometry(fp.x1 - fp.x0, fp.y1 - fp.y0), new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.25, depthWrite: false, side: T.DoubleSide }));
+      const width = fp.x1-fp.x0, depth = fp.y1-fp.y0;
+      if (!this.dragPlane) {
+        this.dragPlane = new T.PlaneGeometry(1,1);
+        this.dragEdges = new T.EdgesGeometry(this.dragPlane);
+        this.orbitRing = new T.BufferGeometry().setFromPoints(
+          new T.EllipseCurve(0,0,1,1,0,Math.PI*2).getPoints(64).map(q=>new T.Vector3(q.x,0,-q.y)));
+      }
+      const fill = new T.Mesh(this.dragPlane, this.mat('drop:'+color, () => new T.MeshBasicMaterial({color,transparent:true,opacity:0.25,depthWrite:false,side:T.DoubleSide})));
       fill.rotation.x = -Math.PI / 2;
-      fill.position.copy(this.local(c.x, c.y, d.pl.side === 'bottom' ? -0.05 : this.thick + 0.05));
-      const edge = new T.LineSegments(new T.EdgesGeometry(new T.PlaneGeometry(fp.x1 - fp.x0, fp.y1 - fp.y0)), new T.LineBasicMaterial({ color }));
-      edge.rotation.copy(fill.rotation); edge.position.copy(fill.position);
-      this.dyn.add(fill, edge);
-      // 悬浮的器件
-      const model = isSat ? this.satModel(item) : this.partModel(item);
+      fill.scale.set(width,depth,1);
+      fill.position.copy(this.local(c.x,c.y,d.pl.side==='bottom' ? -0.05 : this.thick+0.05));
+      const edge = new T.LineSegments(this.dragEdges, this.mat('drop-edge:'+color,()=>new T.LineBasicMaterial({color})));
+      edge.rotation.copy(fill.rotation); edge.position.copy(fill.position); edge.scale.copy(fill.scale);
+      this.dyn.add(fill,edge);
+      const model = floatingModel(item);
       const bob = app.reducedMotion ? 0 : Math.sin(now / 260) * 0.25;
       this.pose(model, raw, LIFT + bob);
       model.scale.multiplyScalar(1.04);
       this.dyn.add(model);
+      this.movingFaces.set(item.ref,{...raw,lift:LIFT+bob});
       // 卫星环绕
       this.orbitPos = {};
-      if (!isSat && app.animOn && app.layers.sats) {
-        const sats = LP.render2d.orbitSats(p, item.ref);
-        if (sats.length) {
+      if (sats.length) {
           const pos = LP.render2d.orbitPositions(item, raw, sats, app.reducedMotion ? 0 : now);
           for (const ring of pos.rings) {
             if (!ring) continue;
-            const curve = new T.EllipseCurve(0, 0, ring.rx, ring.ry, 0, Math.PI * 2);
-            const pts = curve.getPoints(64).map((q) => new T.Vector3(q.x, 0, -q.y));
-            const line = new T.LineLoop(new T.BufferGeometry().setFromPoints(pts), new T.LineDashedMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, dashSize: 0.6, gapSize: 0.5 }));
-            line.computeLineDistances();
+            const line = new T.LineLoop(this.orbitRing,this.mat('orbit-guide',()=>new T.LineBasicMaterial({color:0xffffff,transparent:true,opacity:0.28})));
+            line.scale.set(ring.rx,1,ring.ry);
             line.position.copy(this.local(raw.x, raw.y, raw.side === 'bottom' ? -(LIFT + 0.6) : this.thick + LIFT + 0.6));
             this.dyn.add(line);
           }
           for (const q of pos.items) {
-            this.orbitPos[q.sat.ref] = { x: q.x, y: q.y };
-            const m = this.satModel(q.sat);
+            const m = floatingModel(q.sat);
             const h = LIFT + 0.6 + q.depth * 0.6 + bob;
-            this.pose(m, { x: q.x, y: q.y, rot: q.rot, side: raw.side }, h);
+            const pose = { x:q.x, y:q.y, rot:q.rot, side:raw.side, lift:h };
+            this.orbitPos[q.sat.ref] = pose;
+            this.movingFaces.set(q.sat.ref, pose);
+            this.pose(m, pose, h);
             m.rotation.x = 0.25 * Math.cos(q.ang);
             this.dyn.add(m);
           }
-        }
       }
     }
     placeLabels() {
@@ -675,10 +699,13 @@
       const app = this.app;
       for (const [part, el] of this.labelEls) {
         const ref = part.ref;
-        const hidden = !part || !part.placed || (part.kind && (!app.layers.sats || !part._active)) || (app.drag && app.drag.ref === ref && app.drag.visible) || !this.onSide(part.through ? 'both' : part.placed.side);
+        const moving = this.movingFaces?.get(ref);
+        const pose = moving || part.placed;
+        const hidden = !pose || (!moving && part.kind && !part._active) ||
+          (!app.layers.sats && (part.kind || M.placementOwner(part))) || !this.onSide(part.through ? 'both' : pose.side);
         if (hidden) { el.style.display = 'none'; continue; }
         const pkg = M.passiveGeometry(part);
-        const r = this.screenRect(M.faceRect(part), (pkg?.height || part.z || 0.6) * HZ + (pkg?.pads.length ? 0.025 : 0));
+        const r = this.screenRect(M.faceRect(part,pose), (moving?.lift || 0) + (pkg?.height || part.z || 0.6) * HZ + (pkg?.pads.length ? 0.025 : 0), true);
         if (Math.min(r.w, r.h) < 16) { el.style.display = 'none'; continue; }
         el.style.display = '';
         el.style.maxWidth = Math.max(0, r.w - 3) + 'px';

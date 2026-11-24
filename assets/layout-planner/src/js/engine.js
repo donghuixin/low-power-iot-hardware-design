@@ -27,7 +27,7 @@
         const blocking = issues.filter((i) => i.severity === 'P0' || i.severity === 'P1').length;
         return { id: s.id, state: allPlaced && !blocking ? 'done' : 'todo', parts: [], blocking };
       }
-      const parts = p.parts.filter((x) => s.roles.includes(x.role)).map((x) => x.ref);
+      const parts = p.parts.filter((x) => M.isTrayPart(x) && s.roles.includes(x.role)).map((x) => x.ref);
       if (!parts.length) return { id: s.id, state: 'skip', parts };
       const placed = parts.every((r) => M.partByRef(p, r).placed);
       return { id: s.id, state: placed && !bad(parts) ? 'done' : placed ? 'issues' : 'todo', parts };
@@ -39,12 +39,19 @@
     const satResults = LP.satellites.placeAll(p);
     const zones = LP.rules.zones(p);
     const issues = LP.rules.check(p, satResults);
+    const importedMissing = p.parts.filter(x=>!x.placed && M.placementOwner(x) && M.partByRef(p,M.placementOwner(x))?.placed);
+    for (const child of importedMissing) {
+      const owner = M.placementOwner(child);
+      issues.push({id:'satellite_slot:'+child.ref, rule:'satellite_slot', severity:'P1', check:'卫星贴放',
+        refs:[child.ref,owner], msg:`${child.ref}（${M.faceName(child)}）在 ${owner} 周边尚无落点。`,
+        fix:'移开阻挡器件，再拾起主器件重新放置。'});
+    }
     const metrics = LP.metrics.evaluate(p, satResults, zones);
     const halos = LP.satellites.halos(p);
     return {
       satResults, zones, issues, metrics, halos,
-      unplacedParts: p.parts.filter((x) => !x.placed).map((x) => x.ref),
-      unplacedSats: Object.entries(satResults).filter(([, r]) => r.considered && !r.placed).map(([k]) => k),
+      unplacedParts: p.parts.filter((x) => !x.placed && !M.placementOwner(x)).map((x) => x.ref),
+      unplacedSats: Object.entries(satResults).filter(([, r]) => r.considered && !r.placed).map(([k]) => k).concat(importedMissing.map(x=>x.ref)),
       steps: stepStatus(p, issues, opts),
     };
   }

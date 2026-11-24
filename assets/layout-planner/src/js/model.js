@@ -368,6 +368,21 @@
   function partByRef(p, ref) { return p.parts.find((x) => x.ref === ref) || null; }
   function satByRef(p, ref) { return p.satellites.find((x) => x.ref === ref) || null; }
   function itemByRef(p, ref) { return partByRef(p, ref) || satByRef(p, ref); }
+  function isChipPeripheral(item) {
+    return /^(res|cap|ferrite|thermistor)$/.test(item.shape) ||
+      ['resistor', 'capacitor', 'ferrite', 'thermistor'].includes(item.visualPackage?.kind) ||
+      /^[RC](?:\d{4}|_\d{4}_\d{4}Metric)$/i.test((item.footprint || '').split(':').pop());
+  }
+  function placementOwner(item) {
+    if (!item) return null;
+    if (item.placementRole) return item.placementRole === 'satellite' ? item.placementParent?.[0] || null : null;
+    return isChipPeripheral(item) ? item.orbitParent || item.associatedParent || null : null;
+  }
+  function placementChildren(p, ref) { return p.parts.filter(x => placementOwner(x) === ref); }
+  function isTrayPart(item) {
+    if (item.placementRole) return item.placementRole === 'primary' || item.placementRole === 'main';
+    return !item.kind && !isChipPeripheral(item);
+  }
   function placedParts(p) { return p.parts.filter((x) => x.placed); }
   function partTags(pt) {
     const t = new Set([pt.role, 'part']);
@@ -531,7 +546,11 @@
     const d = clone(p);
     delete d.result;
     delete d.orbitFocus;
-    for (const x of d.parts || []) { delete x.placed; delete x.locked; delete x.orbitParent; delete x.visualPackage; }
+    delete d.placementLimits;
+    for (const x of d.parts || []) {
+      delete x.placed; delete x.locked; delete x.orbitParent; delete x.visualPackage;
+      delete x.placementRole; delete x.placementParent; delete x.placementOffset;
+    }
     for (const x of d.satellites || []) { delete x.placed; delete x.pinned; delete x.visualPackage; }
     if (d.board) { delete d.board.outline; delete d.board.mask; delete d.board.holes; }
     const s = stableStringify(d);
@@ -637,7 +656,7 @@
   LP.model = {
     TOOL_VERSION, ROLES, SAT_KINDS, NET_CLASSES, SIDES, ROTS, SENSOR_ROLES,
     validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint, faceName, faceRect, passiveGeometry, bgaMark,
-    partByRef, satByRef, itemByRef, placedParts, partTags, satTags, connectedParts, parseCap,
+    partByRef, satByRef, itemByRef, placementOwner, placementChildren, isTrayPart, placedParts, partTags, satTags, connectedParts, parseCap,
     snapshot, restore, definitionHash, exportLayout, resultObject, exportCSV, r2, remapBoardFeatures, partsArea, BOARD_SHAPES, outlineFromShape, shapeOf, toEditablePolygon, exportDXF,
     HOLE_SIZES, HOLE_EDGE, holeFits, cornerHoles, suggestHole,
   };

@@ -117,6 +117,140 @@
     ];
   }
 
+  // Imported electrical parts retain their own pads, nets and editable poses. Only a
+  // committed move of their owner changes them; evaluating or opening a file never does.
+  function seedOffset(child, previous) {
+    // Translate the live group, including restored user edits. A first placement
+    // or a tray round-trip uses the imported footprint's relative seed instead.
+    if (!previous || !child.placed) return child.placementOffset || null;
+    const dx = child.placed.x - previous.x, dy = child.placed.y - previous.y;
+    const xAxis = M.dirToWorld(1, 0, previous), yAxis = M.dirToWorld(0, 1, previous);
+    return { x: dx*xAxis.x + dy*xAxis.y, y: dx*yAxis.x + dy*yAxis.y,
+      rot: (child.placed.rot - previous.rot) * (previous.side === 'bottom' ? -1 : 1),
+      side: child.placed.side === previous.side ? 'same' : 'opposite' };
+  }
+
+  function placementPin(core, child, hint) {
+    const pin = child.placementParent?.[1];
+    const copper = pin && core.physicalPads?.find(pad => pad.n === pin);
+    if (copper?.xy?.length) {
+      const closest = copper.xy.map(([x,y]) => M.toWorld(x,y,core.placed))
+        .sort((a,b) => distance(a,hint) - distance(b,hint))[0];
+      return {...closest, net:copper.net};
+    }
+    return (pin && M.pinWorld(core,pin)) || hint;
+  }
+  function distance(a, b) { return Math.hypot(a.x-b.x, a.y-b.y); }
+
+  function findImportedSlot(p, core, child, offset, obstacles, occupied, search) {
+    const pose = core.placed;
+    const requestedSide = offset?.side === 'opposite' ? (pose.side === 'top' ? 'bottom' : 'top') : pose.side;
+    const allowed = child.sides.filter(side => side === 'top' || p.board.two_sided);
+    const side = allowed.includes(requestedSide) ? requestedSide : allowed[0];
+    if (!side) return null;
+    const rot = ((pose.rot + (offset?.rot || 0) * (pose.side === 'bottom' ? -1 : 1)) % 360 + 360) % 360;
+    const hint = offset ? M.toWorld(offset.x, offset.y, pose) : pose;
+    const pin = placementPin(core, child, hint);
+    const matchingPads = (child.physicalPads || []).find(pad => pin.net && pad.net === pin.net)?.xy || [];
+    const target = offset ? hint : pin;
+    const accepts = pl => {
+      const rect = M.footprint(child,pl);
+      return feasible(p,rect,side,obstacles) &&
+        (!child.through || feasible(p,rect,side === 'top' ? 'bottom' : 'top',obstacles)) &&
+        !LP.placementLimits?.violation(p,child,pl,rect,occupied);
+    };
+    const seed = {x:target.x, y:target.y, rot, side};
+    if (accepts(seed)) return seed;
+    if (!search) return null;
+
+    // Expand around the intended footprint. Test alternate angles at each location.
+    // Search the vicinity of this core, so an unrelated vacant corner cannot silently
+    // become the location of a decoupler or termination.
+    const step = 0.5, rings = Math.ceil(Math.max(6,core.w,core.h,child.w,child.h) / step);
+    for (let ring = 0; ring <= rings; ring++) {
+      let best = null, bestCost = Infinity;
+      const trySite = (origin,dx,dy) => {
+        const x = origin.x + dx*step, y = origin.y + dy*step;
+        for (const delta of [0,90,180,270]) {
+          const pl = { x, y, rot:(rot+delta)%360, side };
+          const toPin = matchingPads.length
+            ? Math.min(...matchingPads.map(([px,py])=>distance(M.toWorld(px,py,pl),pin)))
+            : distance(pl,pin);
+          const cost = distance(pl,target) + toPin + (delta ? 0.01 : 0);
+          if (cost < bestCost && accepts(pl)) { best = pl; bestCost = cost; }
+        }
+      };
+      const origins = distance(pin,target) > step ? [target,pin] : [target];
+      for (const origin of origins) for (let i = -ring; i <= ring; i++) {
+        trySite(origin,i,ring);
+        if (ring) trySite(origin,i,-ring);
+        if (Math.abs(i) < ring) { trySite(origin,ring,i); trySite(origin,-ring,i); }
+      }
+      if (best) return best;
+    }
+    return null;
+  }
+
+  function placeImported(p, core, previous) {
+    const movable = M.placementChildren(p,core.ref).filter(x=>!x.locked);
+    if (!movable.length) return [];
+    if (!core.placed) { for (const child of movable) child.placed = null; return []; }
+    p._safe = safeRect(p.board.outline);
+    const moving = new Set(movable.map(x=>x.ref));
+    const obstacles = buildObstacles(p).filter(o=>!moving.has(o.ref));
+    for (const sat of p.satellites) if (sat.placed && (sat.pinned || sat.parent[0] !== core.ref))
+      obstacles.push({rect:M.satFootprint(sat),side:sat.placed.side,ref:sat.ref,gap:true});
+    const occupied = obstacles.filter(o=>o.gap).map(o=>({item:M.itemByRef(p,o.ref),rect:o.rect,side:o.side}));
+    const group = movable.map(child=>({child,offset:seedOffset(child,previous),old:child.placed}));
+    const fixedObstacles = obstacles.length, fixedOccupied = occupied.length;
+    const reserve = child => {
+      const rect = M.footprint(child), side = child.through?'both':child.placed.side;
+      obstacles.push({rect,side,ref:child.ref,gap:true});
+      occupied.push({item:child,rect,side});
+    };
+    const seat = ({child,offset},search) => {
+      child.placed = findImportedSlot(p,core,child,offset,obstacles,occupied,search);
+      if (child.placed) reserve(child);
+      return !!child.placed;
+    };
+    const solve = entries => {
+      // Reserve every usable design seed before a displaced sibling can consume it.
+      const displaced = entries.filter(s=>!seat(s,false));
+      displaced.sort((a,b)=>b.child.w*b.child.h-a.child.w*a.child.h);
+      return displaced.filter(s=>!seat(s,true));
+    };
+    const pending = solve(group);
+    const localRange = Math.max(core.w,core.h,...movable.map(s=>Math.max(s.w,s.h))) * 1.5;
+    if (!pending.length || !previous || previous.side !== core.placed.side ||
+        distance(previous,core.placed) > localRange) return pending.map(s=>s.child.ref);
+
+    // A small owner move can displace a tightly packed power component. If the first
+    // arrangement failed, preserve the group's still-legal sites, then improve them.
+    const first = group.map(s=>s.child.placed);
+    obstacles.length = fixedObstacles; occupied.length = fixedOccupied;
+    const reserved = new Set();
+    for (const entry of group) {
+      const {child,old} = entry;
+      if (!old) continue;
+      const savedOffset = seedOffset({...child,placed:old},core.placed);
+      if (seat({child,offset:savedOffset},false)) reserved.add(child.ref);
+    }
+    if (reserved.size) {
+      const retry = solve(group.filter(entry=>!reserved.has(entry.child.ref)));
+      if (retry.length < pending.length) {
+        for (const entry of group.filter(s=>reserved.has(s.child.ref))) {
+          const child = entry.child, old = child.placed;
+          obstacles.splice(obstacles.findIndex(o=>o.ref===child.ref),1);
+          occupied.splice(occupied.findIndex(o=>o.item===child),1);
+          if (!seat(entry,false)) { child.placed=old; reserve(child); }
+        }
+        return retry.map(s=>s.child.ref);
+      }
+    }
+    group.forEach((s,i)=>{ s.child.placed=first[i]; });
+    return pending.map(s=>s.child.ref);
+  }
+
   /** 卫星的锚点：父引脚组位置与朝外法向；BGA 中心出线的器件改为四边。 */
   function anchorOf(p, sat) {
     const part = M.partByRef(p, sat.parent[0]);
@@ -363,5 +497,5 @@
     return out;
   }
 
-  LP.satellites = { CONFIG, satsOf, placeAll, halos, anchorOf, candidates };
+  LP.satellites = { CONFIG, satsOf, placeAll, placeImported, halos, anchorOf, candidates };
 })(globalThis.LP = globalThis.LP || {});

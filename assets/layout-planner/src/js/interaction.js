@@ -28,7 +28,7 @@
         const thr = ALIGN_PX / Math.max(R().s || 20, 1);
         const xs = [], ys = [];
         for (const q of App.p.parts) {
-          if (q === item || !q.placed) continue;
+          if (q === item || !q.placed || (!q.locked && M.placementOwner(q) === item.ref)) continue;
           const r = M.footprint(q);
           xs.push(r.x0, (r.x0 + r.x1) / 2, r.x1); ys.push(r.y0, (r.y0 + r.y1) / 2, r.y1);
         }
@@ -64,7 +64,7 @@
       const pl0 = orig ? { ...orig } : { x: bp.x, y: bp.y, rot: 0, side: App.defaultSide(item) };
       App.drag = {
         kind, ref, fromTray: !!fromTray, orig, pl: pl0, raw: pl0, lastLegal: orig, guides: [], status: 'ok', moved: false,
-        dx: orig ? bp.x - orig.x : 0, dy: orig ? bp.y - orig.y : 0, visible: !fromTray,
+        dx: orig && !fromTray ? bp.x - orig.x : 0, dy: orig && !fromTray ? bp.y - orig.y : 0, visible: !fromTray,
       };
       App.select({ type: kind, ref });
       return true;
@@ -139,13 +139,17 @@
     function cancelDrag() {
       if (carry) carry.cleanup();
       const d = App.drag;
+      const orbitFrom = R()?.orbitPos;
       App.drag = null;
       setCarrying(false);
       if (R()) R().orbitPos = null;
       App.emit('dragend');
       if (d && d.orig) {
         // 取消：卫星落回原位
-        LP.satellites.satsOf(App.p, d.ref).forEach((s, k) => { if (s.placed && s._active && !s.pinned) R().animate('pop', { ref: s.ref, delay: 30 * k, dur: 260 }); });
+        if (orbitFrom) for (const [ref,from] of Object.entries(orbitFrom)) {
+          const s = M.itemByRef(App.p,ref);
+          if (s?.placed && !s.pinned && !s.locked) R().animate('pop',{ref,from,orbit:true,dur:260});
+        }
       }
       App.redraw();
     }
@@ -161,6 +165,8 @@
     }
     function endDrag(dropOnStage) {
       const d = App.drag;
+      const orbitFrom = d?.kind === 'part' && R()?.orbitPos ? {...R().orbitPos} : null;
+      if (R()) R().orbitPos = null;
       App.drag = null;
       setCarrying(false);
       App.emit('dragend');
@@ -172,15 +178,15 @@
         const why = d.reason ? LP.t(`ui.toast_illegal_${d.reason.reason}`, { ref: d.ref, with: d.reason.with || '' }) : LP.t('ui.toast_illegal_overlap', { ref: d.ref, with: '' });
         App.toast(why + (target ? LP.t('ui.toast_reverted') : ''), 'bad');
       }
-      const orbitFrom = d.kind === 'part' && R().orbitPos ? { ...R().orbitPos } : null;
-      if (R()) R().orbitPos = null;
       if (!target || (d.orig && target.x === d.orig.x && target.y === d.orig.y && target.rot === d.orig.rot && target.side === d.orig.side)) {
+        if (target && d.status !== 'bad' && d.kind === 'part' &&
+            M.placementChildren(App.p,d.ref).some(s=>!s.locked && !s.placed) && App.placePart(d.ref,target,{orbitFrom})) return;
         // 没有移动：卫星从轨道飞回原位
         if (orbitFrom && d.orig) {
           let k = 0;
           for (const [ref, from] of Object.entries(orbitFrom)) {
-            const s = M.satByRef(App.p, ref);
-            if (s && s.placed && s._active) R().animate('pop', { ref, delay: 40 + 30 * k++, dur: 380, from, orbit: true });
+            const s = M.itemByRef(App.p, ref);
+            if (s?.placed && !s.pinned && !s.locked) R().animate('pop', { ref, delay: 40 + 30 * Math.min(8,k++), dur: 380, from, orbit: true });
           }
         }
         App.redraw(); return;
@@ -216,7 +222,7 @@
       const sp = local(e);
       ptrs.set(e.pointerId, sp);
       if (ptrs.size === 2) {
-        if (App.drag) { App.drag = null; App.emit('dragend'); }
+        if (App.drag) cancelDrag();
         const [a, b] = [...ptrs.values()];
         gesture = { type: 'pinch', dist: Math.hypot(a.x - b.x, a.y - b.y), mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
         return;
@@ -235,7 +241,8 @@
       if (e.button === 1 || (e.button === 0 && spaceDown)) { gesture = { type: 'pan', last: sp }; return; }
       if (e.button === 2) { gesture = { type: R().kind === '3d' ? 'orbit' : 'pan', last: sp }; return; }
       const hit = R().pick(sp.x, sp.y);
-      if (hit && (hit.type === 'part' || (hit.type === 'sat' && App.editSats))) {
+      if (hit && ((hit.type === 'part' && (App.editSats || !M.placementOwner(M.partByRef(App.p,hit.ref)))) ||
+                  (hit.type === 'sat' && App.editSats))) {
         gesture = { type: 'press', start: sp, hit };
         return;
       }
@@ -328,7 +335,10 @@
       if (g.type === 'press') {
         const hit = R().pick(sp.x, sp.y);
         App.focusIssue = null;
-        if (hit && hit.type === 'part' && e.button === 0 && !M.partByRef(App.p, hit.ref).locked) { startCarry(hit.ref, g.start, false); return; }
+        if (hit && hit.type === 'part' && e.button === 0) {
+          const part = M.partByRef(App.p,hit.ref);
+          if (!part.locked && !M.placementOwner(part)) { startCarry(hit.ref, g.start, false); return; }
+        }
         App.select(hit ? { type: hit.type, ref: hit.ref } : null);
       }
     };
@@ -372,7 +382,7 @@
     // ---------- 托盘拖出 ----------
     function trayDrag(ref, e) {
       const part = M.partByRef(App.p, ref);
-      if (!part || part.placed) return;
+      if (!part || !M.isTrayPart(part)) return;
       let started = false;
       const sx = e.clientX, sy = e.clientY;
       const move = (ev) => {
@@ -413,6 +423,7 @@
       if (App.drag && (k === 'r' || k === 'R')) { rotateDrag(); return; }
       if (!sel) return;
       if (sel.type === 'part') {
+        if (M.placementOwner(M.partByRef(App.p,sel.ref)) && !App.editSats) return;
         if (k === 'r' || k === 'R') { App.rotatePart(sel.ref); return; }
         if (k === 'f' || k === 'F') { App.flipPart(sel.ref); return; }
         if (k === 'l' || k === 'L') { App.toggleLock(sel.ref); return; }

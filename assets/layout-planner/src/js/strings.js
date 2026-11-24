@@ -145,12 +145,13 @@
       theme: '主题', theme_light: '浅色', theme_dark: '深色',
       help: '帮助', star: 'Star', star_title: '在 GitHub 上 Star 或 Fork 这个 skill，获取后续更新',
       anim_off: '动效', anim_on: '动效开',
-      anim_title_off: '查看当前核心的关联器件环绕预览。点选其他核心可切换。',
-      anim_title_on: '停止环绕预览，查看实际摆位。',
+      anim_title_off: '开启拾取时的环绕与放下时的飞落动画',
+      anim_title_on: '关闭拾取与落地动画',
+      anim_reduced: '本页临时播放拾取与落地动画；刷新后恢复系统的减少动态效果偏好。',
       storage_off: '未自动保存，请手动导出', restored: '已恢复上次的摆放',
       panel_steps: '步骤', panel_eval: '评估',
 
-      tray: '器件托盘', tray_hint: '拖到板上；当前步骤要放的器件已高亮', tray_count: '待放 {n} / {total}',
+      tray: '器件托盘', tray_hint: '点取主器件，再点板面放下；周边件自动就位', tray_count: '待放 {n} / {total}',
       tray_placed: '已摆放', tray_unplaced_sats: '未能放置的卫星器件',
 
       act_toolbar: '选中器件的操作', act_rotate: '旋转', act_flip: '换面', act_lock: '锁定', act_unlock: '解锁',

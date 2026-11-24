@@ -119,12 +119,22 @@
     for (const k of p.board.keepouts || []) if (G.overlaps(r, { x0: k.x, y0: k.y, x1: k.x + k.w, y1: k.y + k.h })) return { ok: false, reason: 'keepout', with: k.reason || '禁布区' };
     for (const h of p.board.holes || []) if (G.overlaps(r, G.expand(holeRect(h), 0.3))) return { ok: false, reason: 'hole' };
     const side = part.through ? 'both' : pl.side;
+    const occupied = [];
     for (const q of p.parts) {
-      if (q === part || !q.placed) continue;
+      if (q === part || !q.placed || (!q.locked && M.placementOwner(q) === part.ref)) continue;
       const qs = q.through ? 'both' : q.placed.side;
+      const rect = M.footprint(q);
+      occupied.push({item:q,rect,side:qs});
       if (side !== 'both' && qs !== 'both' && qs !== side) continue;
-      if (G.overlaps(r, M.footprint(q))) return { ok: false, reason: 'overlap', with: q.ref };
+      if (G.overlaps(r, rect)) return { ok: false, reason: 'overlap', with: q.ref };
     }
+    for (const sat of p.satellites) {
+      if (sat.placed && (sat.pinned || sat.parent[0] !== part.ref)) occupied.push({item:sat,rect:M.satFootprint(sat),side:sat.placed.side});
+      if (sat.pinned && sat.placed && (side === 'both' || sat.placed.side === side) && G.overlaps(r,M.satFootprint(sat)))
+        return { ok: false, reason: 'overlap', with:sat.ref };
+    }
+    const violation = LP.placementLimits?.violation(p,part,pl,r,occupied);
+    if (violation) return {ok:false,...violation};
     return { ok: true };
   }
   /** 拖动反馈：bad 不可放；warn 可放但会挤占卫星位置或进入天线净空区。 */

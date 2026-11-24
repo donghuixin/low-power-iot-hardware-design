@@ -18,7 +18,8 @@
     editSats: false,
     theme: 'light',
     animOn: false,
-    animPreference: null,   // null 表示尚未手动选择，推荐布局可首开预览
+    animPreference: null,
+    motionOverride: null,    // Temporary explicit playback on a reduced-motion page.
     systemReduced: false,   // 系统"减少动态效果"
     get reducedMotion() { return !this.animOn; },
     undoStack: [], redoStack: [],
@@ -39,7 +40,7 @@
       const errors = M.validate(raw);
       if (errors.length) return { ok: false, errors };
       this.p = M.normalize(raw);
-      this.animOn = this.animPreference ?? (!!this.p.orbitFocus && !this.systemReduced);
+      this.animOn = this.systemReduced ? this.motionOverride === true : !!this.animPreference;
       this.boardConfirmed = !!(raw.result || this.p.parts.some((x) => x.placed));
       this.undoStack = []; this.redoStack = [];
       this.sel = null; this.suggestion = null; this.delta = null; this.focusIssue = null;
@@ -59,10 +60,18 @@
       opts = opts || {};
       const before = M.snapshot(this.p);
       const mBefore = this.ev ? this.ev.metrics : null;
-      const satBefore = new Map(this.p.satellites.filter((s) => s.placed && s._active).map((s) => [s.ref, { x: s.placed.x, y: s.placed.y }]));
+      const parent = opts.ref && M.partByRef(this.p,opts.ref);
+      const oldPose = parent?.placed ? {...parent.placed} : null;
+      const children = parent ? M.placementChildren(this.p,parent.ref) : [];
+      const satBefore = new Map([...this.p.satellites.filter(s=>s._active), ...children]
+        .filter(s=>s.placed).map(s=>[s.ref,{...s.placed}]));
       const stepsBefore = this.ev ? this.ev.steps.map((s) => s.state) : [];
       const res = fn();
       if (res === false) return false;
+      if (parent && children.length && (opts.reflow || JSON.stringify(oldPose) !== JSON.stringify(parent.placed))) {
+        const missing = LP.satellites.placeImported(this.p,parent,oldPose);
+        if (missing.length) this.toast(`${parent.ref} 周边有 ${missing.length} 个器件未找到合法落点，详见规则问题。`,'warn');
+      }
       if (M.snapshot(this.p) === before) return false;
       this.undoStack.push(before);
       if (this.undoStack.length > UNDO_LIMIT) this.undoStack.shift();
@@ -78,13 +87,15 @@
       if (r && opts.ref && !opts.noAnim) {
         const parent = M.partByRef(this.p, opts.ref);
         let k = 0;
-        for (const s of this.p.satellites) {
-          if (!s.placed || !s._active || s.pinned || s.parent[0] !== opts.ref) continue;
+        const landing = [...this.p.satellites.filter(s=>s._active && s.parent[0] === opts.ref),
+          ...M.placementChildren(this.p,opts.ref)];
+        for (const s of landing) {
+          if (!s.placed || s.locked || s.pinned) continue;
           const b = satBefore.get(s.ref);
-          if (b && Math.hypot(b.x - s.placed.x, b.y - s.placed.y) < 0.01) continue;
           const orbit = opts.orbitFrom && opts.orbitFrom[s.ref];
-          if (orbit) r.animate('pop', { ref: s.ref, delay: 60 + 35 * k++, dur: 420, from: orbit, orbit: true });
-          else r.animate('pop', { ref: s.ref, delay: 140 + 20 * k++, dur: 260, from: parent && parent.placed ? { x: parent.placed.x, y: parent.placed.y } : null });
+          if (!orbit && b && Math.hypot(b.x - s.placed.x, b.y - s.placed.y) < 0.01) continue;
+          if (orbit) r.animate('pop', { ref: s.ref, delay: 60 + Math.min(8,k++) * 35, dur: 420, from: orbit, orbit: true });
+          else r.animate('pop', { ref: s.ref, delay: 140 + Math.min(8,k++) * 20, dur: 260, from: parent && parent.placed ? { x: parent.placed.x, y: parent.placed.y } : null });
         }
         if (parent && parent.placed) {
           r.animate('drop', { ref: opts.ref });
@@ -128,6 +139,8 @@
     updateSuggestion() {
       this.suggestion = null;
       if (!this.sel || this.sel.type !== 'part') return;
+      const item = M.partByRef(this.p,this.sel.ref);
+      if (!item || item.locked || M.placementOwner(item)) return;
       this.suggestion = LP.metrics.orientationSuggestion(this.p, this.sel.ref, (part, pl) => LP.rules.quickLegal(this.p, part, pl).ok);
     },
     acceptSuggestion() {
@@ -154,7 +167,12 @@
     },
     placePart(ref, pl, extra) {
       const part = M.partByRef(this.p, ref);
-      return this.commit(LP.t('ui.op_place'), () => { part.placed = { ...pl }; }, { ref, ...(extra || {}) });
+      if (!part || part.locked || !LP.rules.quickLegal(this.p,part,pl).ok) return false;
+      const reflow = M.placementChildren(this.p,ref).some(child=>!child.placed && !child.locked);
+      return this.commit(LP.t('ui.op_place'), () => {
+        part.placed = { ...pl };
+        if (M.placementOwner(part)) part.locked = true;
+      }, { ref, reflow, ...(extra || {}) });
     },
     tryTransform(ref, fn, label) {
       const part = M.partByRef(this.p, ref);
@@ -164,7 +182,7 @@
       if (!pl) return false;
       const q = LP.rules.quickLegal(this.p, part, pl);
       if (!q.ok) { this.toast(LP.t(`ui.toast_illegal_${q.reason}`, { ref, with: q.with || '' }), 'bad'); this.emit('shake', ref); return false; }
-      return this.commit(label, () => { part.placed = pl; }, { ref });
+      return this.commit(label, () => { part.placed = pl; if (M.placementOwner(part)) part.locked = true; }, { ref });
     },
     rotatePart(ref) { return this.tryTransform(ref, (pl) => ({ ...pl, rot: (pl.rot + 90) % 360 }), LP.t('ui.op_rotate')); },
     flipPart(ref) {
@@ -258,7 +276,11 @@
     },
     resetLayout() {
       this.commit(LP.t('ui.op_reset'), () => {
-        for (const x of this.p.parts) { x.placed = null; x.locked = false; }
+        const fixed = new Set(this.p.parts.filter(x=>x.placementRole === 'board_feature').map(x=>x.ref));
+        for (const x of this.p.parts) {
+          if (fixed.has(x.ref) || fixed.has(M.placementOwner(x))) continue;
+          x.placed = null; x.locked = false;
+        }
         for (const s of this.p.satellites) { s.placed = null; s.pinned = false; }
       }, { noAnim: true });
       this.select(null);
@@ -308,9 +330,16 @@
     exportCSV() { this.download(`${this.slug()}-placement.csv`, '﻿' + M.exportCSV(this.p), 'text/csv'); },
 
     setAnim(on) {
-      this.animOn = this.animPreference = !!on;
-      try { localStorage.setItem('lp:anim', on ? '1' : '0'); } catch (e) { /* 存储不可用 */ }
-      if (!on && LP.ui) {
+      if (this.systemReduced) this.motionOverride = !!on;
+      else {
+        this.animPreference = !!on;
+        try { localStorage.setItem('lp:anim', on ? '1' : '0'); } catch (e) { /* 存储不可用 */ }
+      }
+      this.applyAnimPreference();
+    },
+    applyAnimPreference() {
+      this.animOn = this.systemReduced ? this.motionOverride === true : !!this.animPreference;
+      if (!this.animOn && LP.ui) {
         for (const renderer of [LP.ui.r2, LP.ui.r3]) {
           if (!renderer) continue;
           renderer.anims = [];

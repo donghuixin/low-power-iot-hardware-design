@@ -65,10 +65,8 @@
       App.systemReduced = mq.matches;
       mq.addEventListener && mq.addEventListener('change', (e) => {
         App.systemReduced = e.matches;
-        if (App.animPreference === null && App.p) {
-          App.animOn = !!App.p.orbitFocus && !App.systemReduced;
-          App.emit('anim'); App.redraw();
-        }
+        App.motionOverride = null;
+        if (App.p) App.applyAnimPreference();
       });
       try {
         const stored = localStorage.getItem('lp:anim');
@@ -99,7 +97,9 @@
         const item = matches[0];
         app.select({ type: item.kind ? 'sat' : 'part', ref: item.ref });
         if (item.placed) app.focusOn([item.ref]);
-        else this.highlightTray(item.kind ? item.parent[0] : item.ref);
+        else if (item.kind || M.placementOwner(item)) this.highlightTray(item.parent?.[0] || M.placementOwner(item));
+        else if (M.isTrayPart(item)) this.highlightTray(item.ref);
+        else LP.interactionApi.startCarry(item.ref, app.renderer.boardToScreen(0, 0), true);
       });
     },
 
@@ -227,7 +227,8 @@
       an.classList.toggle('on', App.animOn);
       an.setAttribute('aria-pressed', String(App.animOn));
       an.querySelector('span').textContent = App.animOn ? t('anim_on') : t('anim_off');
-      an.title = App.animOn ? t('anim_title_on') : t('anim_title_off');
+      an.title = App.animOn ? t('anim_title_on') : App.systemReduced ? t('anim_reduced') : t('anim_title_off');
+      an.setAttribute('aria-label', an.title);
       this.root.classList.toggle('no-anim', App.reducedMotion);
       for (const [k, v] of Object.entries(App.layers)) { const el = $(`#layer-${k}`); if (el) el.checked = v; }
       const es = $('#opt-editsats'); if (es) es.checked = App.editSats;
@@ -557,7 +558,7 @@
       const App = this.App, list = $('#tray-list');
       list.innerHTML = '';
       const cur = this.currentStep();
-      const parts = [...App.p.parts].sort((a, b) => LP.engine.stepOfRole(a.role) - LP.engine.stepOfRole(b.role) || a.ref.localeCompare(b.ref, 'en', { numeric: true }));
+      const parts = App.p.parts.filter(M.isTrayPart).sort((a, b) => LP.engine.stepOfRole(a.role) - LP.engine.stepOfRole(b.role) || a.ref.localeCompare(b.ref, 'en', { numeric: true }));
       const unplaced = parts.filter((x) => !x.placed).length;
       $('#tray-count').textContent = t('tray_count', { n: unplaced, total: parts.length });
       for (const x of parts) {
@@ -569,12 +570,17 @@
         if (x.label !== name && x.label !== x.ref) card.append(h('span', { class: 'tray-label' }, x.label));
         if (x.placed) card.append(h('span', { class: 'tray-badge' }, '✓'));
         card.addEventListener('pointerdown', (e) => {
-          if (x.placed) return;
+          if (e.button !== 0) return;
+          if (x.locked) { App.select({ type: 'part', ref: x.ref }); App.focusOn([x.ref]); return; }
           e.preventDefault();
           LP.interactionApi.trayDrag(x.ref, e);
         });
-        card.addEventListener('click', () => { if (x.placed) { App.select({ type: 'part', ref: x.ref }); App.focusOn([x.ref]); } });
-        card.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && !x.placed) { e.preventDefault(); this.placeByKeyboard(x.ref); } });
+        card.addEventListener('keydown', (e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          e.preventDefault();
+          if (x.placed) { App.select({ type: 'part', ref: x.ref }); App.focusOn([x.ref]); }
+          else this.placeByKeyboard(x.ref);
+        });
         list.append(card);
         requestAnimationFrame(() => LP.render2d.drawThumb(cv, x));
       }
@@ -625,7 +631,11 @@
       if (sel.type === 'part') {
         const part = M.partByRef(App.p, sel.ref);
         if (!part || !part.placed) { a.hidden = true; this.suggestChip.hidden = true; return; }
-        a.append(h('span', { class: 'act-ref' }, `${part.ref} · ${M.faceName(part)}`),
+        const owner = M.placementOwner(part);
+        if (owner && !App.editSats) {
+          a.append(h('span', {class:'act-ref'}, `${part.ref} · ${M.faceName(part)} → ${owner}`),
+            h('span', {class:'muted small act-note'}, t('act_sat_hint')));
+        } else a.append(h('span', { class: 'act-ref' }, `${part.ref} · ${M.faceName(part)}`),
           btn('rotate', t('act_rotate') + ' (R)', () => App.rotatePart(part.ref)),
           btn('flip', t('act_flip') + ' (F)', () => App.flipPart(part.ref)),
           btn('lock', (part.locked ? t('act_unlock') : t('act_lock')) + ' (L)', () => App.toggleLock(part.ref), part.locked ? 'on' : ''),
