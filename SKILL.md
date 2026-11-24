@@ -1,6 +1,6 @@
 ---
 name: low-power-iot-hardware-design
-description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉立创 EDA 与 KiCad 的 MCP 接入、交互式需求澄清、设计资料收集与核验、需求挖掘(含用户没想到的隐性需求及其对应的硬件形态)、器件与无线选型(BLE/WiFi/Thread/LoRa/蜂窝)、传感器放置(如IMU是否需要居中)、首稿电源地符号与紧凑排版、原理图可靠性审查(上拉下拉、三态、开漏/推挽、电平匹配、驱动电压电流、峰值/静态电流、电源树与去耦)、交互式 PCB 布局规划(2D/3D 摆放主器件、卫星器件自动贴放、实时布线复杂度与规则反馈)、布局布线验证(电流与回流、EMI 受扰与平面谐振、温度与散热片对比，布线前估计、布线后从 KiCad/Gerber 提取铜皮复核)、PCB布局布线(射频与天线、信号完整性、电源完整性、EMC、DFM、测试点)以及打样后的bring-up；满足门槛时启用高性能混合信号/医疗手持扩展：手持超声等医疗手持设备、FPGA+高速ADC/AFE、LVDS、高压脉冲(超过 50 V)、混合信号低噪声电源与时钟抖动、1S数瓦供电与接触温升。适用电池供电设备、可穿戴、传感器节点、nRF52/nRF53/nRF54/ESP32/STM32L/STM32WB 等低功耗SoC的硬件、原理图或PCB评审、续航/功耗预算、睡眠电流偏大、天线或射频布局、器件该怎么摆、"帮我看看这个板子/这张原理图"等。Low-power IoT and mixed-signal hardware design, schematic drafting and review, power budgeting, and PCB planning.
+description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉立创 EDA 与 KiCad 的 MCP 接入、交互式需求澄清、设计资料收集与核验、需求挖掘(含用户没想到的隐性需求及其对应的硬件形态)、器件与无线选型(BLE/WiFi/Thread/LoRa/蜂窝)、传感器放置(如IMU是否需要居中)、首稿电源地符号与紧凑排版、原理图可靠性审查(上拉下拉、三态、开漏/推挽、电平匹配、驱动电压电流、峰值/静态电流、电源树与去耦)、交互式 PCB 布局规划(2D/3D 摆放主器件、卫星器件自动贴放、实时布线复杂度与规则反馈)、布局布线验证(电流与回流、EMI 受扰与平面谐振、温度与散热片对比，布线前估计、布线后从 KiCad/Gerber 提取铜皮复核)、设计规则与板厂工艺(嘉立创线宽线距过孔的价格档位、导入自有板厂工艺、规则对照与生成)、PCB布局布线(射频与天线、信号完整性、电源完整性、EMC、DFM、测试点)以及打样后的bring-up；满足门槛时启用高性能混合信号/医疗手持扩展：手持超声等医疗手持设备、FPGA+高速ADC/AFE、LVDS、高压脉冲(超过 50 V)、混合信号低噪声电源与时钟抖动、1S数瓦供电与接触温升。适用电池供电设备、可穿戴、传感器节点、nRF52/nRF53/nRF54/ESP32/STM32L/STM32WB 等低功耗SoC的硬件、原理图或PCB评审、续航/功耗预算、睡眠电流偏大、天线或射频布局、器件该怎么摆、"帮我看看这个板子/这张原理图"等。Low-power IoT and mixed-signal hardware design, schematic drafting and review, power budgeting, and PCB planning.
 ---
 
 # 低功耗 IoT 硬件设计
@@ -101,6 +101,7 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 5. 传感器的选型和放置约束按 `references/03-sensor-placement.md`：这些约束（IMU 的位置与应力、温度传感器远离热源、天线在板边）必须在这个阶段就确定，因为它们决定板形和结构。
 6. 做第一版功耗预算（`references/06-power-budget.md`，可运行 `scripts/power_budget.py`）。预算不闭合就回头改架构，而不是留到画完板再说。
 7. 确定电源架构（`references/05-power-architecture.md`）：电池化学体系、是否需要升压/降压、是否充电、电源路径、保护。
+8. 层数和最细的封装间距定下来后，看目标板厂的价格档位（`python scripts/fab_rules.py show`，见 `references/15-design-rules-and-process.md`）：需要加价档或极限档工艺的器件（细间距 BGA、WLCSP）要在这一步就告诉用户成本影响。
 
 **输出：需求与架构文档**，使用 `assets/requirements-template.md` 的结构，包括：需求表（显性/隐性/假设）、系统框图（用文字或 Mermaid）、电源树、关键器件选型及理由、功耗预算、"你可能没考虑到的问题"、未决事项。
 
@@ -195,6 +196,8 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 
 **布线后验证**（用户已在 EDA 里布完线时推荐）：请用户提供 `.kicad_pcb`（铺铜已填充），或 Gerber + 板框 + IPC-D-356 网表（嘉立创 EDA 导出 Gerber 时勾选 IPC 网表），用 `python scripts/extract_copper.py ... -o copper-pack.json` 提取铜皮，再用 `make_layout_project.py <布局.json> --verifier --copper copper-pack.json` 生成页面，或让用户把数据包拖进已有的验证器页面。阶段 R 的结论（瓶颈、压降、过孔电流、射频参考平面、并行耦合、地铜孤岛、平面谐振、温度）按 `references/13-layout-verifier.md` 第 8 节并入评审报告，注明是简化模型。
 
+**设计规则与板厂工艺**（布线前和下单前都做）：按 `references/15-design-rules-and-process.md`。布线前用 `python scripts/fab_rules.py show` 看目标板厂的价格档位（内置嘉立创；用户有自己的板厂工艺表、PDF 或截图时，先用 `import` 导入成工艺档案），用 `emit --tier standard --layers N` 生成板厂下限规则和网络类建议，填进 EDA 后再布线。下单前用 `check <.kicad_pro> <.kicad_pcb>` 对照，把价格档位、决定档位的参数、降档办法和超限项写进评审。规则按"板厂下限 / 设计默认 / 电气要求"三层来写。报价格时说明检索日期，并提醒以下单系统的实时报价为准；档案超过三个月或用户要下单时，重新查官方页面更新。
+
 **布线过程**（用户在 EDA 里布线、或让 Claude 通过 EDA 工具布线时）：按 `references/14-routing-practice.md`。先建网络类，关键网手工布好并锁定；再逐网布线，每完成一个网络 DRC 保持为零；每根连接按"同层绕行 → 推挤 → 中间点 → 换层"的阶梯逐级尝试；自动布线多跑几次，只取全部连通且零 DRC 的结果。该文件还给出开源 2 层板的线宽、间距、过孔和焊盘密度基准，以及绕线判据。
 
 收尾时用 `references/checklists.md` 的 layout 清单扫一遍（含"布线过程"一段）；用了验证器时加"布局布线验证"一段。
@@ -212,6 +215,7 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 - `scripts/power_budget.py <config.json>`：由电池、常开负载、周期性事件计算平均电流、续航、各项占比，并检查峰值电流在电池内阻上的压降。配置示例见 `assets/power-budget-example.json`。做功耗预算时用它，不要心算。
 - `scripts/make_layout_project.py <project.json> [-o out.html] [--check]`：校验布局规划器的项目数据，生成该项目专用的单文件页面。`assets/layout-planner.html` 内置示例，可直接打开试用；改动页面源码后用 `scripts/build_layout_planner.py` 重新构建。
 - `scripts/make_layout_project.py <布局.json> --verifier [--copper copper-pack.json]`：生成布局布线验证器页面（电流与回流、电磁、温度）；不给铜皮数据包时是布线前估计，给了是布线后验证。`assets/layout-verifier.html` 内置示例；改动源码后用 `scripts/build_layout_verifier.py` 重新构建。
+- `scripts/fab_rules.py show | template | import <工艺表> | read <设计文件…> | check <设计文件…> [--profile 档案.json] | emit --tier <档位> --layers N`：读取板厂工艺（内置 `assets/fab-profiles/jlcpcb.json`，也可导入用户的工艺表）、读取设计规则与实际最小线宽和过孔、对照价格档位、生成 KiCad 规则和网络类建议。只依赖标准库。
 - `scripts/extract_copper.py <board.kicad_pcb> | --gerber ... --outline ... --ipc356 ... [--project 布局.json] -o copper-pack.json`：从布好的 PCB 提取铜皮，生成验证器的铜皮数据包（需要 numpy、scipy、Pillow）。
 - `scripts/hw_calc.py`：常用小计算——I2C 上拉取值范围 (`i2c-pullup`)、脉冲负载所需储能电容 (`bulk-cap`)、分压器电流与输出阻抗 (`divider`)、晶体负载电容 (`xtal`)、续航 (`life`)。运行 `python scripts/hw_calc.py -h` 查看参数。
   扩展模块另有：时钟抖动限制的 SNR 或允许抖动 (`jitter --fin-mhz 10 --snr-db 74`)、由 ADC LSB / 噪声底与 PSRR 反推纹波上限 (`ripple --fs-vpp 2 --bits 12 --psrr-db 40 --margin-db 10`)、高压脉冲峰值电流与 burst 储能电容 (`hvcap --cel-pf 100 --channels 32 --dv 60 --tr-ns 20 --droop-v 1 --cycles 8 --prf-khz 10`)、采集数据率与存储量 (`datarate --channels 8 --fs-msps 30 --bits 12 --window-us 200 --shots 4 --lines 80 --fps 5 --link-mbps 20`)。
@@ -234,6 +238,7 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 | `references/12-layout-planner.md` | 用交互式布局规划器摆放主器件：生成项目数据、页面功能、指标与规则、解读导出结果 |
 | `references/13-layout-verifier.md` | 布局后或布线后做电流回流、电磁、温度验证：`verify` 块、提取铜皮、规则 VF-01…15、解读验证报告 |
 | `references/14-routing-practice.md` | 布线实操（取自 CADET）：开源 2 层板的规则与密度基准、逐网布线顺序、升级阶梯、换层与过孔、绕线判据、自动布线器能做到多少 |
+| `references/15-design-rules-and-process.md` | 写设计规则的八条做法、嘉立创工艺与价格档位、导入用户的板厂工艺、用 `fab_rules.py` 对照设计并生成规则 |
 | `references/20-hv-pulser-tr-safety.md` | 扩展模块：电压 >50 V；高压脉冲、T/R 与接收保护、高压电源与档位、储能、联锁、PCB 间距 |
 | `references/21-ultrasound-afe-clock.md` | 扩展模块：ADC ≥10 MSPS；超声 AFE 噪声、TGC、抗混叠、IQ 解调、时钟抖动与多普勒同源时钟 |
 | `references/22-low-noise-power-thermal.md` | 扩展模块：持续功耗 >1 W 或有高速 ADC；持续功耗模型、1S 电源路径、纹波推导、开关同步、手持热设计 |

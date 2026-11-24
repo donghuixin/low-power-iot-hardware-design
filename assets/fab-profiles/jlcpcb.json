@@ -1,0 +1,346 @@
+{
+ "kind": "fab-profile",
+ "version": 1,
+ "id": "jlcpcb",
+ "name": "嘉立创 FR-4 刚性板（1–6 层常用范围）",
+ "retrieved": "2026-11-24",
+ "units": "mm",
+ "currency": "CNY",
+ "sources": [
+  {
+   "id": "cap",
+   "title": "JLCPCB Rigid PCB Capabilities（官方工艺能力页）",
+   "url": "https://jlcpcb.com/capabilities/pcb-capabilities"
+  },
+  {
+   "id": "quote",
+   "title": "JLCPCB 在线计价页的过孔加价提示",
+   "url": "https://cart.jlcpcb.com/quote"
+  },
+  {
+   "id": "cost",
+   "title": "JLCPCB 官方博客：定制 PCB 成本与省钱规则",
+   "url": "https://jlcpcb.com/blog/custom-pcb-cost"
+  },
+  {
+   "id": "cn",
+   "title": "嘉立创：多层 PCB 工艺能力参数（2022-10）及页面上的价格动态（2026）",
+   "url": "https://www.jlc.com/portal/q7i38752.html"
+  },
+  {
+   "id": "vip",
+   "title": "嘉立创：6–32 层盘中孔与沉金标配、工程费说明",
+   "url": "https://www.jlc.com/portal/q7i51734.html"
+  }
+ ],
+ "notes": [
+  "数值取自上面的公开页面，检索日期见 retrieved。工艺能力和价格会调整，下单前以嘉立创下单系统的实时审核和报价为准。",
+  "档位是本 skill 为了判断成本做的归纳，不是嘉立创的官方分级：经济 = 官方建议的最低成本设计范围；标准 = 常规能力内、不触发细线细孔加价；加价 = 能做但下单系统会加收费用；极限 = 极限能力，有附加条件，不建议用。",
+  "加价金额没有公开的固定数字，随面积、数量和订单类型变化，这里只标出是否加价。",
+  "免费打样券的范围（每月 2 张、10×10 cm 内、5 片、1–4 层）来自第三方整理，未在官方页面核实，规则经常调整。"
+ ],
+ "tiers": [
+  {
+   "id": "economy",
+   "name": "经济",
+   "cost": "最低成本：官方建议的省钱范围，也最接近免费打样和特价板的条件",
+   "source": "cost",
+   "rules": {
+    "2": {
+     "track_width": 0.127,
+     "clearance": 0.127,
+     "via_drill": 0.3,
+     "via_diameter": 0.6
+    },
+    "multi": {
+     "track_width": 0.127,
+     "clearance": 0.127,
+     "via_drill": 0.3,
+     "via_diameter": 0.6
+    }
+   },
+   "conditions": [
+    "板子长宽 ≤ 100 × 100 mm",
+    "板厚 1.6 mm、铜厚 1 oz、绿油白字、喷锡"
+   ]
+  },
+  {
+   "id": "standard",
+   "name": "标准",
+   "cost": "不加价：常规能力内，不触发细线细孔费用",
+   "source": "cap, quote",
+   "rules": {
+    "2": {
+     "track_width": 0.1,
+     "clearance": 0.1,
+     "via_drill": 0.3,
+     "via_diameter": 0.45
+    },
+    "multi": {
+     "track_width": 0.09,
+     "clearance": 0.09,
+     "via_drill": 0.2,
+     "via_diameter": 0.45
+    }
+   },
+   "conditions": [
+    "多层板过孔外径 ≥ 0.45 mm 时，0.2 mm 孔不加价",
+    "过孔外径至少比孔径大 0.1 mm，建议大 0.15 mm 以上"
+   ]
+  },
+  {
+   "id": "extra",
+   "name": "加价",
+   "cost": "加价：孔 < 0.3 mm 且外径 ≤ 0.4 mm，或 0.15 mm 孔，下单系统加收费用（金额以实时报价为准）",
+   "source": "cap, quote",
+   "rules": {
+    "2": {
+     "track_width": 0.1,
+     "clearance": 0.1,
+     "via_drill": 0.15,
+     "via_diameter": 0.25
+    },
+    "multi": {
+     "track_width": 0.09,
+     "clearance": 0.09,
+     "via_drill": 0.15,
+     "via_diameter": 0.25
+    }
+   },
+   "conditions": [
+    "0.2–0.25 mm 的 BGA 焊盘需要沉金"
+   ]
+  },
+  {
+   "id": "extreme",
+   "name": "极限",
+   "cost": "极限能力：更贵，并且有板厚和表面处理限制，不建议用于量产",
+   "source": "cap",
+   "rules": {
+    "2": {
+     "track_width": 0.1,
+     "clearance": 0.1,
+     "via_drill": 0.1,
+     "via_diameter": 0.2
+    },
+    "multi": {
+     "track_width": 0.076,
+     "clearance": 0.09,
+     "via_drill": 0.1,
+     "via_diameter": 0.2
+    }
+   },
+   "conditions": [
+    "0.1 mm 孔要求板厚 ≤ 1.0 mm，表面处理为沉金或 OSP",
+    "多层板 3 mil 线宽只允许在 BGA 扇出的局部使用"
+   ]
+  }
+ ],
+ "common": {
+  "via_annular": {
+   "value": 0.05,
+   "rec": 0.1,
+   "note": "过孔单边焊环：外径至少比孔径大 0.1 mm，建议 0.15 mm 以上"
+  },
+  "pth_annular": {
+   "value": 0.15,
+   "rec": 0.25,
+   "note": "插件孔单边焊环：2 层极限 0.18、建议 0.25；多层极限 0.15、建议 0.20"
+  },
+  "pth_drill": {
+   "value": 0.15,
+   "rec": 0.5,
+   "note": "插件孔建议 ≥ 0.5 mm"
+  },
+  "npth_drill": {
+   "value": 0.5
+  },
+  "hole_to_hole_via": {
+   "value": 0.2,
+   "note": "过孔孔边到孔边"
+  },
+  "hole_to_hole_pad": {
+   "value": 0.45,
+   "note": "插件孔孔边到孔边"
+  },
+  "via_hole_to_track": {
+   "value": 0.2,
+   "note": "过孔孔边到异网走线"
+  },
+  "pth_hole_to_track": {
+   "value": 0.28,
+   "rec": 0.35
+  },
+  "npth_to_track": {
+   "value": 0.2
+  },
+  "pad_to_track": {
+   "value": 0.1,
+   "note": "BGA 局部 0.09"
+  },
+  "smd_pad_to_pad": {
+   "value": 0.15
+  },
+  "same_net_spacing": {
+   "value": 0.25,
+   "note": "同网导体之间的缝隙，太小会有干膜碎屑"
+  },
+  "copper_to_edge": {
+   "value": 0.2,
+   "rec": 0.3,
+   "note": "铣边"
+  },
+  "copper_to_vcut": {
+   "value": 0.4
+  },
+  "min_smd_pad": {
+   "value": 0.25
+  },
+  "bga_pad": {
+   "value": 0.2,
+   "rec": 0.25,
+   "note": "0.2–0.25 mm 需沉金"
+  },
+  "mask_bridge": {
+   "value": 0.1,
+   "note": "1 oz：绿红黄蓝紫 0.10，黑白 0.13；2 oz 为 0.20"
+  },
+  "silk_width": {
+   "value": 0.15
+  },
+  "silk_height": {
+   "value": 1.0
+  },
+  "silk_to_pad": {
+   "value": 0.15
+  },
+  "slot_plated": {
+   "value": 0.5,
+   "note": "多层 0.35；长度 ≥ 2 倍宽度"
+  },
+  "slot_npth": {
+   "value": 1.0
+  },
+  "castellated_hole": {
+   "value": 0.5,
+   "note": "半孔：孔边到板边 ≥ 1 mm，板子 ≥ 10 × 10 mm，板厚 ≥ 0.6 mm"
+  },
+  "track_tolerance_pct": {
+   "value": 20,
+   "note": "线宽公差 ±20%"
+  }
+ },
+ "copper": {
+  "1": {
+   "scale": "基准"
+  },
+  "2": {
+   "track_width": {
+    "2": 0.16,
+    "multi": 0.15
+   },
+   "clearance": {
+    "2": 0.16,
+    "multi": 0.15
+   },
+   "mask_bridge": 0.2,
+   "note": "2 oz 铜的最小线宽线距"
+  }
+ },
+ "options": {
+  "layers": "1–32 层；1–6 层的成本、交期最均衡",
+  "thickness_mm": [
+   0.4,
+   0.6,
+   0.8,
+   1.0,
+   1.2,
+   1.6,
+   2.0
+  ],
+  "outer_copper_oz": {
+   "2": [
+    1,
+    2,
+    2.5,
+    3.5,
+    4.5
+   ],
+   "multi": [
+    1,
+    2
+   ]
+  },
+  "inner_copper_oz": [
+   0.5,
+   1,
+   2
+  ],
+  "finish": "有铅/无铅喷锡、沉金、OSP；6 层及以上不支持喷锡；0.4 mm 板厚只接受沉金",
+  "via_in_pad": "树脂塞孔 + 电镀盖帽（盘中孔），孔径 0.15–0.55 mm；6 层及以上为标配并免费，2/4 层收费",
+  "impedance": "±10%（多层板）；±5% 需特别申请"
+ },
+ "pricing": [
+  {
+   "item": "单、双面板 板费",
+   "value": 410,
+   "unit": "元/㎡",
+   "as_of": "2026-09-21",
+   "source": "cn",
+   "note": "A 级板材、1.6 mm；样板和小批量按系统实时报价"
+  },
+  {
+   "item": "4 层板 板费",
+   "value": 460,
+   "unit": "元/㎡",
+   "as_of": "2026-09-21",
+   "source": "cn"
+  },
+  {
+   "item": "无铅喷锡",
+   "value": 30,
+   "unit": "元/㎡",
+   "as_of": "2026-08-24",
+   "source": "cn",
+   "note": "OSP 无表面处理费"
+  },
+  {
+   "item": "6 层及以上 2u\" 沉金",
+   "value": 30,
+   "unit": "元/㎡",
+   "as_of": "2025",
+   "source": "vip"
+  },
+  {
+   "item": "6 层及以上 工程费",
+   "value": 200,
+   "unit": "元/款",
+   "as_of": "2025",
+   "source": "vip"
+  },
+  {
+   "item": "6 层及以上 盘中孔",
+   "value": 0,
+   "unit": "元",
+   "as_of": "2025",
+   "source": "vip",
+   "note": "标配，免费"
+  },
+  {
+   "item": "面积超过 50 ㎡ 的部分",
+   "value": null,
+   "unit": "",
+   "as_of": "2026-06-12",
+   "source": "cn",
+   "note": "反向阶梯加价"
+  },
+  {
+   "item": "免费打样券",
+   "value": 0,
+   "unit": "元",
+   "as_of": "2026",
+   "source": null,
+   "note": "每月 2 张、长宽 ≤ 10 cm、5 片、1–4 层、常规工艺；只免板费。第三方整理，未在官方页面核实"
+  }
+ ]
+}

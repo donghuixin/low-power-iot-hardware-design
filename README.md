@@ -158,6 +158,26 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 
 所有结果都是简化模型的定性结论，相对比较（改动前后、方案 A 与 B）比绝对数值更可靠；不替代 SI/PI/EMC 仿真和实测。
 
+## 设计规则与板厂工艺
+
+线宽画到多细要加钱？0.2 mm 的孔算不算特殊工艺？`scripts/fab_rules.py` 把这些问题变成一次对照：
+
+- **内置嘉立创工艺档案**（[`assets/fab-profiles/jlcpcb.json`](assets/fab-profiles/jlcpcb.json)，检索日期 2026-11-24）：按线宽、线距、过孔归纳成"经济 / 标准 / 加价 / 极限"四档，另有焊环、孔距、板边距、阻焊桥等下限，以及带日期和来源的价格参考。
+- **支持自己的板厂**：把工艺表（CSV、Markdown 表格、xlsx 或键值文本）交给 `import`，中英文参数名和 mil / mm 单位自动识别，没认出来的行会列出来。
+- **读取设计**：从 KiCad 的 `.kicad_pro`、`.kicad_pcb` 读出网络类、全局下限和板上实际用到的最小线宽、每种过孔规格。
+- **对照**：告诉你板子落在哪个价格档、是哪个参数决定的、把哪个数改到多少就能降一档，以及超出能力或自相矛盾的规则。
+- **生成**：按目标档位输出 KiCad 自定义规则和四个网络类的建议表。
+
+```text
+$ python scripts/fab_rules.py check demo.kicad_pro demo.kicad_pcb
+- 按 4 层、1 oz 铜对照
+- 价格档位：加价 — 孔 < 0.3 mm 且外径 ≤ 0.4 mm，或 0.15 mm 孔，下单系统加收费用
+- 决定档位的参数：过孔 0.25/0.4（孔径/外径）
+- 降档办法：改成不小于 0.2/0.45 可回到「标准」档
+```
+
+怎么把规则写好（三层规则、成组的网络类、带范围的特例、严格口径验收等八条做法）见 [`references/15-design-rules-and-process.md`](references/15-design-rules-and-process.md)。工艺和价格会调整，下单前以板厂下单系统的实时报价为准。
+
 ## 目录结构
 
 ```
@@ -177,6 +197,7 @@ references/
   12-layout-planner.md           交互式布局规划器：项目数据、功能、指标与规则、解读导出
   13-layout-verifier.md          布局布线验证器：verify 块、提取铜皮、规则 VF-01…15、解读验证报告
   14-routing-practice.md         布线实操（取自 CADET）：规则与密度基准、逐网顺序、升级阶梯、换层、绕线判据、自动布线器预期
+  15-design-rules-and-process.md 设计规则与板厂工艺：写规则的八条做法、嘉立创价格档位、导入自有工艺、对照与生成
   20-hv-pulser-tr-safety.md      扩展：高压脉冲、T/R、高压电源与联锁、间距
   21-ultrasound-afe-clock.md     扩展：超声 AFE、采样与 IQ、时钟抖动
   22-low-noise-power-thermal.md  扩展：持续功耗模型、纹波与开关同步、手持热设计
@@ -191,6 +212,7 @@ scripts/
   build_layout_planner.py        把规划器源码构建为单文件
   build_layout_verifier.py       把验证器源码构建为单文件
   extract_copper.py              从 KiCad 或 Gerber + IPC-D-356 提取铜皮，生成铜皮数据包
+  fab_rules.py                   读取板厂工艺与设计规则，对照价格档位，生成 KiCad 规则和网络类建议
 assets/
   layout-planner.html            布局规划器（单文件，内置示例）
   layout-planner/                规划器源码与 Three.js（MIT）
@@ -198,6 +220,7 @@ assets/
   layout-verifier.html           布局布线验证器（单文件，内置示例）
   layout-verifier/               验证器源码
   layout-verify-example.json     验证器示例（布局 + verify 块）
+  fab-profiles/jlcpcb.json       嘉立创工艺档案：价格档位、各项下限、价格参考与来源
   requirements-template.md       需求与架构文档模板
   power-budget-example.json      功耗预算配置示例
 tests/                           规划器与验证器的单元测试、铜皮提取测试与合成板
@@ -250,10 +273,12 @@ python scripts/hw_calc.py jitter --fin-mhz 10 --snr-db 74
 python scripts/hw_calc.py hvcap --cel-pf 100 --channels 32 --dv 60 --tr-ns 20 --droop-v 1 --cycles 8 --prf-khz 10
 python scripts/make_layout_project.py assets/layout-project-example.json --check
 python scripts/make_layout_project.py assets/layout-verify-example.json --verifier
+python scripts/fab_rules.py show --layers 4
+python scripts/fab_rules.py check board.kicad_pro board.kicad_pcb
 python scripts/extract_copper.py board.kicad_pcb --project 布局.json -o copper-pack.json
 ```
 
-除 `extract_copper.py`（需要 numpy、scipy、Pillow）外只依赖 Python 3 标准库。规划器与验证器的单元测试：`node --test tests/*.test.js`（Node 18+，无第三方依赖）；铜皮提取：`python -m unittest tests/test_extract_copper.py`。
+除 `extract_copper.py`（需要 numpy、scipy、Pillow）外只依赖 Python 3 标准库（`fab_rules.py` 导入 xlsx 时需要 openpyxl）。规划器与验证器的单元测试：`node --test tests/*.test.js`（Node 18+，无第三方依赖）；铜皮提取与工艺规则：`python -m unittest tests/test_extract_copper.py tests/test_fab_rules.py`。
 
 ## 参与改进
 

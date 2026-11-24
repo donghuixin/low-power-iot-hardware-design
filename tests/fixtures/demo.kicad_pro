@@ -1,0 +1,9 @@
+{
+ "board": {"design_settings": {
+   "rules": {"min_clearance": 0.09, "min_track_width": 0.09, "min_via_diameter": 0.4, "min_through_hole_diameter": 0.2,
+             "min_via_annular_width": 0.05, "min_copper_edge_clearance": 0.15, "min_hole_to_hole": 0.2, "min_hole_clearance": 0.2},
+   "rule_severities": {"clearance": "error", "track_dangling": "warning", "via_dangling": "warning", "hole_to_hole": "warning"}}},
+ "net_settings": {"classes": [
+   {"name": "Default", "clearance": 0.15, "track_width": 0.15, "via_diameter": 0.45, "via_drill": 0.25},
+   {"name": "Power", "clearance": 0.2, "track_width": 0.3, "via_diameter": 0.6, "via_drill": 0.3}]}
+}
