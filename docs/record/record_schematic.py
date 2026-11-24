@@ -17,7 +17,7 @@ async def main():
         await pg.goto(HTML.as_uri())
         r = Rec(pg, 'schematic-drawing')
         await r.step(1)
-        while await pg.evaluate('(window.__t || 0) < 20.5'):
+        while await pg.evaluate('(window.__t || 0) < 15'):
             await r.frames(1)
         print(r.name, r.n, errs)
         await b.close()

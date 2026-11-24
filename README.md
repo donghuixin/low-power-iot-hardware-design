@@ -32,9 +32,9 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 
 ## 原理图绘制流程
 
-画原理图时按 [`references/09-schematic-readability.md`](references/09-schematic-readability.md) 的十步走：先框图后分页 → 确认符号 → 按手册典型电路列出卫星器件 → 按信号流向摆放、卫星贴所服务的引脚 → 同页近处直连 → 跨页用标号与端口 → 整理文字互不重叠 → 写设计意图注释 → ERC 清零 → 导出 PDF 通读。下面用 BLE IMU 节点的"主控最小系统"一页演示：
+画原理图时按 [`references/09-schematic-readability.md`](references/09-schematic-readability.md) 的十步走：先框图后分页 → 确认符号 → 按手册典型电路列出卫星器件 → 按信号流向摆放、卫星贴所服务的引脚 → 同页近处直连 → 跨页用标号与端口 → 整理文字互不重叠 → 写设计意图注释 → ERC 清零 → 导出 PDF 通读。下面用 BLE IMU 节点的"主控最小系统"一页演示前八步：
 
-![原理图绘制流程：从框图到 ERC 清零](docs/images/schematic-drawing.gif)
+![原理图绘制流程：从框图到设计意图注释](docs/images/schematic-drawing.gif)
 
 ## 交互式布局规划器
 
@@ -44,7 +44,11 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 
 单击托盘或板上的器件把它拿起来，光标由器件本身代替。它的卫星器件——主控周围的去耦电容、晶体及负载电容、射频匹配、DCDC 电感——跟着悬浮起来，沿两条倾斜的轨道环绕。再次单击放下，卫星从轨道飞落，按"离所属引脚最近、不挡出线、远离噪声源"的原则贴到板上最合适的位置。
 
-![单击拾取、卫星环绕、落地贴放；摆到差的位置时右侧立即给出线长、交叉和拥挤的变化与原因](docs/images/planner-satellites.gif)
+| 2D | 3D |
+|---|---|
+| ![2D：单击拾取、卫星环绕、落地贴放](docs/images/planner-satellites.gif) | ![3D：拾取后卫星在立体轨道上环绕，放下时飞落贴放](docs/images/planner-satellites-3d.gif) |
+
+摆到差的位置时，右侧立即给出线长、交叉和拥挤的变化与原因；3D 视图里拾取、旋转、放下的操作与 2D 相同。
 
 拾取中按 `R` 或右键旋转 90°，点托盘放回，`Esc` 取消；习惯拖放的话，按住拖动同样可以。
 
@@ -106,40 +110,39 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 
 计算在后台 Worker 里做，求解器带多重网格预条件，一次分析在几百毫秒内完成；动效可以关，帧耗时高时自动降级。
 
+工具条上的 **2D | 3D** 按钮（快捷键 `T`）把同一份结果搬到立体视图里：左键拖动旋转、右键平移、滚轮缩放、双击复位。Three.js 只在第一次切换时载入，不影响打开速度；"动效"按钮同样控制 3D 里的动画。下面每项功能左边是 2D、右边是 3D。
+
 ### 电流与回流
 
 选一个负载，供电从电源起点流过来（暖色），回流从它的地脚流回去（冷色），粒子越亮电流密度越大。高频负载的回流贴着去程走，地平面有缺口时会看到它绕路；右侧给出回路面积、建议线宽、压降和最近的去耦电容。
 
-![电流与回流：切换负载；把叠层假设成 2 层后，回流从贴着去程变成走线](docs/images/verifier-current.gif)
+| 2D | 3D |
+|---|---|
+| ![2D 电流与回流](docs/images/verifier-current.gif) | ![3D 电流与回流](docs/images/verifier3d-current.gif) |
+
+2D 演示切换负载，以及把叠层假设成 2 层后回流从贴着去程变成走线；3D 里板子半透明，下方分开画出地平面，去程光点在板上流、回流光点在地平面上流。
 
 ### 电磁：受扰地图与平面谐振
 
 天线、射频线、开关节点、电感、时钟各自向外扩散，叠加成受扰地图，IMU、晶体、模拟网络等敏感对象按"高 / 中 / 低"脉动提示。切到"平面谐振"，看电源/地平面对的各阶模态起伏的振型、节线和频率，接近射频频段或时钟谐波时标出来。
 
-![受扰地图：叠加全部干扰源，或只看天线、只看射频走线](docs/images/verifier-emi.gif)
+| 受扰地图 · 2D | 受扰地图 · 3D |
+|---|---|
+| ![2D 受扰地图](docs/images/verifier-emi.gif) | ![3D 受扰地图](docs/images/verifier3d-emi.gif) |
+| **平面谐振 · 2D** | **平面谐振 · 3D** |
+| ![2D 平面谐振](docs/images/verifier-plane-modes.gif) | ![3D 平面谐振](docs/images/verifier3d-modes.gif) |
 
-![平面谐振：逐个模态的振型、节线与频率](docs/images/verifier-plane-modes.gif)
+3D 里受扰电平做成起伏的地形，天线处隆起成峰，波纹从干扰源向外扩散；平面谐振是上下起伏的振型曲面，节线固定不动。
 
 ### 温度：加散热片前后对比
 
 逐个器件选散热片、改风速、改环境温度、打开密闭外壳，左右分屏对比改动前后，分割线可以拖动，标注直接写出"结温 102 °C → 39 °C"。
 
-![温度：给 0.9 W 的主控逐级加大散热片，再拖动分割线对比](docs/images/verifier-thermal.gif)
-
-### 一键切到 3D
-
-工具条上的 **2D | 3D** 按钮（快捷键 `T`）把同一份结果搬到立体视图里：左键拖动旋转、右键平移、滚轮缩放、双击复位。Three.js 只在第一次切换时载入，不影响打开速度；"动效"按钮同样控制 3D 里的动画。
-
-- **电流**：板子半透明，下方分开画出地平面，去程光点在板上流、回流光点在地平面上流，负载和电源起点的地脚用虚线连到地平面。
-- **受扰地图**：受扰电平做成起伏的地形，天线所在处隆起成峰，波纹从干扰源向外扩散，敏感器件按等级脉动。
-- **平面谐振**：模态振型做成上下起伏的曲面，节线固定不动。
-- **温度**：温度做成高度，左右对比加散热前后，加了散热器的器件上会长出散热片，热点上方飘起热气。
-
-| 电流：板上去程、地平面上的回流 | 受扰地图：电平地形与扩散波纹 |
+| 2D | 3D |
 |---|---|
-| ![3D 电流与回流](docs/images/verifier3d-current.gif) | ![3D 受扰地图](docs/images/verifier3d-emi.gif) |
-| **平面谐振：起伏的振型** | **温度：逐级加大散热片** |
-| ![3D 平面谐振](docs/images/verifier3d-modes.gif) | ![3D 温度对比](docs/images/verifier3d-thermal.gif) |
+| ![2D 温度对比](docs/images/verifier-thermal.gif) | ![3D 温度对比](docs/images/verifier3d-thermal.gif) |
+
+给 0.9 W 的主控逐级加大散热片：2D 拖动分割线对比；3D 里温度做成高度，加了散热器的器件上会长出散热片，热点上方飘起热气。
 
 ### 布线后：从实际铜皮复核
 
