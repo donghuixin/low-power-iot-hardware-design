@@ -4,6 +4,8 @@
 用法:
     python make_layout_project.py project.json [-o out.html]
     python make_layout_project.py project.json --check      # 只校验，不输出
+    python make_layout_project.py project.json --verifier   # 生成布局布线验证器页面（布线前估计）
+    python make_layout_project.py project.json --verifier --copper copper-pack.json   # 布线后验证
 
 项目 JSON 的格式见 references/12-layout-planner.md，示例见 assets/layout-project-example.json。
 校验规则与页面内 model.js 的 validate() 一致。只依赖 Python 标准库。
@@ -17,6 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE = ROOT / "assets" / "layout-planner.html"
+VERIFIER_TEMPLATE = ROOT / "assets" / "layout-verifier.html"
 
 ROLES = {"soc_rf", "mcu", "rf_module", "antenna", "imu", "magnetometer", "temp_humidity", "barometer",
          "microphone", "optical", "dcdc", "ldo", "charger", "inductor", "battery", "connector", "button",
@@ -237,12 +240,12 @@ def validate(p):
     return errs
 
 
-def inject(template_html, project):
-    """把项目数据写入模板中的 <script type="application/json" id="project-data"> 节点。"""
-    data = json.dumps(project, ensure_ascii=False, indent=1).replace("</", "<\\/")
-    pat = re.compile(r'(<script type="application/json" id="project-data">)(.*?)(</script>)', re.S)
+def inject(template_html, project, node="project-data", indent=1):
+    """把数据写入模板中的 <script type="application/json" id="<node>"> 节点。"""
+    data = json.dumps(project, ensure_ascii=False, indent=indent, separators=None if indent else (",", ":")).replace("</", "<\\/")
+    pat = re.compile(r'(<script type="application/json" id="' + node + r'">)(.*?)(</script>)', re.S)
     if not pat.search(template_html):
-        raise SystemExit("模板中找不到 project-data 节点，请先运行 scripts/build_layout_planner.py")
+        raise SystemExit(f"模板中找不到 {node} 节点，请先运行 scripts/build_layout_planner.py / build_layout_verifier.py")
     return pat.sub(lambda m: m.group(1) + data + m.group(3), template_html, count=1)
 
 
@@ -251,8 +254,12 @@ def main():
     ap.add_argument("project", help="项目 JSON 路径")
     ap.add_argument("-o", "--output", help="输出 HTML 路径（默认：<项目文件名>-layout.html，与项目 JSON 同目录）")
     ap.add_argument("--check", action="store_true", help="只校验，不生成页面")
-    ap.add_argument("--template", default=str(TEMPLATE), help="页面模板（默认 assets/layout-planner.html）")
+    ap.add_argument("--template", help="页面模板（默认 assets/layout-planner.html；加 --verifier 时为 assets/layout-verifier.html）")
+    ap.add_argument("--verifier", action="store_true", help="生成布局布线验证器页面（<项目>-verify.html），而不是布局规划器")
+    ap.add_argument("--copper", help="铜皮数据包（scripts/extract_copper.py 的输出），给出时验证器直接进入布线后验证")
     args = ap.parse_args()
+    if args.copper and not args.verifier:
+        ap.error("--copper 需要和 --verifier 一起用")
 
     src = Path(args.project)
     try:
@@ -272,8 +279,16 @@ def main():
     print(f"校验通过：{project['name']}，{n_parts} 个主器件、{n_sats} 个卫星器件、{n_nets} 组网络")
     if args.check:
         return 0
-    out = Path(args.output) if args.output else src.with_name(src.stem + "-layout.html")
-    html = inject(Path(args.template).read_text(encoding="utf-8"), project)
+    suffix = "-verify.html" if args.verifier else "-layout.html"
+    out = Path(args.output) if args.output else src.with_name(src.stem + suffix)
+    template = Path(args.template) if args.template else (VERIFIER_TEMPLATE if args.verifier else TEMPLATE)
+    html = inject(template.read_text(encoding="utf-8"), project)
+    if args.copper:
+        pack = json.loads(Path(args.copper).read_text(encoding="utf-8"))
+        if pack.get("kind") != "copper-pack":
+            print(f"{args.copper} 不是铜皮数据包（kind 应为 copper-pack）", file=sys.stderr)
+            return 2
+        html = inject(html, pack, "copper-data", indent=None)
     out.write_text(html, encoding="utf-8")
     print(f"已生成 {out}（{out.stat().st_size / 1024:.0f} KB），双击即可在浏览器中打开")
     return 0

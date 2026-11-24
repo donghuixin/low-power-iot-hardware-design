@@ -1,6 +1,6 @@
 ---
 name: low-power-iot-hardware-design
-description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉立创 EDA 与 KiCad 的 MCP 接入、交互式需求澄清、设计资料收集与核验、需求挖掘(含用户没想到的隐性需求及其对应的硬件形态)、器件与无线选型(BLE/WiFi/Thread/LoRa/蜂窝)、传感器放置(如IMU是否需要居中)、原理图可靠性审查(上拉下拉、三态、开漏/推挽、电平匹配、驱动电压电流、峰值/静态电流、电源树与去耦)、交互式 PCB 布局规划(2D/3D 摆放主器件、卫星器件自动贴放、实时布线复杂度与规则反馈)、PCB布局布线(射频与天线、信号完整性、电源完整性、EMC、DFM、测试点)以及打样后的bring-up；满足门槛时启用高性能混合信号/医疗手持扩展：手持超声等医疗手持设备、FPGA+高速ADC/AFE、LVDS、高压脉冲(>50 V)、混合信号低噪声电源与时钟抖动、1S数瓦供电与接触温升。只要用户提到电池供电设备、可穿戴、传感器节点、nRF52/nRF53/nRF54/ESP32/STM32L/STM32WB 等低功耗SoC的硬件、原理图或PCB评审、续航/功耗预算、睡眠电流偏大、天线或射频布局、器件该怎么摆、"帮我看看这个板子/这张原理图"等，都应使用本skill，即使用户没有明确说"硬件设计"。Low-power IoT hardware design and review skill covering requirements elicitation, wireless/part selection, sensor placement, schematic reliability review, power budgeting, and PCB layout review for battery-powered devices, with a gated extension for high-performance mixed-signal and medical handheld devices (handheld ultrasound, FPGA + high-speed ADC/AFE, LVDS, >50 V pulsers, low-noise power).
+description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉立创 EDA 与 KiCad 的 MCP 接入、交互式需求澄清、设计资料收集与核验、需求挖掘(含用户没想到的隐性需求及其对应的硬件形态)、器件与无线选型(BLE/WiFi/Thread/LoRa/蜂窝)、传感器放置(如IMU是否需要居中)、原理图可靠性审查(上拉下拉、三态、开漏/推挽、电平匹配、驱动电压电流、峰值/静态电流、电源树与去耦)、交互式 PCB 布局规划(2D/3D 摆放主器件、卫星器件自动贴放、实时布线复杂度与规则反馈)、布局布线验证(电流与回流、EMI 受扰与平面谐振、温度与散热片对比，布线前估计、布线后从 KiCad/Gerber 提取铜皮复核)、PCB布局布线(射频与天线、信号完整性、电源完整性、EMC、DFM、测试点)以及打样后的bring-up；满足门槛时启用高性能混合信号/医疗手持扩展：手持超声等医疗手持设备、FPGA+高速ADC/AFE、LVDS、高压脉冲(>50 V)、混合信号低噪声电源与时钟抖动、1S数瓦供电与接触温升。只要用户提到电池供电设备、可穿戴、传感器节点、nRF52/nRF53/nRF54/ESP32/STM32L/STM32WB 等低功耗SoC的硬件、原理图或PCB评审、续航/功耗预算、睡眠电流偏大、天线或射频布局、器件该怎么摆、"帮我看看这个板子/这张原理图"等，都应使用本skill，即使用户没有明确说"硬件设计"。Low-power IoT hardware design and review skill covering requirements elicitation, wireless/part selection, sensor placement, schematic reliability review, power budgeting, and PCB layout review for battery-powered devices, with a gated extension for high-performance mixed-signal and medical handheld devices (handheld ultrasound, FPGA + high-speed ADC/AFE, LVDS, >50 V pulsers, low-noise power).
 ---
 
 # 低功耗 IoT 硬件设计
@@ -170,6 +170,7 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 2. **生成页面**：`python scripts/make_layout_project.py project.json`，校验通过后得到单文件 `project-layout.html`，交给用户并说明：单击器件拾取、再次单击放下；它的卫星器件会跟着悬浮，落地后自动贴到最近的合适位置（工具条"动效"按钮可打开环绕与飞落动画，默认关闭）；右侧实时显示布线复杂度和规则问题；摆好后"导出 → 布局 JSON"发回。
 3. **读回结果**：按第 9 节把导出 JSON 的 `issues` 和 `metrics` 转写进阶段三的评审报告，页面不检查的项目（叠层、地平面、走线几何、DFM、3D 干涉）照常评审。指标是启发式估计，报告中要写明。
 4. **导入嘉立创 EDA 做最终板框**：规划器里可以改板框形状，但它只用于摆放规划。布局完成后，建议用户导出板框 DXF 和位置表 CSV，导入嘉立创 EDA 作为初始板框和摆放起点，再按外壳图纸绘制最终板框、完成布线；操作按 `references/10-easyeda-execution.md`。
+5. **布线前验证（推荐）**：用读回的布局 JSON 生成验证器页面 `python scripts/make_layout_project.py <布局.json> --verifier`。先按 `references/13-layout-verifier.md` 第 3 节在 `verify` 块里填上负载电流和功耗，再交给用户。页面三个标签页分别显示电流与回流、电磁受扰与平面谐振、温度（可加散热片对比）；结论都是"估计"，用来调整摆放、指导布线。用户导出的验证报告按该文件第 8 节写进评审。
 
 ## 阶段三：Layout
 
@@ -188,7 +189,9 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 9. **DFM / DFA / DFT**：封装核对、钢网、拼板、基准点、测试点、丝印。
 10. **走线与接点几何**。按[走线与接点几何复核](references/07-layout.md#走线与接点几何复核)逐网逐层检查短折线、直角、焊盘入口、过孔两侧和参考走线线尾。从截图发现问题时，将同类检查覆盖整板。交付时分别记录中心线复核与原生 DRC 的结果。
 
-收尾时用 `references/checklists.md` 的 layout 清单扫一遍。
+**布线后验证**（用户已在 EDA 里布完线时推荐）：请用户提供 `.kicad_pcb`（铺铜已填充），或 Gerber + 板框 + IPC-D-356 网表（嘉立创 EDA 导出 Gerber 时勾选 IPC 网表），用 `python scripts/extract_copper.py ... -o copper-pack.json` 提取铜皮，再用 `make_layout_project.py <布局.json> --verifier --copper copper-pack.json` 生成页面，或让用户把数据包拖进已有的验证器页面。阶段 R 的结论（瓶颈、压降、过孔电流、射频参考平面、并行耦合、地铜孤岛、平面谐振、温度）按 `references/13-layout-verifier.md` 第 8 节并入评审报告，注明是简化模型。
+
+收尾时用 `references/checklists.md` 的 layout 清单扫一遍；用了验证器时加"布局布线验证"一段。
 
 **输出：Layout 评审报告**，格式同原理图评审报告，位置一栏写器件位号/区域/层。
 
@@ -202,6 +205,8 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 
 - `scripts/power_budget.py <config.json>`：由电池、常开负载、周期性事件计算平均电流、续航、各项占比，并检查峰值电流在电池内阻上的压降。配置示例见 `assets/power-budget-example.json`。做功耗预算时用它，不要心算。
 - `scripts/make_layout_project.py <project.json> [-o out.html] [--check]`：校验布局规划器的项目数据，生成该项目专用的单文件页面。`assets/layout-planner.html` 内置示例，可直接打开试用；改动页面源码后用 `scripts/build_layout_planner.py` 重新构建。
+- `scripts/make_layout_project.py <布局.json> --verifier [--copper copper-pack.json]`：生成布局布线验证器页面（电流与回流、电磁、温度）；不给铜皮数据包时是布线前估计，给了是布线后验证。`assets/layout-verifier.html` 内置示例；改动源码后用 `scripts/build_layout_verifier.py` 重新构建。
+- `scripts/extract_copper.py <board.kicad_pcb> | --gerber ... --outline ... --ipc356 ... [--project 布局.json] -o copper-pack.json`：从布好的 PCB 提取铜皮，生成验证器的铜皮数据包（需要 numpy、scipy、Pillow）。
 - `scripts/hw_calc.py`：常用小计算——I2C 上拉取值范围 (`i2c-pullup`)、脉冲负载所需储能电容 (`bulk-cap`)、分压器电流与输出阻抗 (`divider`)、晶体负载电容 (`xtal`)、续航 (`life`)。运行 `python scripts/hw_calc.py -h` 查看参数。
   扩展模块另有：时钟抖动限制的 SNR 或允许抖动 (`jitter --fin-mhz 10 --snr-db 74`)、由 ADC LSB / 噪声底与 PSRR 反推纹波上限 (`ripple --fs-vpp 2 --bits 12 --psrr-db 40 --margin-db 10`)、高压脉冲峰值电流与 burst 储能电容 (`hvcap --cel-pf 100 --channels 32 --dv 60 --tr-ns 20 --droop-v 1 --cycles 8 --prf-khz 10`)、采集数据率与存储量 (`datarate --channels 8 --fs-msps 30 --bits 12 --window-us 200 --shots 4 --lines 80 --fps 5 --link-mbps 20`)。
 
@@ -221,6 +226,7 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 | `references/10-easyeda-execution.md` | 嘉立创EDA 自动绘图、器件标准化、资料归档、失败恢复与保存验收 |
 | `references/11-eda-mcp-setup.md` | 设计开始时接入嘉立创 EDA 或 KiCad 的 MCP，或排查连接问题 |
 | `references/12-layout-planner.md` | 用交互式布局规划器摆放主器件：生成项目数据、页面功能、指标与规则、解读导出结果 |
+| `references/13-layout-verifier.md` | 布局后或布线后做电流回流、电磁、温度验证：`verify` 块、提取铜皮、规则 VF-01…14、解读验证报告 |
 | `references/20-hv-pulser-tr-safety.md` | 扩展模块：电压 >50 V；高压脉冲、T/R 与接收保护、高压电源与档位、储能、联锁、PCB 间距 |
 | `references/21-ultrasound-afe-clock.md` | 扩展模块：ADC ≥10 MSPS；超声 AFE 噪声、TGC、抗混叠、IQ 解调、时钟抖动与多普勒同源时钟 |
 | `references/22-low-noise-power-thermal.md` | 扩展模块：持续功耗 >1 W 或有高速 ADC；持续功耗模型、1S 电源路径、纹波推导、开关同步、手持热设计 |

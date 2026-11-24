@@ -19,6 +19,7 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 | 1. 需求明确 | 把功能描述变成量化指标；主动提出用户没想到的需求（峰值电流、电池末期、OTA、运输模式、认证、产测……）；把需求映射到硬件形态；无线选型按数据率、吞吐、距离、峰值电流、平均功耗比较；传感器放置约束（例如 IMU 是否需要靠近转动中心） |
 | 2. 原理图可靠性 | 逐状态检查每个网络：上拉下拉、开漏/推挽/三态、电平域匹配、断电域反灌；驱动电压与驱动电流；睡眠电流逐项清点与峰值电流压降；电源树、充电、保护、去耦与储能；绘制流程与可读性规范（同页直连、跨页与标准接口用标号/端口、网络命名、文字不重叠、设计意图注释） |
 | 2½. 交互式布局规划 | [2D/3D 布局规划器](#交互式布局规划器)：摆放主器件，卫星器件自动贴放，实时估计布线复杂度并按规则给出问题，导出结果交回评审 |
+| 2¾. 布局布线验证 | [验证器](#布局布线验证器)：电流与回流、EMI 受扰与平面谐振、温度与散热片对比；布线前按概率估计，布线后从 KiCad / Gerber 提取实际铜皮复核 |
 | 3. Layout | 叠层与阻抗、布局顺序、天线与射频、电源完整性、信号完整性、晶体、高阻节点、传感器应力与热隔离、EMC/ESD、热、DFM/DFA/DFT |
 | 4. Bring-up 与量产 | 上电顺序、功耗实测、常见故障排查（睡眠电流大、射频距离短、偶发复位）、认证与产测 |
 | 5. 交互式引导 | 根据使用场景分轮追问，把用户确认的目标转成带单位、工况和验收方法的电路指标，并随反馈更新预算。 |
@@ -90,6 +91,47 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 
 指标是启发式估计，用于比较不同摆法，不等于实际布线结果；默认规则参数是典型值，器件手册给出具体数值时在项目数据里覆盖。
 
+## 布局布线验证器
+
+和规划器分开的另一个单文件网页（[`assets/layout-verifier.html`](assets/layout-verifier.html)，内置示例，双击即可试用），专门回答"这样摆、这样布，电流怎么走、会不会互相干扰、热不热"。它在布局之后和布线之后各用一次：
+
+- **布线前（估计）**：读入规划器导出的布局 JSON，按引脚朝向和可走通道做概率估计，告诉你供电和回流大概怎么走、哪里会挤、哪个敏感器件离干扰源太近、热点在哪，用来改摆放、指导布线。
+- **布线后（简化求解）**：从 KiCad 的 `.kicad_pcb`，或 Gerber + IPC-D-356 网表（嘉立创 EDA、Altium 等）提取真实铜皮，按电源 / 模拟 / 数字 / 射频分组，只解相关的那部分铜皮，查出瓶颈、压降、过孔电流、射频参考平面缺口、并行耦合和地铜孤岛。
+
+计算在后台 Worker 里做，求解器带多重网格预条件，一次分析在几百毫秒内完成；动效可以关，帧耗时高时自动降级。
+
+### 电流与回流
+
+选一个负载，供电从电源起点流过来（暖色），回流从它的地脚流回去（冷色），粒子越亮电流密度越大。高频负载的回流贴着去程走，地平面有缺口时会看到它绕路；右侧给出回路面积、建议线宽、压降和最近的去耦电容。
+
+![电流与回流：射频 SoC 的供电和回流](docs/images/verifier-current.png)
+
+### 电磁：受扰地图与平面谐振
+
+天线、射频线、开关节点、电感、时钟各自向外扩散，叠加成受扰地图，IMU、晶体、模拟网络等敏感对象按"高 / 中 / 低"脉动提示。切到"平面谐振"，看电源/地平面对的各阶模态起伏的振型、节线和频率，接近射频频段或时钟谐波时标出来。
+
+![平面谐振：第 1 模的振型与节线](docs/images/verifier-modes.png)
+
+### 温度：加散热片前后对比
+
+逐个器件选散热片、改风速、改环境温度、打开密闭外壳，左右分屏对比改动前后，分割线可以拖动，标注直接写出"结温 102 °C → 39 °C"。
+
+![温度：同样 0.9 W，加散热片前后](docs/images/verifier-thermal.png)
+
+### 布线后：从实际铜皮复核
+
+下图是一块布完线的板子：射频线下方的地平面开了槽、两侧地孔围栏太稀、模拟线贴着数字线走了 8 mm、顶层有一块没打孔的地铜，四条都被查出来并在板上定位。
+
+![布线后：射频参考平面、并行耦合、地铜孤岛](docs/images/verifier-routed-emi.png)
+
+### 怎么用
+
+1. 布局摆好后，让 Claude 生成验证页面：`python scripts/make_layout_project.py 布局.json --verifier`。Claude 会先按 [`references/13-layout-verifier.md`](references/13-layout-verifier.md) 在 `verify` 块里填好负载电流和功耗。
+2. 布线完成后，提供 `.kicad_pcb`（铺铜已填充）或 Gerber + 板框 + IPC 网表，Claude 用 `python scripts/extract_copper.py ... -o copper-pack.json` 提取铜皮，再加 `--copper copper-pack.json` 生成页面；也可以直接把数据包拖进页面。
+3. "导出报告"得到验证报告 JSON，Claude 把其中的结论（规则 VF-01…VF-14）并入 Layout 评审。
+
+所有结果都是简化模型的定性结论，相对比较（改动前后、方案 A 与 B）比绝对数值更可靠；不替代 SI/PI/EMC 仿真和实测。
+
 ## 目录结构
 
 ```
@@ -107,6 +149,7 @@ references/
   10-easyeda-execution.md        嘉立创EDA 实施、器件标准化、资料归档与保存验收
   11-eda-mcp-setup.md            嘉立创 EDA 与 KiCad 的 MCP 安装、连接与排错
   12-layout-planner.md           交互式布局规划器：项目数据、功能、指标与规则、解读导出
+  13-layout-verifier.md          布局布线验证器：verify 块、提取铜皮、规则 VF-01…14、解读验证报告
   20-hv-pulser-tr-safety.md      扩展：高压脉冲、T/R、高压电源与联锁、间距
   21-ultrasound-afe-clock.md     扩展：超声 AFE、采样与 IQ、时钟抖动
   22-low-noise-power-thermal.md  扩展：持续功耗模型、纹波与开关同步、手持热设计
@@ -117,15 +160,20 @@ references/
 scripts/
   power_budget.py                功耗预算与峰值压降检查
   hw_calc.py                     I2C 上拉、储能电容、分压器、晶体负载电容、续航；抖动、纹波、高压储能、数据率
-  make_layout_project.py         校验项目数据并生成布局规划页面
+  make_layout_project.py         校验项目数据，生成布局规划页面或验证页面（--verifier / --copper）
   build_layout_planner.py        把规划器源码构建为单文件
+  build_layout_verifier.py       把验证器源码构建为单文件
+  extract_copper.py              从 KiCad 或 Gerber + IPC-D-356 提取铜皮，生成铜皮数据包
 assets/
   layout-planner.html            布局规划器（单文件，内置示例）
   layout-planner/                规划器源码与 Three.js（MIT）
   layout-project-example.json    规划器示例项目
+  layout-verifier.html           布局布线验证器（单文件，内置示例）
+  layout-verifier/               验证器源码
+  layout-verify-example.json     验证器示例（布局 + verify 块）
   requirements-template.md       需求与架构文档模板
   power-budget-example.json      功耗预算配置示例
-tests/                           规划器计算模块的单元测试
+tests/                           规划器与验证器的单元测试、铜皮提取测试与合成板
 docs/images/                     README 配图
 ```
 
@@ -173,9 +221,11 @@ python scripts/hw_calc.py xtal --cl-pf 9 --cstray-pf 3
 python scripts/hw_calc.py jitter --fin-mhz 10 --snr-db 74
 python scripts/hw_calc.py hvcap --cel-pf 100 --channels 32 --dv 60 --tr-ns 20 --droop-v 1 --cycles 8 --prf-khz 10
 python scripts/make_layout_project.py assets/layout-project-example.json --check
+python scripts/make_layout_project.py assets/layout-verify-example.json --verifier
+python scripts/extract_copper.py board.kicad_pcb --project 布局.json -o copper-pack.json
 ```
 
-只依赖 Python 3 标准库。规划器的单元测试：`node --test tests/*.test.js`（Node 18+，无第三方依赖）。
+除 `extract_copper.py`（需要 numpy、scipy、Pillow）外只依赖 Python 3 标准库。规划器与验证器的单元测试：`node --test tests/*.test.js`（Node 18+，无第三方依赖）；铜皮提取：`python -m unittest tests/test_extract_copper.py`。
 
 ## 参与改进
 

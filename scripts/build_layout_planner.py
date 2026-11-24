@@ -29,8 +29,11 @@ def esc_script(text):
 
 
 def build(src_dir=SRC):
-    html = (src_dir / "index.html").read_text(encoding="utf-8")
+    return build_html((src_dir / "index.html").read_text(encoding="utf-8"), src_dir)
 
+
+def build_html(html, src_dir):
+    """内联 index.html 里的样式、脚本和数据（路径相对于 src_dir）。"""
     def css(m):
         return "<style>\n" + (src_dir / m.group(1)).read_text(encoding="utf-8") + "\n</style>"
     html = re.sub(r'<link rel="stylesheet" href="([^"]+)">', css, html)

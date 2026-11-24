@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>布局布线验证器</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="top">
+  <div class="brand"><span class="logo" aria-hidden="true"></span><span id="proj-name">布局布线验证器</span><span id="stage-badge" class="badge">—</span><span id="calc-mode" class="muted"></span></div>
+  <nav id="tabs" role="tablist" aria-label="验证类别">
+    <button data-tab="current" role="tab" aria-selected="true">电流与回流</button>
+    <button data-tab="emi" role="tab" aria-selected="false">电磁</button>
+    <button data-tab="thermal" role="tab" aria-selected="false">温度</button>
+  </nav>
+  <div class="actions">
+    <button id="btn-anim" class="tbtn" aria-pressed="true" title="开关动效">动效</button>
+    <button id="btn-perf" class="tbtn" title="减少粒子数，适合较慢的电脑">性能模式</button>
+    <button id="btn-open" class="tbtn" title="打开布局 JSON 或铜皮数据包（也可以直接拖进页面）">打开</button>
+    <button id="btn-png" class="tbtn" title="导出当前视图">导出 PNG</button>
+    <button id="btn-report" class="tbtn primary" title="逐项计算并导出 verify-report.json，交回 Claude 写进评审报告">导出报告</button>
+    <input id="file-in" type="file" accept=".json,application/json" multiple hidden>
+  </div>
+</header>
+<main id="layout">
+  <aside id="left" aria-label="对象与假如"></aside>
+  <section id="stage" aria-label="板图">
+    <div id="stage-canvas"></div>
+    <div id="tip" role="status" hidden></div>
+    <div id="busy" hidden><span class="spin" aria-hidden="true"></span><span id="busy-text">计算中…</span></div>
+    <div id="toasts" aria-live="polite"></div>
+    <p id="assume" class="assume-bar"></p>
+  </section>
+  <aside id="right" aria-label="结论"></aside>
+</main>
+<div id="drop-hint">松开以载入布局 JSON 或铜皮数据包</div>
+<script type="application/json" id="project-data"></script>
+<script type="application/json" id="copper-data"></script>
+<script type="application/json" id="example-data" data-src="../../layout-verify-example.json"></script>
+<script type="text/plain" id="worker-src" data-bundle="../../layout-planner/src/js/geometry.js ../../layout-planner/src/js/model.js js/constants.js js/solver.js js/vmodel.js js/routes.js js/vrules.js js/current.js js/thermal.js js/emi.js js/copper.js js/analysis.js js/worker.js"></script>
+<script src="../../layout-planner/src/js/geometry.js"></script>
+<script src="js/render.js"></script>
+<script src="js/particles.js"></script>
+<script src="js/client.js"></script>
+<script src="js/app.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

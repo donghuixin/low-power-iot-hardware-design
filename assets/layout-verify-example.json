@@ -1,0 +1,1019 @@
+{
+  "version": 1,
+  "name": "BLE IMU 温湿度节点（验证示例）",
+  "_comment": "示例项目：CR2032 供电的 BLE + IMU + 温湿度节点，与 assets/power-budget-example.json 对应。尺寸为典型值，实际项目按所选器件的封装图填写。",
+  "board": {
+    "outline": {
+      "corner_r": 3,
+      "type": "rect",
+      "w": 36,
+      "h": 28
+    },
+    "layers": 4,
+    "thickness": 1,
+    "track": 0.15,
+    "space": 0.15,
+    "via_d": 0.45,
+    "two_sided": true,
+    "holes": [
+      {
+        "x": 3.5,
+        "y": 25,
+        "d": 2.2
+      },
+      {
+        "x": 32.5,
+        "y": 3.5,
+        "d": 2.2
+      }
+    ],
+    "keepouts": [],
+    "mask": "green"
+  },
+  "parts": [
+    {
+      "ref": "U1",
+      "role": "soc_rf",
+      "label": "BLE SoC",
+      "w": 6,
+      "h": 6,
+      "z": 0.85,
+      "shape": "qfn",
+      "pins": [
+        {
+          "id": "DCC",
+          "side": "N",
+          "pos": 0.15,
+          "count": 1
+        },
+        {
+          "id": "RF",
+          "side": "N",
+          "pos": 0.85,
+          "count": 1
+        },
+        {
+          "id": "I2C",
+          "side": "W",
+          "pos": 0.1,
+          "count": 2
+        },
+        {
+          "id": "SPI",
+          "side": "W",
+          "pos": 0.35,
+          "count": 4
+        },
+        {
+          "id": "GPIO_A",
+          "side": "W",
+          "pos": 0.55,
+          "count": 2
+        },
+        {
+          "id": "VDD",
+          "side": "W",
+          "pos": 0.9,
+          "count": 4
+        },
+        {
+          "id": "XTAL",
+          "side": "S",
+          "pos": 0.3,
+          "count": 2
+        },
+        {
+          "id": "XL",
+          "side": "S",
+          "pos": 0.7,
+          "count": 2
+        },
+        {
+          "id": "SWD",
+          "side": "S",
+          "pos": 0.9,
+          "count": 3
+        },
+        {
+          "id": "QSPI",
+          "side": "E",
+          "pos": 0.4,
+          "count": 6
+        },
+        {
+          "id": "GPIO_B",
+          "side": "E",
+          "pos": 0.8,
+          "count": 2
+        }
+      ],
+      "sides": [
+        "top"
+      ],
+      "locked": false,
+      "heat_mw": 0,
+      "edge": false,
+      "placed": {
+        "x": 23,
+        "y": 20,
+        "rot": 0,
+        "side": "top"
+      }
+    },
+    {
+      "ref": "ANT1",
+      "role": "antenna",
+      "label": "2.4G 陶瓷天线",
+      "w": 5,
+      "h": 2,
+      "z": 1.1,
+      "pins": [
+        {
+          "id": "FEED",
+          "side": "W",
+          "pos": 0.5,
+          "count": 1
+        }
+      ],
+      "keepout": {
+        "N": 3,
+        "S": 3,
+        "E": 4,
+        "W": 0
+      },
+      "shape": "chip_antenna",
+      "sides": [
+        "top"
+      ],
+      "locked": false,
+      "heat_mw": 0,
+      "edge": true,
+      "placed": {
+        "x": 33.2,
+        "y": 20,
+        "rot": 0,
+        "side": "top"
+      }
+    },
+    {
+      "ref": "U2",
+      "role": "imu",
+      "label": "6 轴 IMU",
+      "w": 3,
+      "h": 2.5,
+      "z": 0.9,
+      "pins": [
+        {
+          "id": "INT",
+          "side": "W",
+          "pos": 0.2,
+          "count": 2
+        },
+        {
+          "id": "SPI",
+          "side": "W",
+          "pos": 0.65,
+          "count": 4
+        },
+        {
+          "id": "VDD",
+          "side": "S",
+          "pos": 0.5,
+          "count": 1
+        }
+      ],
+      "shape": "lga",
+      "sides": [
+        "top"
+      ],
+      "locked": false,
+      "heat_mw": 0,
+      "edge": false,
+      "placed": {
+        "x": 15,
+        "y": 20,
+        "rot": 180,
+        "side": "top"
+      }
+    },
+    {
+      "ref": "U3",
+      "role": "temp_humidity",
+      "label": "温湿度",
+      "w": 2,
+      "h": 2,
+      "z": 0.8,
+      "pins": [
+        {
+          "id": "I2C",
+          "side": "W",
+          "pos": 0.5,
+          "count": 2
+        },
+        {
+          "id": "VDD",
+          "side": "S",
+          "pos": 0.5,
+          "count": 1
+        }
+      ],
+      "shape": "dfn",
+      "sides": [
+        "top"
+      ],
+      "locked": false,
+      "heat_mw": 0,
+      "edge": false,
+      "placed": {
+        "x": 10,
+        "y": 25.5,
+        "rot": 180,
+        "side": "top"
+      }
+    },
+    {
+      "ref": "U4",
+      "role": "flash",
+      "label": "SPI Flash",
+      "w": 3,
+      "h": 2,
+      "z": 0.6,
+      "pins": [
+        {
+          "id": "QSPI",
+          "side": "W",
+          "pos": 0.5,
+          "count": 6
+        },
+        {
+          "id": "VDD",
+          "side": "N",
+          "pos": 0.5,
+          "count": 1
+        }
+      ],
+      "shape": "uson",
+      "sides": [
+        "top"
+      ],
+      "locked": false,
+      "heat_mw": 0,
+      "edge": false,
+      "placed": {
+        "x": 29,
+        "y": 14.5,
+        "rot": 0,
+        "side": "top"
+      }
+    },
+    {
+      "ref": "BT1",
+      "role": "battery",
+      "label": "CR2032 电池座",
+      "w": 21,
+      "h": 21,
+      "z": 4,
+      "shape": "coin",
+      "sides": [
+        "bottom"
+      ],
+      "pins": [
+        {
+          "id": "PLUS",
+          "side": "W",
+          "pos": 0.5,
+          "count": 1
+        }
+      ],
+      "locked": false,
+      "heat_mw": 0,
+      "edge": false,
+      "placed": {
+        "x": 13,
+        "y": 13,
+        "rot": 0,
+        "side": "bottom"
+      }
+    },
+    {
+      "ref": "J1",
+      "role": "connector",
+      "label": "调试口",
+      "w": 6.4,
+      "h": 3,
+      "z": 2.5,
+      "shape": "header",
+      "edge": false,
+      "pins": [
+        {
+          "id": "SWD",
+          "side": "N",
+          "pos": 0.5,
+          "count": 3
+        }
+      ],
+      "sides": [
+        "top"
+      ],
+      "locked": false,
+      "heat_mw": 0,
+      "placed": {
+        "x": 27,
+        "y": 5,
+        "rot": 0,
+        "side": "top"
+      }
+    },
+    {
+      "ref": "SW1",
+      "role": "button",
+      "label": "按键",
+      "w": 3,
+      "h": 4,
+      "z": 1.5,
+      "pins": [
+        {
+          "id": "A",
+          "side": "N",
+          "pos": 0.5,
+          "count": 1
+        }
+      ],
+      "shape": "button",
+      "sides": [
+        "top"
+      ],
+      "locked": false,
+      "heat_mw": 0,
+      "edge": false,
+      "placed": {
+        "x": 33.5,
+        "y": 8,
+        "rot": 0,
+        "side": "top"
+      }
+    },
+    {
+      "ref": "D1",
+      "role": "led",
+      "label": "指示灯",
+      "w": 1.6,
+      "h": 0.8,
+      "z": 0.6,
+      "color": "#34d399",
+      "pins": [
+        {
+          "id": "A",
+          "side": "W",
+          "pos": 0.5,
+          "count": 1
+        }
+      ],
+      "shape": "led",
+      "sides": [
+        "top"
+      ],
+      "locked": false,
+      "heat_mw": 0,
+      "edge": false,
+      "placed": {
+        "x": 33,
+        "y": 11.5,
+        "rot": 0,
+        "side": "top"
+      }
+    }
+  ],
+  "nets": [
+    {
+      "width": 1,
+      "name": "RF_FEED",
+      "class": "rf",
+      "max_len": 10,
+      "pins": [
+        [
+          "U1",
+          "RF"
+        ],
+        [
+          "ANT1",
+          "FEED"
+        ]
+      ]
+    },
+    {
+      "width": 4,
+      "name": "SPI_IMU",
+      "class": "bus",
+      "pins": [
+        [
+          "U1",
+          "SPI"
+        ],
+        [
+          "U2",
+          "SPI"
+        ]
+      ]
+    },
+    {
+      "width": 2,
+      "name": "IMU_INT",
+      "class": "misc",
+      "pins": [
+        [
+          "U1",
+          "GPIO_A"
+        ],
+        [
+          "U2",
+          "INT"
+        ]
+      ]
+    },
+    {
+      "width": 2,
+      "name": "I2C_ENV",
+      "class": "bus",
+      "pins": [
+        [
+          "U1",
+          "I2C"
+        ],
+        [
+          "U3",
+          "I2C"
+        ]
+      ]
+    },
+    {
+      "width": 6,
+      "name": "QSPI_FLASH",
+      "class": "high_speed",
+      "pins": [
+        [
+          "U1",
+          "QSPI"
+        ],
+        [
+          "U4",
+          "QSPI"
+        ]
+      ]
+    },
+    {
+      "width": 3,
+      "name": "SWD",
+      "class": "bus",
+      "pins": [
+        [
+          "U1",
+          "SWD"
+        ],
+        [
+          "J1",
+          "SWD"
+        ]
+      ]
+    },
+    {
+      "width": 2,
+      "name": "UI",
+      "class": "misc",
+      "pins": [
+        [
+          "U1",
+          "GPIO_B"
+        ],
+        [
+          "SW1",
+          "A"
+        ],
+        [
+          "D1",
+          "A"
+        ]
+      ]
+    },
+    {
+      "width": 1,
+      "name": "VDD",
+      "class": "power",
+      "pins": [
+        [
+          "BT1",
+          "PLUS"
+        ],
+        [
+          "U1",
+          "VDD"
+        ],
+        [
+          "U2",
+          "VDD"
+        ],
+        [
+          "U3",
+          "VDD"
+        ],
+        [
+          "U4",
+          "VDD"
+        ]
+      ]
+    }
+  ],
+  "satellites": [
+    {
+      "label": "去耦电容",
+      "max_dist": 2,
+      "pinned": false,
+      "ref": "C1",
+      "kind": "decoupling",
+      "parent": [
+        "U1",
+        "VDD"
+      ],
+      "w": 1,
+      "h": 0.5,
+      "value": "100nF",
+      "placed": {
+        "x": 19.3,
+        "y": 17.6,
+        "rot": 0,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "去耦电容",
+      "max_dist": 2,
+      "pinned": false,
+      "ref": "C2",
+      "kind": "decoupling",
+      "parent": [
+        "U1",
+        "VDD"
+      ],
+      "w": 1,
+      "h": 0.5,
+      "value": "100nF",
+      "placed": {
+        "x": 19.3,
+        "y": 16.85,
+        "rot": 0,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "去耦电容",
+      "max_dist": 2,
+      "pinned": false,
+      "ref": "C3",
+      "kind": "decoupling",
+      "parent": [
+        "U1",
+        "VDD"
+      ],
+      "w": 1.6,
+      "h": 0.8,
+      "value": "4.7uF",
+      "placed": {
+        "x": 19,
+        "y": 18.6,
+        "rot": 0,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "储能电容",
+      "max_dist": 5,
+      "pinned": false,
+      "ref": "C4",
+      "kind": "bulk",
+      "parent": [
+        "U1",
+        "VDD"
+      ],
+      "w": 3.2,
+      "h": 1.6,
+      "value": "47uF",
+      "placed": {
+        "x": 18.2,
+        "y": 15.6,
+        "rot": 0,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "DCDC 电感",
+      "max_dist": 3,
+      "pinned": false,
+      "ref": "L1",
+      "kind": "dcdc_inductor",
+      "parent": [
+        "U1",
+        "DCC"
+      ],
+      "w": 2,
+      "h": 1.25,
+      "value": "10uH",
+      "placed": {
+        "x": 20.9,
+        "y": 24.2,
+        "rot": 90,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "DCDC 电容",
+      "max_dist": 2,
+      "pinned": false,
+      "ref": "C5",
+      "kind": "dcdc_cap",
+      "parent": [
+        "U1",
+        "DCC"
+      ],
+      "near": "L1",
+      "w": 1,
+      "h": 0.5,
+      "value": "1uF",
+      "placed": {
+        "x": 21.98,
+        "y": 24.2,
+        "rot": 90,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "晶体",
+      "max_dist": 4,
+      "pinned": false,
+      "ref": "Y1",
+      "kind": "crystal",
+      "parent": [
+        "U1",
+        "XTAL"
+      ],
+      "w": 2,
+      "h": 1.6,
+      "value": "32MHz",
+      "placed": {
+        "x": 21.8,
+        "y": 16,
+        "rot": 0,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "晶体负载电容",
+      "max_dist": 2,
+      "pinned": false,
+      "ref": "C6",
+      "kind": "xtal_load",
+      "parent": [
+        "U1",
+        "XTAL"
+      ],
+      "near": "Y1",
+      "w": 1,
+      "h": 0.5,
+      "value": "12pF",
+      "placed": {
+        "x": 20.35,
+        "y": 16,
+        "rot": 90,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "晶体负载电容",
+      "max_dist": 2,
+      "pinned": false,
+      "ref": "C7",
+      "kind": "xtal_load",
+      "parent": [
+        "U1",
+        "XTAL"
+      ],
+      "near": "Y1",
+      "w": 1,
+      "h": 0.5,
+      "value": "12pF",
+      "placed": {
+        "x": 21.8,
+        "y": 14.75,
+        "rot": 0,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "晶体",
+      "max_dist": 4,
+      "pinned": false,
+      "ref": "Y2",
+      "kind": "crystal",
+      "parent": [
+        "U1",
+        "XL"
+      ],
+      "w": 2,
+      "h": 1.2,
+      "value": "32.768kHz",
+      "placed": {
+        "x": 24.2,
+        "y": 15.8,
+        "rot": 90,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "晶体负载电容",
+      "max_dist": 2,
+      "pinned": false,
+      "ref": "C8",
+      "kind": "xtal_load",
+      "parent": [
+        "U1",
+        "XL"
+      ],
+      "near": "Y2",
+      "w": 1,
+      "h": 0.5,
+      "value": "12pF",
+      "placed": {
+        "x": 25.5,
+        "y": 15.55,
+        "rot": 0,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "晶体负载电容",
+      "max_dist": 2,
+      "pinned": false,
+      "ref": "C9",
+      "kind": "xtal_load",
+      "parent": [
+        "U1",
+        "XL"
+      ],
+      "near": "Y2",
+      "w": 1,
+      "h": 0.5,
+      "value": "12pF",
+      "placed": {
+        "x": 24.2,
+        "y": 14.35,
+        "rot": 0,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "射频匹配",
+      "max_dist": 1,
+      "pinned": false,
+      "ref": "C10",
+      "kind": "rf_match",
+      "parent": [
+        "U1",
+        "RF"
+      ],
+      "w": 1,
+      "h": 0.5,
+      "value": "1.2pF",
+      "placed": {
+        "x": 27.7,
+        "y": 21.61,
+        "rot": 0,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "射频匹配",
+      "max_dist": 1,
+      "pinned": false,
+      "ref": "L2",
+      "kind": "rf_match",
+      "parent": [
+        "U1",
+        "RF"
+      ],
+      "w": 1,
+      "h": 0.5,
+      "value": "2.7nH",
+      "placed": {
+        "x": 28.99,
+        "y": 21.26,
+        "rot": 0,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "射频匹配",
+      "max_dist": 1,
+      "pinned": false,
+      "ref": "C11",
+      "kind": "rf_match",
+      "parent": [
+        "U1",
+        "RF"
+      ],
+      "w": 1,
+      "h": 0.5,
+      "value": "1.0pF",
+      "placed": {
+        "x": 29.99,
+        "y": 20.38,
+        "rot": 0,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "去耦电容",
+      "max_dist": 2,
+      "pinned": false,
+      "ref": "C12",
+      "kind": "decoupling",
+      "parent": [
+        "U2",
+        "VDD"
+      ],
+      "w": 1,
+      "h": 0.5,
+      "value": "100nF",
+      "placed": {
+        "x": 15,
+        "y": 21.7,
+        "rot": 0,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "去耦电容",
+      "max_dist": 2,
+      "pinned": false,
+      "ref": "C13",
+      "kind": "decoupling",
+      "parent": [
+        "U3",
+        "VDD"
+      ],
+      "w": 1,
+      "h": 0.5,
+      "value": "100nF",
+      "placed": {
+        "x": 10,
+        "y": 26.95,
+        "rot": 0,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "去耦电容",
+      "max_dist": 2,
+      "pinned": false,
+      "ref": "C14",
+      "kind": "decoupling",
+      "parent": [
+        "U4",
+        "VDD"
+      ],
+      "w": 1,
+      "h": 0.5,
+      "value": "100nF",
+      "placed": {
+        "x": 29,
+        "y": 15.95,
+        "rot": 0,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "串联电阻",
+      "max_dist": 3,
+      "pinned": false,
+      "ref": "R1",
+      "kind": "series_r",
+      "parent": [
+        "U1",
+        "GPIO_B"
+      ],
+      "w": 1,
+      "h": 0.5,
+      "value": "1k",
+      "placed": {
+        "x": 26.7,
+        "y": 18.2,
+        "rot": 0,
+        "side": "top"
+      },
+      "_active": true
+    },
+    {
+      "label": "上下拉",
+      "max_dist": 6,
+      "pinned": false,
+      "ref": "R2",
+      "kind": "pull",
+      "parent": [
+        "SW1",
+        "A"
+      ],
+      "w": 1,
+      "h": 0.5,
+      "value": "100k",
+      "placed": {
+        "x": 33.5,
+        "y": 10.45,
+        "rot": 0,
+        "side": "top"
+      },
+      "_active": true
+    }
+  ],
+  "rules": [],
+  "_safe": [
+    {
+      "x0": 3,
+      "y0": 0,
+      "x1": 33,
+      "y1": 28
+    },
+    {
+      "x0": 0,
+      "y0": 3,
+      "x1": 36,
+      "y1": 25
+    }
+  ],
+  "verify": {
+    "_comment": "验证器输入：电源起点、负载电流、功耗、干扰源与敏感对象。未写的字段按默认值补全，页面上会列出。",
+    "gnd_net": "GND",
+    "sources": [
+      {
+        "net": "VDD",
+        "part": "BT1",
+        "pin": "PLUS",
+        "gnd_pin": "C",
+        "v": 3
+      }
+    ],
+    "loads": [
+      {
+        "part": "U1",
+        "pin": "VDD",
+        "net": "VDD",
+        "i_avg_ma": 6,
+        "i_peak_ma": 16,
+        "kind": "rf",
+        "f_hz": 2400000000
+      },
+      {
+        "part": "U2",
+        "pin": "VDD",
+        "net": "VDD",
+        "i_avg_ma": 0.9,
+        "i_peak_ma": 2,
+        "kind": "dc"
+      },
+      {
+        "part": "U3",
+        "pin": "VDD",
+        "net": "VDD",
+        "i_avg_ma": 0.3,
+        "i_peak_ma": 1,
+        "kind": "dc"
+      },
+      {
+        "part": "U4",
+        "pin": "VDD",
+        "net": "VDD",
+        "i_avg_ma": 3,
+        "i_peak_ma": 15,
+        "kind": "dc"
+      }
+    ],
+    "env": {
+      "ta_c": 25
+    }
+  }
+}

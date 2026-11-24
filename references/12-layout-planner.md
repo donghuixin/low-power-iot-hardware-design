@@ -206,6 +206,7 @@ python scripts/make_layout_project.py my-project.json --check     # 只校验
 3. 用 `metrics` 写"布线可行性"一节：交叉对、拥挤峰值附近的器件、出线压力最大的边、层数建议及其理由；说明这些是估计值。
 4. 页面不检查的项目照常按 `07-layout.md` 和清单评审：叠层与阻抗、地平面完整性、走线几何、DFM 细节、与外壳的 3D 干涉等。
 5. **导入嘉立创 EDA 做最终设计**：规划器里的板框只用于摆放规划。建议用户把板框 DXF 导入嘉立创 EDA 作为初始板框，再按外壳图纸精确绘制最终板框（圆角、卡扣、定位孔等）；把位置表 CSV 或布局 JSON 中的 `placed` 坐标作为器件摆放起点。注意 EDA 的坐标原点和旋转方向可能不同，导入后核对一两个器件的位置与朝向。通过 MCP 操作嘉立创 EDA 时按 `10-easyeda-execution.md` 与 `11-eda-mcp-setup.md`。
+6. **接着做验证（推荐）**：同一份布局 JSON 可以直接生成布局布线验证器页面（`make_layout_project.py 布局.json --verifier`），看电流回流、电磁受扰与平面谐振、温度；布线完成后再用实际铜皮复核。见 `13-layout-verifier.md`。导出时项目里的 `verify` 块会原样保留。
 
 ## 10. 局限
 
