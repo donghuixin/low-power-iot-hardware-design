@@ -178,9 +178,9 @@ def build(variant):
     s0, s1 = pads_xy[("U1", "SPI")], pads_xy[("U2", "SPI")]
     pcb.seg(s0, (s1[0], s0[1]), 0.15, "F.Cu", "SPI_IMU")
     # 板下方一段 8 mm 的模拟线与数字线并行，间距 0.2 mm（用于并行耦合检查）
-    pcb.seg((6.0, 2.2), (14.0, 2.2), 0.15, "F.Cu", "SPI_IMU")
-    gap = 0.35 if variant == "trace" else 1.5   # 坏板：间距 0.2 mm；好板：拉开到 1.35 mm
-    pcb.seg((6.0, 2.2 + gap), (14.0, 2.2 + gap), 0.15, "F.Cu", "ADC_IN")
+    if variant == "trace":                       # 坏板：一段 8 mm 的数字线绕到板下方，贴着模拟线走（间距 0.2 mm）
+        pcb.seg((6.0, 2.2), (14.0, 2.2), 0.15, "F.Cu", "SPI_IMU")
+    pcb.seg((6.0, 2.55), (14.0, 2.55), 0.15, "F.Cu", "ADC_IN")
     return pcb.text()
 
 

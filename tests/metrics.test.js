@@ -104,3 +104,17 @@ test('关键网络按 45° 走线估计，斜向摆放不误判超限', () => {
   const P = LP.model.pinWorld(LP.model.partByRef(p, 'U1'), 'RF'), A = LP.model.pinWorld(LP.model.partByRef(p, 'ANT1'), 'FEED');
   assert.ok(LP.geometry.manhattan(P, A) > 10 && rf.ok, `曼哈顿 ${LP.geometry.manhattan(P, A).toFixed(1)}，45° 估计 ${rf.value.toFixed(1)}`);
 });
+
+test('层数建议：给出联网焊盘密度及其在开源 2 层板中的百分位', () => {
+  const L = evalOf(GOOD).ev.metrics.layers;
+  assert.ok(L.padDensity && L.padDensity.value > 0 && L.padDensity.pct >= 0 && L.padDensity.pct <= 99);
+  // 把板子缩到很小，焊盘密度超过第 90 百分位时，即使没有射频也建议 4 层
+  const raw = loadExample(LP);
+  raw.nets = raw.nets.filter((n) => n.class !== 'rf');
+  raw.board.outline = { type: 'rect', w: 8, h: 8 };
+  const p = LP.model.normalize ? LP.model.normalize(raw) : raw;
+  const L2 = LP.engine.evaluate(p).metrics.layers;
+  assert.ok(L2.padDensity.value > 12.06, String(L2.padDensity.value));
+  assert.equal(L2.layers, 4);
+  assert.ok(L2.reasons.some((r) => r.includes('九成开源 2 层板')));
+});

@@ -20,7 +20,7 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 | 2. 原理图可靠性 | 逐状态检查每个网络：上拉下拉、开漏/推挽/三态、电平域匹配、断电域反灌；驱动电压与驱动电流；睡眠电流逐项清点与峰值电流压降；电源树、充电、保护、去耦与储能；绘制流程与可读性规范（同页直连、跨页与标准接口用标号/端口、网络命名、文字不重叠、设计意图注释） |
 | 2½. 交互式布局规划 | [2D/3D 布局规划器](#交互式布局规划器)：摆放主器件，卫星器件自动贴放，实时估计布线复杂度并按规则给出问题，导出结果交回评审 |
 | 2¾. 布局布线验证 | [验证器](#布局布线验证器)：电流与回流、EMI 受扰与平面谐振、温度与散热片对比；布线前按概率估计，布线后从 KiCad / Gerber 提取实际铜皮复核 |
-| 3. Layout | 叠层与阻抗、布局顺序、天线与射频、电源完整性、信号完整性、晶体、高阻节点、传感器应力与热隔离、EMC/ESD、热、DFM/DFA/DFT |
+| 3. Layout | 叠层与阻抗、布局顺序、天线与射频、电源完整性、信号完整性、晶体、高阻节点、传感器应力与热隔离、EMC/ESD、热、DFM/DFA/DFT；布线实操：逐网顺序、升级阶梯、换层与过孔、绕线判据、自动布线器预期（取自 [CADET](https://github.com/LGAI-Research/CADET) 对 283 块开源 2 层板的统计与实测） |
 | 4. Bring-up 与量产 | 上电顺序、功耗实测、常见故障排查（睡眠电流大、射频距离短、偶发复位）、认证与产测 |
 | 5. 交互式引导 | 根据使用场景分轮追问，把用户确认的目标转成带单位、工况和验收方法的电路指标，并随反馈更新预算。 |
 | 6. 设计资料管理 | 按设计问题请用户提供对应型号的数据手册、参考设计或原理图，记录版本与页码，让关键参数可追溯。 |
@@ -154,7 +154,7 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 
 1. 布局摆好后，让 Claude 生成验证页面：`python scripts/make_layout_project.py 布局.json --verifier`。Claude 会先按 [`references/13-layout-verifier.md`](references/13-layout-verifier.md) 在 `verify` 块里填好负载电流和功耗。
 2. 布线完成后，提供 `.kicad_pcb`（铺铜已填充）或 Gerber + 板框 + IPC 网表，Claude 用 `python scripts/extract_copper.py ... -o copper-pack.json` 提取铜皮，再加 `--copper copper-pack.json` 生成页面；也可以直接把数据包拖进页面。
-3. "导出报告"得到验证报告 JSON，Claude 把其中的结论（规则 VF-01…VF-14）并入 Layout 评审。
+3. "导出报告"得到验证报告 JSON，Claude 把其中的结论（规则 VF-01…VF-15）并入 Layout 评审。
 
 所有结果都是简化模型的定性结论，相对比较（改动前后、方案 A 与 B）比绝对数值更可靠；不替代 SI/PI/EMC 仿真和实测。
 
@@ -175,7 +175,8 @@ references/
   10-easyeda-execution.md        嘉立创EDA 实施、器件标准化、资料归档与保存验收
   11-eda-mcp-setup.md            嘉立创 EDA 与 KiCad 的 MCP 安装、连接与排错
   12-layout-planner.md           交互式布局规划器：项目数据、功能、指标与规则、解读导出
-  13-layout-verifier.md          布局布线验证器：verify 块、提取铜皮、规则 VF-01…14、解读验证报告
+  13-layout-verifier.md          布局布线验证器：verify 块、提取铜皮、规则 VF-01…15、解读验证报告
+  14-routing-practice.md         布线实操（取自 CADET）：规则与密度基准、逐网顺序、升级阶梯、换层、绕线判据、自动布线器预期
   20-hv-pulser-tr-safety.md      扩展：高压脉冲、T/R、高压电源与联锁、间距
   21-ultrasound-afe-clock.md     扩展：超声 AFE、采样与 IQ、时钟抖动
   22-low-noise-power-thermal.md  扩展：持续功耗模型、纹波与开关同步、手持热设计

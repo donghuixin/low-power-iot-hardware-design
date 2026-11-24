@@ -285,6 +285,16 @@
     const r9 = F.rule(v, 'VF-09');
     for (const q of ck.coupling || []) if (q.ratio > r9.max_ratio) out.push(F.finding(v, 'VF-09', { obj: q.a, value: q.ratio, where: q.at ? { x: q.at[0], y: q.at[1] } : null,
       title: `模拟线 ${q.a} 与 ${q.b} 在 L${q.layer + 1} 并行 ${q.len} mm、间距 ${q.gap} mm（比值 ${q.ratio}）`, advice: '拉开间距到 3 倍线宽以上、换层，或在中间加地线', assume: `并行长度 ÷ 间距 > ${r9.max_ratio}` }));
+    const r15 = F.rule(v, 'VF-15');
+    for (const q of ck.detours || []) {
+      if (!(q.routed > r15.max_ratio * q.direct + r15.slack_mm)) continue;
+      const n = st.pack.nets.get(q.net), cls = n ? n.class : 'misc';
+      out.push(F.finding(v, 'VF-15', { obj: q.net, value: q.ratio, where: q.at ? { x: q.at[0], y: q.at[1] } : null,
+        sev: ['rf', 'clock', 'analog', 'switch_node'].includes(cls) ? 'P2' : undefined,
+        title: `${q.net} 走线共 ${q.routed} mm，是焊盘间最短连线（${q.direct} mm）的 ${q.ratio} 倍`,
+        advice: '看是否被摆放挡住：调换器件朝向或位置、换一层直走，或先让出通道再布；射频、时钟、模拟网络优先处理',
+        assume: `阈值：走线总长 > ${r15.max_ratio} × 焊盘最小生成树长度 + ${r15.slack_mm} mm（参考 CADET 的绕行判据）` }));
+    }
     for (const q of ck.islands || []) out.push(F.finding(v, 'VF-14', { value: q.area, where: { x: q.x, y: q.y },
       title: `L${q.layer + 1} 有一块 ${q.area} mm² 的地铜没有连到主地`, advice: '打过孔连到地平面，或删除这块铜', assume: '按地网络的连通性' }));
     return out;

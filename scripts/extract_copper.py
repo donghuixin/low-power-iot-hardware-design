@@ -607,7 +607,7 @@ def build_pack(b, project=None, res=0.05, cells=200):
     # ---------- 离线检查 ----------
     gnd_ids = [nid for n, nid in b.nets.items() if classes[n] == "ground"]
     gnd_vias = [(x, y) for n in b.nets if classes[n] == "ground" for x, y, _ in via_by_net.get(n, [])]
-    checks = {"rf": [], "coupling": [], "islands": []}
+    checks = {"rf": [], "coupling": [], "islands": [], "detours": []}
 
     def at(l, x, y):
         px, py = R.px(x, y)
@@ -697,6 +697,12 @@ def build_pack(b, project=None, res=0.05, cells=200):
                     y_ = H - cm[0] * res
                     checks["islands"].append({"layer": key[0], "x": round(cm[1] * res, 2), "y": round(y_, 2), "area": round(area, 1)})
 
+    zone_nets = {z[1] for z in b.zones}
+    if b.source != "kicad":                                 # Gerber：用覆盖率判断哪些网络有大块铜皮
+        zone_nets = {n["name"] for n in nets_out if n.get("cov") and classes[n["name"]] in ("ground", "power")}
+    checks["detours"] = detour_checks({n: (seg_by_net.get(n, []), pad_by_net.get(n, [])) for n in b.nets},
+                                      skip=zone_nets | {n for n in b.nets if classes[n] == "ground"})
+
     return {
         "kind": "copper-pack", "version": VERSION, "source": b.source, "units": "mm", "res": res,
         "board": {"w": round(W, 3), "h": round(H, 3), "outline": [[round(x, 3), round(y, 3)] for x, y in outline]},
@@ -704,6 +710,43 @@ def build_pack(b, project=None, res=0.05, cells=200):
         "grid": {"cell": cell, "nx": gnx, "ny": gny, "x0": 0, "y0": 0},
         "nets": nets_out, "cov": cov, "parts": parts, "checks": checks,
     }
+
+
+def mst_length(pts):
+    """平面点集的最小生成树长度（Prim，点数少，直接 O(n²)）。"""
+    pts = list(dict.fromkeys((round(x, 2), round(y, 2)) for x, y in pts))
+    if len(pts) < 2:
+        return 0.0
+    inside, total = {0}, 0.0
+    dist = [math.dist(pts[0], q) for q in pts]
+    while len(inside) < len(pts):
+        k = min((i for i in range(len(pts)) if i not in inside), key=lambda i: dist[i])
+        total += dist[k]
+        inside.add(k)
+        for i in range(len(pts)):
+            if i not in inside:
+                dist[i] = min(dist[i], math.dist(pts[k], pts[i]))
+    return total
+
+
+def detour_checks(nets, skip=(), ratio=1.3, slack=2.0, top=10):
+    """走线总长与焊盘最小生成树长度之比。nets: {名: (segs, pads)}；segs 为 [l, x1, y1, x2, y2, w]，pads 为 [ref, pin, l, x, y]。
+    靠铺铜连接的网络（skip）不查；走线总长不到直线下限一半的视为主要靠铜皮连接，也不查。
+    阈值来自 CADET 的连接搜索：一步新增线长超过"向目标推进量 × 1.3 + 1 mm"就算绕行；这里按整网放宽为 ×1.3 + 2 mm。"""
+    out = []
+    for name, (segs, pads) in nets.items():
+        if name in skip or len(pads) < 2 or not segs:
+            continue
+        direct = mst_length([(q[3], q[4]) for q in pads])
+        routed = sum(math.hypot(s_[3] - s_[1], s_[4] - s_[2]) for s_ in segs)
+        if direct < 1.0 or routed < 0.5 * direct:
+            continue
+        if routed > ratio * direct + slack:
+            s0 = max(segs, key=lambda s_: math.hypot(s_[3] - s_[1], s_[4] - s_[2]))
+            out.append({"net": name, "routed": round(routed, 2), "direct": round(direct, 2), "ratio": round(routed / direct, 2),
+                        "at": [round((s0[1] + s0[3]) / 2, 2), round((s0[2] + s0[4]) / 2, 2)]})
+    out.sort(key=lambda d: -(d["routed"] - d["direct"]))
+    return out[:top]
 
 
 def parallel(a, b):

@@ -81,6 +81,27 @@ class KiCadDemo(unittest.TestCase):
         self.assertAlmostEqual(vdd["min_w"], 0.10, places=3)
 
 
+class Detours(unittest.TestCase):
+    def test_mst(self):
+        self.assertAlmostEqual(X.mst_length([(0, 0), (3, 0), (3, 4)]), 7.0)
+        self.assertAlmostEqual(X.mst_length([(0, 0), (0, 0)]), 0.0)
+
+    def test_detour_flagged(self):
+        pads = [["U1", "1", 0, 0, 0], ["U2", "1", 0, 10, 0]]
+        straight = [[0, 0, 0, 10, 0, 0.2]]
+        around = [[0, 0, 0, 0, 5, 0.2], [0, 0, 5, 10, 5, 0.2], [0, 10, 5, 10, 0, 0.2]]
+        out = X.detour_checks({"A": (straight, pads), "B": (around, pads), "GND": (around, pads)}, skip={"GND"})
+        self.assertEqual([d["net"] for d in out], ["B"])
+        self.assertAlmostEqual(out[0]["ratio"], 2.0)
+
+    def test_demo_boards(self):
+        proj = json.loads(PROJECT.read_text(encoding="utf-8"))
+        good = X.build_pack(X.parse_kicad(FIX / "demo-plane.kicad_pcb"), proj)["checks"]["detours"]
+        bad = X.build_pack(X.parse_kicad(FIX / "demo-trace.kicad_pcb"), proj)["checks"]["detours"]
+        self.assertEqual(good, [])
+        self.assertIn("SPI_IMU", [d["net"] for d in bad])
+
+
 class GerberIPC(unittest.TestCase):
     """两层板：顶层一根 GND 粗线 + 一根 SIG 细线，底层一块 GND 铺铜；板框 20×10。"""
 

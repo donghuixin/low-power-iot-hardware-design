@@ -41,13 +41,14 @@ test('好板：四个负载都能在铜皮上求解，射频负载下方有地�
   assert.ok(u1.gapFrac < 0.05);
   assert.ok(!rules(u1.findings).has('VF-05'));
   const e = LP.analysis.emi({});
-  for (const id of ['VF-08', 'VF-09', 'VF-14']) assert.ok(!rules(e.findings).has(id), id);
+  for (const id of ['VF-08', 'VF-09', 'VF-14', 'VF-15']) assert.ok(!rules(e.findings).has(id), id);
 });
 
 test('坏板：射频参考缺口、并行耦合、地铜孤岛都能查出来', () => {
   const s = LP.analysis.init(proj, bad);
   const e = LP.analysis.emi({});
-  for (const id of ['VF-08', 'VF-09', 'VF-14']) assert.ok(rules(e.findings).has(id), id);
+  for (const id of ['VF-08', 'VF-09', 'VF-14', 'VF-15']) assert.ok(rules(e.findings).has(id), id);
+  assert.ok(e.findings.some((f) => f.rule === 'VF-15' && f.obj === 'SPI_IMU'));
   const u1 = LP.analysis.current(loadIdx(s, 'U1'));
   assert.ok(rules(u1.findings).has('VF-05'));
 });

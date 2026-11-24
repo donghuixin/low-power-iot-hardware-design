@@ -21,7 +21,7 @@
 3. `verify` 块：电源、负载、功耗、干扰源
 4. 布线后：提取铜皮
 5. 三类验证怎么算
-6. 规则 VF-01 … VF-14
+6. 规则 VF-01 … VF-15
 7. 页面功能
 8. 解读导出报告
 9. 局限
@@ -99,7 +99,7 @@ python scripts/extract_copper.py --gerber top.gtl in1.g2 in2.g3 bottom.gbl --out
 - 嘉立创 EDA 专业版：导出 Gerber 时勾选"IPC 网表"（IPC-D-356A），按第二种用法处理。
 - `--project` 用来取网络类别（电源、射频、模拟等）；不给时按网络名猜（GND、VCC、RF、ADC、CLK……），可能分错，报告里要提示。
 - 繁重的几何处理在脚本里离线完成：每层按 0.05 mm 画成网络编号位图，再降采样到求解网格（长边约 200 格，可用 `--cells` 调整）。浏览器只拿到按分组压缩的覆盖率，一般几十 KB。
-- 数据包同时带有离线检查的结果：射频线下方相邻层的地覆盖率与地孔围栏间距、模拟线与数字线的并行段、各层地铜的连通性（孤岛）。
+- 数据包同时带有离线检查的结果：射频线下方相邻层的地覆盖率与地孔围栏间距、模拟线与数字线的并行段、各层地铜的连通性（孤岛）、各网络走线总长与焊盘最小生成树长度之比（绕线）。
 - 需要 Python 的 numpy、scipy、Pillow。
 
 阶段 R 以数据包里的板框和器件位置为准（覆盖布局 JSON 里的值），网络名必须与原理图一致，否则会报"找不到焊盘"。
@@ -121,7 +121,7 @@ python scripts/extract_copper.py --gerber top.gtl in1.g2 in2.g3 bottom.gbl --out
 
 所有数值都是简化模型的定性结果。相对比较（改动前后、方案 A 与 B）比绝对值可靠。
 
-## 6. 规则 VF-01 … VF-14
+## 6. 规则 VF-01 … VF-15
 
 阈值可在 `verify.rules` 里覆盖。"对应条目"指 `references/checklists.md` 中 layout 清单的条目。
 
@@ -141,6 +141,7 @@ python scripts/extract_copper.py --gerber top.gtl in1.g2 in2.g3 bottom.gbl --out
 | VF-12 | 怕热器件 | P2 | 敏感对象和电池处板温比环境高 > `max_rise`（20 K），或器件两端温差 > `max_grad`（5 K） | P / R | SEN-02 |
 | VF-13 | 表面温度 | P0 | 板面最高温度 > `env.contact_limit_c`（未设置时不检查） | P / R | THM-01 |
 | VF-14 | 地铜孤岛 | P2 | 某层地铜（> 1 mm²）经过孔也连不到主地 | R | PI-08 |
+| VF-15 | 绕线过长 | P3（射频、时钟、模拟、开关节点为 P2） | 网络走线总长 > `max_ratio`（1.3）× 焊盘最小生成树长度 + `slack_mm`（2 mm）；靠铺铜连接的网络不查（判据见 `14-routing-practice.md` 第 7 节） | R | RT-05 |
 
 阶段 P 的结论标题前加"估计："，等级最高到 P1。
 

@@ -287,19 +287,36 @@
     return { max, list, worst: list[0] || null, status: status(max, CONFIG.exit) };
   }
 
+  // 开源 2 层板（CADET 整理的 141 块 PCBWorld D3-B 板，31–100 个联网焊盘）的焊盘密度十分位数，个/cm²
+  const PAD_DENSITY_DECILES = [0.48, 1.19, 1.82, 2.31, 2.86, 3.63, 4.39, 5.47, 6.88, 12.06, 57.71];
+  function padDensity(p) {
+    const ol = p.board.outline || {};
+    const area = G.outlineArea(ol) / 100;
+    let pads = 0;
+    for (const n of p.nets || []) pads += (n.pins || []).length;
+    pads += 2 * (p.satellites || []).length;
+    if (!(area > 0) || !pads) return null;
+    const d = pads / area;
+    let k = 0; while (k < 10 && d > PAD_DENSITY_DECILES[k + 1]) k++;
+    return { value: d, pct: Math.min(99, k * 10 + Math.round(10 * (d - PAD_DENSITY_DECILES[k]) / ((PAD_DENSITY_DECILES[k + 1] - PAD_DENSITY_DECILES[k]) || 1))) };
+  }
+
   function layerMetric(p, cross, cong) {
     const reasons = [];
+    const pd = padDensity(p);
     const hasRf = p.nets.some((n) => n.class === 'rf');
     let layers = 2;
     if (hasRf) { layers = 4; reasons.push('有射频网络：50 Ω 走线和天线需要完整的参考地平面'); }
     if (cong.peak2 > 1.0) { layers = 4; reasons.push(`按 2 层板估算的拥挤峰值为 ${Math.round(cong.peak2 * 100)}%，超过容量`); }
     if (cross.density > CONFIG.layerCrossDensity) { layers = 4; reasons.push(`交叉密度 ${cross.density.toFixed(1)} 个/cm²，2 层板需要大量过孔`); }
+    if (pd && pd.value > PAD_DENSITY_DECILES[9]) { layers = 4; reasons.push(`联网焊盘密度约 ${pd.value.toFixed(1)} 个/cm²，高于九成开源 2 层板（第 90 百分位 ${PAD_DENSITY_DECILES[9]}）`); }
     if (layers === 2) {
       reasons.push(`交叉 ${cross.value} 个，可在 2 层板上用过孔处理`);
       reasons.push('前提：底层大面积铺地并保持连续；2 层板上"完整地平面"的假设要靠布线维持');
     }
+    if (pd && pd.value <= PAD_DENSITY_DECILES[9]) reasons.push(`参考：联网焊盘密度约 ${pd.value.toFixed(1)} 个/cm²，约在开源 2 层板的第 ${pd.pct} 百分位（中位数 3.6 个/cm²）`);
     const cur = p.board.layers;
-    return { layers, reasons, status: layers <= cur ? 'good' : 'warn', current: cur };
+    return { layers, reasons, status: layers <= cur ? 'good' : 'warn', current: cur, padDensity: pd };
   }
 
   /** 计算全部指标。satResults 来自 LP.satellites.placeAll，zones 来自 LP.rules.zones。 */

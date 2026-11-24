@@ -195,7 +195,9 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 
 **布线后验证**（用户已在 EDA 里布完线时推荐）：请用户提供 `.kicad_pcb`（铺铜已填充），或 Gerber + 板框 + IPC-D-356 网表（嘉立创 EDA 导出 Gerber 时勾选 IPC 网表），用 `python scripts/extract_copper.py ... -o copper-pack.json` 提取铜皮，再用 `make_layout_project.py <布局.json> --verifier --copper copper-pack.json` 生成页面，或让用户把数据包拖进已有的验证器页面。阶段 R 的结论（瓶颈、压降、过孔电流、射频参考平面、并行耦合、地铜孤岛、平面谐振、温度）按 `references/13-layout-verifier.md` 第 8 节并入评审报告，注明是简化模型。
 
-收尾时用 `references/checklists.md` 的 layout 清单扫一遍；用了验证器时加"布局布线验证"一段。
+**布线过程**（用户在 EDA 里布线、或让 Claude 通过 EDA 工具布线时）：按 `references/14-routing-practice.md`。先建网络类，关键网手工布好并锁定；再逐网布线，每完成一个网络 DRC 保持为零；每根连接按"同层绕行 → 推挤 → 中间点 → 换层"的阶梯逐级尝试；自动布线多跑几次，只取全部连通且零 DRC 的结果。该文件还给出开源 2 层板的线宽、间距、过孔和焊盘密度基准，以及绕线判据。
+
+收尾时用 `references/checklists.md` 的 layout 清单扫一遍（含"布线过程"一段）；用了验证器时加"布局布线验证"一段。
 
 **输出：Layout 评审报告**，格式同原理图评审报告，位置一栏写器件位号/区域/层。
 
@@ -230,7 +232,8 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 | `references/10-easyeda-execution.md` | 嘉立创EDA 自动绘图、器件标准化、资料归档、失败恢复与保存验收 |
 | `references/11-eda-mcp-setup.md` | 设计开始时接入嘉立创 EDA 或 KiCad 的 MCP，或排查连接问题 |
 | `references/12-layout-planner.md` | 用交互式布局规划器摆放主器件：生成项目数据、页面功能、指标与规则、解读导出结果 |
-| `references/13-layout-verifier.md` | 布局后或布线后做电流回流、电磁、温度验证：`verify` 块、提取铜皮、规则 VF-01…14、解读验证报告 |
+| `references/13-layout-verifier.md` | 布局后或布线后做电流回流、电磁、温度验证：`verify` 块、提取铜皮、规则 VF-01…15、解读验证报告 |
+| `references/14-routing-practice.md` | 布线实操（取自 CADET）：开源 2 层板的规则与密度基准、逐网布线顺序、升级阶梯、换层与过孔、绕线判据、自动布线器能做到多少 |
 | `references/20-hv-pulser-tr-safety.md` | 扩展模块：电压 >50 V；高压脉冲、T/R 与接收保护、高压电源与档位、储能、联锁、PCB 间距 |
 | `references/21-ultrasound-afe-clock.md` | 扩展模块：ADC ≥10 MSPS；超声 AFE 噪声、TGC、抗混叠、IQ 解调、时钟抖动与多普勒同源时钟 |
 | `references/22-low-noise-power-thermal.md` | 扩展模块：持续功耗 >1 W 或有高速 ADC；持续功耗模型、1S 电源路径、纹波推导、开关同步、手持热设计 |
