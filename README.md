@@ -154,7 +154,7 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 
 1. 布局摆好后，让 Claude 生成验证页面：`python scripts/make_layout_project.py 布局.json --verifier`。Claude 会先按 [`references/13-layout-verifier.md`](references/13-layout-verifier.md) 在 `verify` 块里填好负载电流和功耗。
 2. 布线完成后，提供 `.kicad_pcb`（铺铜已填充）或 Gerber + 板框 + IPC 网表，Claude 用 `python scripts/extract_copper.py ... -o copper-pack.json` 提取铜皮，再加 `--copper copper-pack.json` 生成页面；也可以直接把数据包拖进页面。
-3. "导出报告"得到验证报告 JSON，Claude 把其中的结论（规则 VF-01…VF-27，其中 VF-16…27 是布线几何与质量）并入 Layout 评审。
+3. "导出报告"得到验证报告 JSON，Claude 把其中的结论（规则 VF-01…VF-30，其中 VF-16…30 是布线几何、质量与走线原则）并入 Layout 评审。
 
 所有结果都是简化模型的定性结论，相对比较（改动前后、方案 A 与 B）比绝对数值更可靠；不替代 SI/PI/EMC 仿真和实测。
 
@@ -189,14 +189,21 @@ DRC 只保证走线合法，不保证有序。任意角度的斜线、锐角、�
 
 ```text
 $ python scripts/route_lint.py lint tests/fixtures/route-bad.kicad_pcb
-得分 52.4 / 100 · 不通过（有 P0）   任意角度 9、锐角 4、晶振线打过孔、底层长跳线 …
+得分 61.0 / 100 · 不通过（有 P0）   任意角度 9、锐角 4、晶振线打过孔、底层长跳线 …
 $ python scripts/route_fix.py tests/fixtures/route-bad.kicad_pcb -o fixed.kicad_pcb
 已写入 fixed.kicad_pcb：修复 9 段走线，删除 22 条、新增 18 条线段
 $ python scripts/route_lint.py lint fixed.kicad_pcb
-得分 91.8 / 100   任意角度 0、锐角 0；剩下晶振过孔和底层跳线是拓扑问题，要人决定
+得分 93.3 / 100   任意角度 0、锐角 0；剩下晶振过孔和底层跳线是拓扑问题，要人决定
 ```
 
-整网自动布线器、全局通道规划和 EDA 写入适配器还没有实现，路线图见该文件第 11 节。
+**走线原则**（[`references/17-routing-principles.md`](references/17-routing-principles.md)，检查器 `scripts/route_principles.py`）：
+
+- **关键信号优先**：射频 → 晶振 → 开关回路与高压 → 高速差分 → 时钟 → 模拟 → 电源 → 一般信号 → 地。`route_lint.py order` 按档位给出逐网布线顺序；`lint` 会抓“优先级倒挂”——关键网络因为直连通道被一般信号占了而绕行或打孔。
+- **就近**：去耦电容到电源引脚 ≤ 3 mm、地焊盘 0.5 mm 内有地过孔，负载电容贴晶振，ESD 在接口 5 mm 内且串在线上，串阻贴驱动端。
+- **差分**：同层、并行、线距一致、对内等长（USB ≤ 0.5 mm、LVDS ≤ 0.13 mm）、过孔成对并排、对内不穿线、对外留间距。
+- **隔离**：开关节点、时钟、高速差分不与模拟、晶振、射频同层并行超过 5 mm。
+
+整网自动布线器、全局通道规划和 EDA 写入适配器还没有实现，路线图见 `16-routing-constraints.md` 第 11 节。
 
 ## 目录结构
 
@@ -215,10 +222,11 @@ references/
   10-easyeda-execution.md        嘉立创EDA 实施、器件标准化、资料归档与保存验收
   11-eda-mcp-setup.md            嘉立创 EDA 与 KiCad 的 MCP 安装、连接与排错
   12-layout-planner.md           交互式布局规划器：项目数据、功能、指标与规则、解读导出
-  13-layout-verifier.md          布局布线验证器：verify 块、提取铜皮、规则 VF-01…27、解读验证报告
+  13-layout-verifier.md          布局布线验证器：verify 块、提取铜皮、规则 VF-01…30、解读验证报告
   14-routing-practice.md         布线实操（取自 CADET）：规则与密度基准、逐网顺序、升级阶梯、换层、绕线判据、自动布线器预期
   15-design-rules-and-process.md 设计规则与板厂工艺：写规则的八条做法、嘉立创价格档位、导入自有工艺、对照与生成
   16-routing-constraints.md      布线约束与质量评分：八方向几何、线宽线长过孔层约束、检查器与修复器、写入闸门、AI 布线规程
+  17-routing-principles.md       走线原则：布线优先级、就近、差分、隔离及对应检查器
   20-hv-pulser-tr-safety.md      扩展：高压脉冲、T/R、高压电源与联锁、间距
   21-ultrasound-afe-clock.md     扩展：超声 AFE、采样与 IQ、时钟抖动
   22-low-noise-power-thermal.md  扩展：持续功耗模型、纹波与开关同步、手持热设计
@@ -236,6 +244,7 @@ scripts/
   fab_rules.py                   读取板厂工艺与设计规则，对照价格档位，生成 KiCad 规则和网络类建议
   route_lint.py                  布线几何检查与评分、写入 EDA 前的闸门、生成布线约束文件
   route_fix.py                   把任意角度、锐角、抖动、斜出焊盘的走线修成八方向折线
+  route_principles.py            走线原则检查（就近、差分、优先级倒挂、隔离）与推荐布线顺序
 assets/
   layout-planner.html            布局规划器（单文件，内置示例）
   layout-planner/                规划器源码与 Three.js（MIT）
@@ -301,6 +310,7 @@ python scripts/fab_rules.py show --layers 4
 python scripts/fab_rules.py check board.kicad_pro board.kicad_pcb
 python scripts/extract_copper.py board.kicad_pcb --project 布局.json -o copper-pack.json
 python scripts/route_lint.py lint board.kicad_pcb -o 布线报告.md
+python scripts/route_lint.py order board.kicad_pcb
 python scripts/route_fix.py board.kicad_pcb -o board-fixed.kicad_pcb
 ```
 

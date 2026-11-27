@@ -2,12 +2,14 @@
 """布线几何检查、网络类推导与质量评分。
 
 规则见 references/16-routing-constraints.md：RTG（几何）、RTW（线宽）、RTL（线长）、RTV（过孔）、
-RTS（间距）、RTY（层），评分项 VF-16…26。DRC（间距、短路、开路）是前置闸门，这里不重复。
+RTS（间距）、RTY（层），评分项 VF-16…26；走线原则（就近 RTP、差分 RTD、优先级 RTO、隔离 RTS-06，评分 VF-28…30）
+见 references/17-routing-principles.md，实现在 route_principles.py。DRC（间距、短路、开路）是前置闸门，这里不重复。
 
   python route_lint.py lint board.kicad_pcb [--constraints c.json] [-o report.md] [--json report.json]
   python route_lint.py lint copper-pack.json [...]          # extract_copper.py 生成的铜皮数据包
   python route_lint.py gate plan.json                       # 写入 EDA 之前的闸门：只查方向、锐角和锐角分支
   python route_lint.py constraints board.kicad_pcb [--layers 4] [-o constraints.json] [--dru routing.kicad_dru]
+  python route_lint.py order board.kicad_pcb                # 按布线优先级给出推荐布线顺序
 
 lint 有 P0 违规时退出码为 1；gate 有拦截项时退出码为 1。
 
@@ -40,18 +42,21 @@ CLASSES = {
     "XTAL":     {"width": 0.20, "min_width": 0.127, "via_budget": 0, "tau_max": 1.15, "max_len_mm": 5.0, "critical": True},
     "RF50":     {"width": None, "min_width": 0.15, "via_budget": 0, "tau_max": 1.15, "critical": True, "allow_arc": True, "no_branch": True},
     "USB90":    {"width": 0.20, "min_width": 0.127, "via_budget": 2, "tau_max": 1.15, "critical": True, "skew_mm": 0.5, "skew_max_mm": 1.25},
+    "DIFF100":  {"width": 0.15, "min_width": 0.1, "via_budget": 2, "tau_max": 1.15, "critical": True, "skew_mm": 0.13, "skew_max_mm": 0.5},
     "PWR_LOW":  {"width": 0.30, "min_width": 0.25, "via_budget": None, "tau_max": None},
     "PWR_MAIN": {"width": 0.60, "min_width": 0.50, "via_budget": None, "tau_max": None},
     "SW":       {"width": None, "min_width": 0.30, "via_budget": None, "tau_max": None},
     "HV":       {"width": 0.30, "min_width": 0.30, "via_budget": 2, "tau_max": 1.3},
     "GND":      {"width": None, "min_width": None, "via_budget": None, "tau_max": None},
 }
-PRIORITY = ["RF50", "XTAL", "SW", "PWR_MAIN", "USB90", "CLK", "ANALOG", "HV", "PWR_LOW", "SIG", "GND"]
+# 布线与修复顺序，与 route_principles.TIERS 一致：射频 → 晶振 → 开关回路与高压 → 高速差分 → 时钟 → 模拟 → 电源 → 一般信号 → 地
+PRIORITY = ["RF50", "XTAL", "SW", "HV", "USB90", "DIFF100", "CLK", "ANALOG", "PWR_MAIN", "PWR_LOW", "SIG", "GND"]
 
 NAME_RULES = [
     (r"^(A|D|P|S|C)?GND|^VSS|^EARTH|^0V$", "GND", 0.95),
     (r"^(SW|LX|PH)\d*$|_(SW|LX)\d*$", "SW", 0.9),
     (r"USB.*D[PN+\-]$|^D[+\-]$|USB_?D?[PN]$|_D[PN]$", "USB90", 0.9),
+    (r"LVDS|MIPI|HDMI|SERDES|(^|_)(TX|RX|CK|CLK|D\d)_?[PN]$", "DIFF100", 0.85),
     (r"XTAL|^XIN|^XOUT|^XC\d|^XL\d|OSC_?(IN|OUT)|32K", "XTAL", 0.85),
     (r"(^|_)(ANT|RF)(_|$|\d)|RFIO|LNA|^RF", "RF50", 0.85),
     (r"^HV|PULSE|VPP|VNN", "HV", 0.85),
@@ -577,9 +582,11 @@ def pad_aligned_exit(g, e, dx, dy):
 
 
 # ------------------------------------------------------------------ 评分
-WEIGHTS = {"VF-16": 15, "VF-17": 10, "VF-18": 8, "VF-19": 8, "VF-20": 10, "VF-21": 12, "VF-22": 8, "VF-23": 7, "VF-24": 6, "VF-25": 6, "VF-26": 10}
+WEIGHTS = {"VF-16": 15, "VF-17": 10, "VF-18": 8, "VF-19": 8, "VF-20": 10, "VF-21": 12, "VF-22": 8, "VF-23": 7, "VF-24": 6, "VF-25": 6, "VF-26": 10,
+           "VF-28": 8, "VF-29": 8, "VF-30": 6}
 NAMES = {"VF-16": "任意角度", "VF-17": "锐角", "VF-18": "短段、抖动与出线", "VF-19": "多余拐弯", "VF-20": "过孔", "VF-21": "地平面完整性",
-         "VF-22": "绕行率", "VF-23": "成束整齐度", "VF-24": "层方向与层使用", "VF-25": "走线密度均匀性", "VF-26": "网络类约束"}
+         "VF-22": "绕行率", "VF-23": "成束整齐度", "VF-24": "层方向与层使用", "VF-25": "走线密度均匀性", "VF-26": "网络类约束",
+         "VF-28": "差分对", "VF-29": "就近", "VF-30": "优先级与隔离"}
 
 
 def ramp(v, good, bad):
@@ -612,6 +619,7 @@ def analyze(pack, cons=None):
             classes[n["name"]] = c
             if p < 0.8:
                 conf.append({"net": n["name"], "class": c, "confidence": p, "why": why})
+    upgrade_pairs(classes, nets, ctx.cons, conf)
     gnd_vias = [(v[0], v[1]) for n in nets if classes[n["name"]] == "GND" for v in n["vias"]]
     gnd_vias += [(p["x"], p["y"]) for n in nets if classes[n["name"]] == "GND" for p in n["pads"] if p["l"] == -1]
     fab_min = (ctx.cons.get("board") or {}).get("fab_min_track") or (0.127 if nL <= 2 else 0.09)
@@ -719,24 +727,6 @@ def analyze(pack, cons=None):
                     ctx.add("RTV-02", "P1", n["name"], None, (v[0], v[1]), "换层过孔附近 5.08 mm 内没有地过孔" if d is not None else "换层过孔附近没有地过孔", round(d, 2) if d else None, metric="VF-26")
                 elif d > 2.0:
                     ctx.add("RTV-02", "P2", n["name"], None, (v[0], v[1]), f"最近的地过孔在 {d:.1f} mm 外（建议 2 mm 内）", round(d, 2), metric="VF-26")
-    # USB 对内长度差
-    by_name = {p["net"]: p for p in per_net}
-    seen_pairs = set()
-    for nm, p in by_name.items():
-        if p["class"] != "USB90":
-            continue
-        mate = pair_mate(nm, by_name)
-        if not mate or (mate, nm) in seen_pairs:
-            continue
-        seen_pairs.add((nm, mate))
-        r = class_rules("USB90", ctx.cons)
-        skew = abs(p["len"] - by_name[mate]["len"])
-        if skew > r.get("skew_max_mm", 1.25):
-            ctx.add("RTL-07", "P1", nm, None, None, f"USB 差分 {nm}/{mate} 长度差 {skew:.2f} mm（上限 {r.get('skew_max_mm', 1.25)}）", round(skew, 2), metric="VF-26")
-        elif skew > r.get("skew_mm", 0.5):
-            ctx.add("RTL-07", "P2", nm, None, None, f"USB 差分 {nm}/{mate} 长度差 {skew:.2f} mm（建议 ≤ {r.get('skew_mm', 0.5)}）", round(skew, 2), metric="VF-26")
-        if p["vias"] != by_name[mate]["vias"]:
-            ctx.add("RTV-07", "P1", nm, None, None, f"USB 差分 {nm}/{mate} 过孔不成对（{p['vias']} 对 {by_name[mate]['vias']}）", metric="VF-26")
     # 2 层板底层跳线
     if nL == 2:
         for name, c in bottom_chains:
@@ -771,6 +761,10 @@ def analyze(pack, cons=None):
                 ctx.add("RTY-04", "P0", ", ".join(tr[:4]), p["layer"], None, f"内层地平面 L{p['layer'] + 1} 上有其他网络的走线：{', '.join(tr[:4])}")
     # 成束
     bundle_sd = bundle_check(ctx, nets)
+    # 走线原则：就近、差分对、优先级倒挂、攻击 / 敏感网络隔离（route_principles.py）
+    import route_principles as RP
+    values = {p["ref"]: p.get("value") for p in pack.get("parts") or [] if p.get("value")}
+    pairs = RP.analyze(ctx, nets, classes, values, nL, bool(gnd_layers), {p["net"]: p["len"] for p in per_net})
     # 密度
     cv, overload = density(nets, layers, pack.get("board"))
 
@@ -815,30 +809,43 @@ def analyze(pack, cons=None):
         "" if layer_dir or nL == 2 else "约束里没有层主方向")
     put("VF-25", {"cv": round(cv, 2) if cv is not None else None, "overloaded_tiles": overload},
         max(ramp(cv, 0.8, 1.6) if cv is not None else 0, 0.5 if overload else 0), "2.5 mm 瓦片走线占用率")
-    crit = [x for x in v if x.get("metric") == "VF-26" or x["rule"] in ("RTL-03", "RTL-06", "RTL-07", "RTV-02", "RTV-07", "RTW-01", "RTW-09")]
+    crit = [x for x in v if x.get("metric") == "VF-26" or x["rule"] in ("RTL-03", "RTL-06", "RTV-02", "RTW-01", "RTW-09")]
     p0 = any(x["sev"] == "P0" for x in crit)
     p1 = sum(1 for x in crit if x["sev"] == "P1")
     p2 = sum(1 for x in crit if x["sev"] == "P2")
     put("VF-26", {"P0": int(p0), "P1": p1, "P2": p2}, 1.0 if p0 or p1 > 2 else (0.6 if p1 else (0.3 if p2 else 0)))
+    def sev_frac(prefixes, extra=()):
+        xs = [x for x in v if x["rule"].startswith(prefixes) or x["rule"] in extra]
+        c = {s_: sum(1 for x in xs if x["sev"] == s_) for s_ in ("P0", "P1", "P2", "P3")}
+        return c, (1.0 if c["P0"] else min(1.0, 0.5 * c["P1"] + 0.2 * c["P2"] + 0.05 * c["P3"]))
+    c28, f28 = sev_frac(("RTD-",))
+    put("VF-28", {**c28, "pairs": len(pairs)}, f28, "" if pairs else "没有识别到差分对")
+    c29, f29 = sev_frac(("RTP-",))
+    put("VF-29", c29, f29)
+    c30, f30 = sev_frac(("RTO-",), ("RTS-06",))
+    put("VF-30", c30, f30)
     for x in v:
         x.setdefault("metric", METRIC_OF.get(x["rule"], "VF-26" if x in crit else None))
-    score = round(100 - sum(e["deduct"] for e in m.values()), 1)
+    score = round(100 - 100.0 * sum(e["deduct"] for e in m.values()) / sum(WEIGHTS.values()), 1)   # 按总权重归一化到 100
     has_p0 = any(x["sev"] == "P0" for x in v)
     grade = "不通过（有 P0）" if has_p0 else ("优秀" if score >= 90 else "合格" if score >= 75 else "需返工" if score >= 60 else "不合格")
     v.sort(key=lambda x: (SEV_ORDER[x["sev"]], x["rule"], str(x.get("net"))))
     return {"kind": "routing-report", "version": 1, "score": score, "grade": grade, "pass": not has_p0,
             "gate": {"RTG-01": n16 - cnt({"RTG-10"}), "RTG-02/03": n17},
-            "metrics": m, "violations": v, "stats": {k: (round(statistics.mean(x), 3) if x else 0) if isinstance(x, list) else x for k, x in stats.items()}, "classes": classes, "confirm": conf, "nets": per_net}
+            "metrics": m, "violations": v, "pairs": pairs, "stats": {k: (round(statistics.mean(x), 3) if x else 0) if isinstance(x, list) else x for k, x in stats.items()}, "classes": classes, "confirm": conf, "nets": per_net}
 
 
-def pair_mate(nm, names):
-    for a, b in (("DP", "DN"), ("D+", "D-"), ("_P", "_N"), ("P", "N"), ("DP", "DM")):
-        if nm.endswith(a):
-            m = nm[: -len(a)] + b
-            if m in names:
-                return m
-    return None
-
+def upgrade_pairs(classes, nets, cons, conf=None):
+    """按命名成对的网络（X_P / X_N、D+ / D-…）如果被推成普通信号或时钟，改成差分类 DIFF100（USB 的保持 USB90）。"""
+    import route_principles as RP
+    given = set((cons.get("nets") or {}).keys()) if cons else set()
+    for a, b in RP.pair_names([n["name"] for n in nets]):
+        for x in (a, b):
+            if x not in given and classes.get(x) in ("SIG", "CLK"):
+                classes[x] = "DIFF100"
+                if conf is not None:
+                    conf[:] = [c for c in conf if c["net"] != x]
+                    conf.append({"net": x, "class": "DIFF100", "confidence": 0.75, "why": f"与 {b if x == a else a} 命名成对"})
 
 def bundle_check(ctx, nets):
     bundles = ctx.cons.get("bundles") or []
@@ -955,8 +962,14 @@ def make_constraints(pack, layers=None, fab="JLC-standard"):
     for n in pack.get("nets", []):
         c, p, why = infer_class(n["name"], [norm_pad(q) for q in n.get("pads", [])])
         nets[n["name"]] = {"class": c, "confidence": p}
-        if p < 0.8:
-            confirm.append(n["name"])
+    cls = {k: v["class"] for k, v in nets.items()}
+    upgrade_pairs(cls, [{"name": k} for k in nets], None)
+    for k, c in cls.items():
+        if c != nets[k]["class"]:
+            nets[k] = {"class": c, "confidence": 0.75}
+    confirm = [k for k, v in nets.items() if v["confidence"] < 0.8]
+    import route_principles as RP
+    pairs = [{"p": a, "n": b} for a, b in RP.pair_names(list(nets))]
     return {
         "schema": "lpiot-routing/1.0",
         "board": {"layers": nL, "copper_oz": 1, "fab": fab, "units": "mm", "fab_min_track": 0.127 if nL <= 2 else 0.09},
@@ -964,7 +977,7 @@ def make_constraints(pack, layers=None, fab="JLC-standard"):
         "geometry": merge_cons(None)["geometry"] | {"chamfer_min": {"k_w": 2.0, "abs_mm": 0.2}, "forbid_acute_tee": True},
         "netclasses": {k: {kk: vv for kk, vv in v.items()} for k, v in CLASSES.items()},
         "nets": nets, "confirm": confirm,
-        "priority": PRIORITY, "budgets": {}, "keepouts": [], "exempt_zones": [], "channels": [], "bundles": [], "escape": [], "locks": [],
+        "priority": PRIORITY, "pairs": pairs, "budgets": {}, "keepouts": [], "exempt_zones": [], "channels": [], "bundles": [], "escape": [], "locks": [],
     }
 
 
@@ -1009,11 +1022,25 @@ def report_md(rep, title="布线质量报告"):
     return "\n".join(L)
 
 
+def order_md(rows):
+    L = ["# 推荐布线顺序", "", "按档位先后；同档内先布最密器件上的网络，再按八方向最短长度从短到长。地网络最后铺铜、补缝合过孔。", ""]
+    cur = None
+    k = 0
+    for r in rows:
+        if r["tier"] != cur:
+            cur = r["tier"]
+            L += ["", f"## {r['tier']}. {r['tier_name']}：{r['why']}", "", "| 顺序 | 网络 | 类 | 焊盘数 | 最短长度 mm |", "|---|---|---|---|---|"]
+        k += 1
+        L.append(f"| {k} | {r['net']} | {r['class']} | {r['pads']} | {r['len']} |")
+    return "\n".join(L) + "\n"
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="布线几何检查、网络类推导与质量评分")
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("lint"); s.add_argument("file"); s.add_argument("--constraints"); s.add_argument("-o", "--output"); s.add_argument("--json")
     s = sub.add_parser("gate"); s.add_argument("file"); s.add_argument("--constraints")
+    s = sub.add_parser("order"); s.add_argument("file"); s.add_argument("--constraints"); s.add_argument("--json")
     s = sub.add_parser("constraints"); s.add_argument("file"); s.add_argument("--layers", type=int); s.add_argument("-o", "--output", default="constraints.json")
     s.add_argument("--dru")
     a = ap.parse_args(argv)
@@ -1036,6 +1063,16 @@ def main(argv=None):
             print(f"拦截 {x['rule']} {x.get('net')} L{(x.get('layer') or 0) + 1} {x.get('at')}: {x['msg']}")
         print(f"闸门：{'不通过，' + str(len(block)) + ' 处任意角度或锐角，先用 route_fix.py 修复' if block else '通过'}")
         return 1 if block else 0
+    if a.cmd == "order":
+        import route_principles as RP
+        pack, _ = load_any(a.file, cons)
+        rep = analyze(pack, cons)
+        nets = [norm_net(n) for n in pack.get("nets", [])]
+        rows = RP.routing_order(nets, rep["classes"])
+        if a.json:
+            Path(a.json).write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(order_md(rows))
+        return 0
     if a.cmd == "constraints":
         pack, _ = load_any(a.file)
         c = make_constraints(pack, a.layers)

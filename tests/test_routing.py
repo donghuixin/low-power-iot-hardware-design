@@ -101,7 +101,7 @@ class LintBoards(unittest.TestCase):
 
     def test_bad_board_detects_injected_problems(self):
         self.assertFalse(self.bad["pass"])
-        self.assertLessEqual(self.bad["score"], 60)
+        self.assertLessEqual(self.bad["score"], 65)
         got = rules_of(self.bad)
         for r in ["RTG-01", "RTG-02", "RTG-03", "RTG-05", "RTG-06", "RTG-07", "RTV-01", "RTL-11"]:
             self.assertIn(r, got, r)
@@ -190,6 +190,86 @@ class FixBoard(unittest.TestCase):
         self.assertFalse(any(r["net"] == "SDA" for r in rep["fixed"]))
 
 
+class Principles(unittest.TestCase):
+    """走线原则：就近、差分、优先级倒挂、隔离（route_principles.py）。"""
+
+    @classmethod
+    def setUpClass(cls):
+        subprocess.run([sys.executable, str(FIX / "make_route_fixtures.py"), str(FIX)], check=True)
+        cls.good = lint(FIX / "principles-good.kicad_pcb")
+        cls.bad = lint(FIX / "principles-bad.kicad_pcb")
+
+    def by_rule(self, rep, rule):
+        return [v for v in rep["violations"] if v["rule"] == rule]
+
+    def test_good_board_clean(self):
+        bad = [v for v in self.good["violations"] if v["rule"][:3] in ("RTP", "RTD", "RTO") or v["rule"] == "RTS-06"]
+        self.assertEqual(bad, [])
+        self.assertGreaterEqual(self.good["score"], 95)
+        self.assertEqual({(p["p"], p["n"], p["class"]) for p in self.good["pairs"]},
+                         {("USB_DP", "USB_DM", "USB90"), ("LVDS_P", "LVDS_N", "DIFF100")})
+
+    def test_proximity(self):
+        r = self.by_rule(self.bad, "RTP-01")
+        self.assertTrue(r and r[0]["sev"] == "P1" and "C1" in r[0]["msg"])
+        self.assertTrue(any("C1" in v["msg"] for v in self.by_rule(self.bad, "RTP-03")))
+        self.assertEqual({v["net"] for v in self.by_rule(self.bad, "RTP-04")}, {"XIN", "XOUT"})
+        self.assertTrue(self.by_rule(self.bad, "RTP-05"))
+        self.assertTrue(any("更靠近芯片" in v["msg"] for v in self.by_rule(self.bad, "RTP-06")))
+        self.assertTrue(any("R5" in v["msg"] for v in self.by_rule(self.bad, "RTP-07")))
+
+    def test_diff_pairs(self):
+        got = {v["rule"]: v for v in self.bad["violations"] if v["rule"].startswith("RTD")}
+        for r in ("RTD-01", "RTD-03", "RTD-04", "RTD-05", "RTD-06"):
+            self.assertIn(r, got, r)
+        self.assertIn("USB_DP/USB_DM", got["RTD-04"]["net"])
+        self.assertIn("CS", got["RTD-06"]["msg"])
+        self.assertIn("LVDS", got["RTD-03"]["net"])
+
+    def test_priority_and_isolation(self):
+        inv = self.by_rule(self.bad, "RTO-01")
+        self.assertEqual({v["net"] for v in inv}, {"XIN", "XOUT"})
+        self.assertTrue(all("LED" in v["msg"] for v in inv))
+        self.assertTrue(any("SW" in v["net"] and "ADC_IN" in v["net"] for v in self.by_rule(self.bad, "RTS-06")))
+
+    def test_metrics(self):
+        for k in ("VF-28", "VF-29", "VF-30"):
+            self.assertEqual(self.good["metrics"][k]["deduct"], 0)
+            self.assertGreater(self.bad["metrics"][k]["deduct"], 0, k)
+
+    def test_order(self):
+        import route_principles as RP
+        pack, _ = R.load_any(FIX / "principles-good.kicad_pcb")
+        rep = R.analyze(pack)
+        rows = RP.routing_order([R.norm_net(n) for n in pack["nets"]], rep["classes"])
+        names = [r["net"] for r in rows]
+        tiers = [r["tier"] for r in rows]
+        self.assertEqual(tiers, sorted(tiers))
+        self.assertLess(names.index("XIN"), names.index("USB_DP"))
+        self.assertLess(names.index("USB_DP"), names.index("ADC_IN"))
+        self.assertLess(names.index("VDD"), names.index("LED"))
+        self.assertEqual(names[-1], "GND")
+        self.assertEqual(R.main(["order", str(FIX / "principles-good.kicad_pcb")]), 0)
+
+    def test_pair_naming(self):
+        import route_principles as RP
+        pairs = RP.pair_names(["USB_DP", "USB_DM", "CLK+", "CLK-", "TXP", "TXN", "VINP", "VINN", "GPIO_P", "SDA", "MIPI_D0_P", "MIPI_D0_N"])
+        self.assertIn(("USB_DP", "USB_DM"), pairs); self.assertIn(("CLK+", "CLK-"), pairs); self.assertIn(("TXP", "TXN"), pairs)
+        self.assertIn(("MIPI_D0_P", "MIPI_D0_N"), pairs); self.assertIn(("VINP", "VINN"), pairs)
+        self.assertFalse(any("GPIO_P" in p for p in pairs))
+
+    def test_parse_value(self):
+        import route_principles as RP
+        for v, f in [("100nF", 1e-7), ("0.1uF", 1e-7), ("4u7", 4.7e-6), ("10u/16V", 1e-5), ("12pF", 1.2e-11), ("DNP", None)]:
+            got = RP.parse_value(v)
+            self.assertTrue((got is None and f is None) or abs(got - f) < f * 1e-6, (v, got))
+
+    def test_fixer_leaves_placement_alone(self):
+        with tempfile.TemporaryDirectory() as d:
+            rep = F.fix_kicad(FIX / "principles-good.kicad_pcb", Path(d) / "x.kicad_pcb")
+            self.assertEqual(rep["fixed"], [])
+
+
 class RandomPolylines(unittest.TestCase):
     """随机两焊盘网络 + 随机折线：修复后要么全是八方向、无锐角、出线正确、连通不变，要么明确标为 needs_manual。"""
 
@@ -273,13 +353,20 @@ class Integration(unittest.TestCase):
             if not k.startswith("_"):
                 self.assertIn(k, schema["properties"], k)
 
+    def test_pack_part_values(self):
+        subprocess.run([sys.executable, str(FIX / "make_route_fixtures.py"), str(FIX)], check=True)
+        pack = X.build_pack(X.parse_kicad(FIX / "principles-good.kicad_pcb"))
+        vals = {p["ref"]: p.get("value") for p in pack["parts"]}
+        self.assertEqual(vals["C1"], "100nF")
+        self.assertIn("VF-29", pack["checks"]["routing"]["metrics"])
+
     def test_pack_has_routing_fields(self):
         subprocess.run([sys.executable, str(FIX / "make_route_fixtures.py"), str(FIX)], check=True)
         pack = X.build_pack(X.parse_kicad(FIX / "route-bad.kicad_pcb"))
         self.assertIn("frame", pack)
         self.assertTrue(pack["checks"]["planes"])
         self.assertIn("routing", pack["checks"])
-        self.assertLessEqual(pack["checks"]["routing"]["score"], 60)
+        self.assertLessEqual(pack["checks"]["routing"]["score"], 65)
         n = next(q for q in pack["nets"] if q["name"] == "SDA")
         self.assertEqual(len(n["pads"][0]), 9)              # ref, pin, layer, x, y, w, h, rot, shape
         gnd_b = next(p for p in pack["checks"]["planes"] if p["layer"] == 1)

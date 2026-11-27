@@ -21,7 +21,7 @@
 3. `verify` 块：电源、负载、功耗、干扰源
 4. 布线后：提取铜皮
 5. 三类验证怎么算
-6. 规则 VF-01 … VF-27
+6. 规则 VF-01 … VF-30
 7. 页面功能
 8. 解读导出报告
 9. 局限
@@ -121,7 +121,7 @@ python scripts/extract_copper.py --gerber top.gtl in1.g2 in2.g3 bottom.gbl --out
 
 所有数值都是简化模型的定性结果。相对比较（改动前后、方案 A 与 B）比绝对值可靠。
 
-## 6. 规则 VF-01 … VF-27
+## 6. 规则 VF-01 … VF-30
 
 阈值可在 `verify.rules` 里覆盖。"对应条目"指 `references/checklists.md` 中 layout 清单的条目。
 
@@ -143,7 +143,7 @@ python scripts/extract_copper.py --gerber top.gtl in1.g2 in2.g3 bottom.gbl --out
 | VF-14 | 地铜孤岛 | P2 | 某层地铜（> 1 mm²）经过孔也连不到主地 | R | PI-08 |
 | VF-15 | 绕线过长 | P3（射频、时钟、模拟、开关节点为 P2） | 网络走线总长 > `max_ratio`（1.3）× 焊盘最小生成树长度 + `slack_mm`（2 mm）；靠铺铜连接的网络不查（判据见 `14-routing-practice.md` 第 7 节） | R | RT-05 |
 
-**布线几何与质量（VF-16 … VF-27，只在阶段 R）**：`extract_copper.py` 生成数据包时调用 `route_lint.py` 检查走线几何、线宽、线长、过孔和层使用，结果放在 `checks.routing`（得分、11 项指标、违规列表，最多 300 条）。验证器把同一规则、同一网络、同一层的多处违规合并成一条结论，标第一处的位置；等级沿用检查器给的 P0–P3。绕行率（RTL-01/02）已由 VF-15 报告，这里不重复。规则定义和阈值见 `16-routing-constraints.md` 第 4、5 节。
+**布线几何与质量（VF-16 … VF-30，只在阶段 R）**：`extract_copper.py` 生成数据包时调用 `route_lint.py` 检查走线几何、线宽、线长、过孔和层使用，结果放在 `checks.routing`（得分、11 项指标、违规列表，最多 300 条）。验证器把同一规则、同一网络、同一层的多处违规合并成一条结论，标第一处的位置；等级沿用检查器给的 P0–P3。绕行率（RTL-01/02）已由 VF-15 报告，这里不重复。规则定义和阈值见 `16-routing-constraints.md` 第 4、5 节。
 
 | 规则 | 名称 | 来源规则 | 对应条目 |
 |---|---|---|---|
@@ -159,6 +159,11 @@ python scripts/extract_copper.py --gerber top.gtl in1.g2 in2.g3 bottom.gbl --out
 | VF-25 | 走线密度 | 只计分 | — |
 | VF-26 | 网络类约束 | RTW、RTL-03/06/07、RTV-02/07 | RTW、RTL |
 | VF-27 | 布线质量总分 | 总分 < `min_score`（75）时给出，< 60 为 P2，列出扣分最多的三项 | RT-08 |
+| VF-28 | 差分对 | RTD-01…07（同层、耦合、线距、等长、过孔成对、对内穿线、对外间距） | RTD |
+| VF-29 | 就近 | RTP-01…07（去耦电容、地过孔、负载电容、ESD、串阻） | RTP |
+| VF-30 | 优先级与隔离 | RTO-01 优先级倒挂、RTS-06 攻击与敏感网络并行 | RTO |
+
+VF-28…30 的规则见 `17-routing-principles.md`。
 
 阶段 P 的结论标题前加"估计："，等级最高到 P1。
 

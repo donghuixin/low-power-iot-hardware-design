@@ -96,5 +96,6 @@ test('布线几何（VF-16…27）：坏板的任意角度电源线能报出来�
   assert.ok(f16.some((f) => f.obj === 'VDD' && f.where && /共 \d+ 处|任意角度/.test(f.title)));
   assert.ok(bad.checks.routing.score < good.checks.routing.score);
   assert.ok(eb.findings.some((f) => f.rule === 'VF-27'));       // 坏板总分低于 75，给出总分结论
+  assert.ok(eb.findings.some((f) => f.rule === 'VF-29' && /去耦电容/.test(f.title)));   // 就近原则（route_principles.py）
   void sg; void sb;
 });

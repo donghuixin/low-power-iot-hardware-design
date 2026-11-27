@@ -30,6 +30,10 @@
     'VF-25': { name: '走线密度', sev: 'P3', weight: 6, check: 'RTS-05' },
     'VF-26': { name: '网络类约束', sev: 'P1', weight: 10, check: 'RTW-01' },
     'VF-27': { name: '布线质量总分', sev: 'P3', min_score: 75, check: 'RT-08' },
+    // 走线原则（scripts/route_principles.py；references/17-routing-principles.md）
+    'VF-28': { name: '差分对', sev: 'P1', weight: 8, check: 'RTD-02' },
+    'VF-29': { name: '就近', sev: 'P1', weight: 8, check: 'RTP-01' },
+    'VF-30': { name: '优先级与隔离', sev: 'P2', weight: 6, check: 'RTO-01' },
   };
   function rule(v, id) { return { ...RULES[id], ...((v && v.rules && v.rules[id]) || {}) }; }
   /**

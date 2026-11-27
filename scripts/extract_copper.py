@@ -160,14 +160,18 @@ def parse_kicad(path):
         fx, fy = num(at[1]), num(at[2])
         frot = num(at[3]) if len(at) > 3 else 0.0
         side = "bottom" if (first(fp, "layer") or ["", "F.Cu"])[1] == "B.Cu" else "top"
-        ref = ""
+        ref, value = "", ""
         for pr in find(fp, "property"):
             if len(pr) > 2 and pr[1] == "Reference":
                 ref = pr[2]
+            if len(pr) > 2 and pr[1] == "Value":
+                value = pr[2]
         for t in find(fp, "fp_text"):
             if len(t) > 2 and t[1] == "reference":
                 ref = t[2]
-        b.parts[ref] = {"x": fx, "y": fy, "side": side}
+            if len(t) > 2 and t[1] == "value":
+                value = t[2]
+        b.parts[ref] = {"x": fx, "y": fy, "side": side, "value": value}
         for pd in find(fp, "pad"):
             pat, size = first(pd, "at"), first(pd, "size")
             if not pat or not size:
@@ -607,6 +611,8 @@ def build_pack(b, project=None, res=0.05, cells=200, routing=True):
     for ref, (a, c, d, e, ls) in refs.items():
         side = b.parts.get(ref, {}).get("side") or ("bottom" if ls == {nL - 1} else "top")
         parts.append({"ref": ref, "x": round((a + d) / 2, 3), "y": round((c + e) / 2, 3), "rect": [round(a, 3), round(c, 3), round(d, 3), round(e, 3)], "side": side})
+        if b.parts.get(ref, {}).get("value"):
+            parts[-1]["value"] = b.parts[ref]["value"]
 
     # ---------- 离线检查 ----------
     gnd_ids = [nid for n, nid in b.nets.items() if classes[n] == "ground"]
