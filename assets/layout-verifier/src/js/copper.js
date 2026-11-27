@@ -297,6 +297,45 @@
     }
     for (const q of ck.islands || []) out.push(F.finding(v, 'VF-14', { value: q.area, where: { x: q.x, y: q.y },
       title: `L${q.layer + 1} 有一块 ${q.area} mm² 的地铜没有连到主地`, advice: '打过孔连到地平面，或删除这块铜', assume: '按地网络的连通性' }));
+    return out.concat(routingFindings(v, ck.routing));
+  }
+
+  const RT_ADVICE = {
+    'RTG-01': '改成 0/45/90° 折线：python scripts/route_fix.py 板子.kicad_pcb 可自动重建',
+    'RTG-02': '锐角会积酸、蚀刻过度，信号上也是阻抗突变：改成两个 45° 拐弯', 'RTG-03': '分支改成 90° T 接或两个 45°',
+    'RTG-05': '合并到相邻线段，或整段按八方向重走', 'RTG-06': '拉直：去掉小于 2 倍线宽的错位和来回拐弯',
+    'RTG-07': '先沿焊盘长轴直出到焊盘外，再拐弯', 'RTG-09': '线宽只在焊盘颈缩或分支处变化',
+    'RTG-10': '圆弧只用在射频、柔性弯折区或高压区，并在约束里声明豁免区', 'RTG-12': '删除悬空线头',
+    'RTV-01': '少打过孔：晶振、射频、时钟线同层直连', 'RTV-02': '换层过孔 2 mm 内打一个地过孔给回流',
+    'RTV-05': '过孔移出焊盘；必须盘中孔时向板厂要求树脂塞孔电镀盖帽', 'RTV-07': '差分线过孔成对、对称放置',
+    'RTL-03': '晶振靠近芯片放置，走线 ≤ 5 mm', 'RTL-06': '射频线不分叉；匹配元件串在线上', 'RTL-07': '在长的一根上加蛇形补偿到 ≤ 0.5 mm',
+    'RTL-11': '2 层板底层留给地：信号跳线 ≤ 10 mm，换层两端就近打地孔', 'RTY-02': '按层主方向走线，逆向走线换到另一层',
+    'RTY-04': '内层地平面上不走线', 'RTY-05': '底层地被走线切碎：缩短或挪走底层跳线，补地孔缝合', 'RTS-03': '成束的线保持等间距平行',
+    'RTW-01': '加宽到网络类要求的线宽', 'RTW-09': '线宽低于板厂下限，必须加宽',
+  };
+  /** 布线几何检查结果 → 结论。同一规则、网络、层的多处合并成一条，标第一处的位置。 */
+  function routingFindings(v, rt) {
+    if (!rt) return [];
+    const out = [], groups = new Map();
+    for (const x of rt.violations || []) {
+      if (x.rule === 'RTL-01' || x.rule === 'RTL-02') continue;     // 绕行已由 VF-15 报告
+      const id = x.metric && F.RULES[x.metric] ? x.metric : 'VF-26';
+      const k = `${x.rule}|${x.net || ''}|${x.layer ?? ''}`;
+      if (!groups.has(k)) groups.set(k, { id, x, n: 0 });
+      groups.get(k).n++;
+    }
+    for (const { id, x, n } of groups.values()) {
+      out.push(F.finding(v, id, { obj: x.net || null, value: x.value ?? n, sev: x.sev, where: x.at ? { x: x.at[0], y: x.at[1] } : null,
+        title: `${x.rule}${x.layer != null ? ' L' + (x.layer + 1) : ''}${x.net ? ' ' + x.net : ''}：${x.msg}${n > 1 ? `（共 ${n} 处）` : ''}`,
+        advice: RT_ADVICE[x.rule] || '', assume: '规则与阈值见 references/16-routing-constraints.md' }));
+    }
+    const r27 = F.rule(v, 'VF-27');
+    if (rt.score != null && rt.score < r27.min_score) {
+      const worst = Object.entries(rt.metrics || {}).filter(([, e]) => e.deduct > 0).sort((a, b) => b[1].deduct - a[1].deduct).slice(0, 3);
+      out.push(F.finding(v, 'VF-27', { value: rt.score, sev: rt.score < 60 ? 'P2' : 'P3',
+        title: `布线质量 ${rt.score} / 100（${rt.grade}）`, advice: '主要扣分：' + worst.map(([k, e]) => `${k} ${F.RULES[k] ? F.RULES[k].name : ''} −${e.deduct}`).join('，'),
+        assume: '11 项加权扣分，任一 P0 即不通过' }));
+    }
     return out;
   }
 

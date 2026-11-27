@@ -62,7 +62,7 @@
       const o = { ...opts };
       if (st.stage === 'R') o.netGeom = LP.copper.netGeom(st);
       const r = LP.emi.analyze(st, o);
-      if (st.stage === 'R') r.findings = r.findings.concat(LP.copper.emiChecks(st));
+      if (st.stage === 'R') r.findings = F.sortFindings(r.findings.concat(LP.copper.emiChecks(st)));
       r.findings = F.forStage(r.findings, st.stage);
       return r;
     });

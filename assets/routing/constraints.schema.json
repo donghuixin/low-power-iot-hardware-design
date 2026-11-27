@@ -1,0 +1,92 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "lpiot-routing/1.0",
+ "title": "布线约束（route_lint.py / route_fix.py 读取）",
+ "description": "所有长度单位 mm。坐标与板文件一致（KiCad 为 y 向下）。缺省项取 route_lint.py 内置默认值，见 references/16-routing-constraints.md。",
+ "type": "object",
+ "required": ["schema"],
+ "properties": {
+  "schema": {"const": "lpiot-routing/1.0"},
+  "board": {
+   "type": "object",
+   "properties": {
+    "layers": {"type": "integer", "enum": [1, 2, 4, 6]},
+    "copper_oz": {"type": "number"},
+    "fab": {"type": "string", "description": "板厂工艺档位，例如 JLC-standard"},
+    "fab_min_track": {"type": "number", "description": "板厂最小线宽；低于它记 RTW-09（P0）"}
+   }
+  },
+  "layers": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": ["name", "role"],
+    "properties": {
+     "name": {"type": "string"},
+     "role": {"enum": ["signal", "gnd_plane", "power_pour", "mixed"]},
+     "preferred_dir": {"enum": ["H", "V", null], "description": "主走线方向；逆向走线长度占比超过 25% 记 RTY-02"},
+     "against_dir_cost": {"type": "number"},
+     "routing": {"enum": ["free", "limited", "jumpers_only", "forbidden"]},
+     "max_jumper_mm": {"type": "number"}
+    }
+   }
+  },
+  "geometry": {
+   "type": "object",
+   "properties": {
+    "angles_deg": {"type": "array", "items": {"type": "number"}},
+    "angle_tol_um": {"type": "number", "default": 1},
+    "min_seg": {"type": "object", "properties": {"k_w": {"type": "number"}, "abs_mm": {"type": "number"}}},
+    "fanout_k_w": {"type": "number", "default": 0.5},
+    "jog_k_w": {"type": "number", "default": 2.0},
+    "jitter_window_k_w": {"type": "number", "default": 5.0},
+    "chamfer_min": {"type": "object", "properties": {"k_w": {"type": "number"}, "abs_mm": {"type": "number"}}},
+    "forbid_acute": {"type": "boolean"},
+    "forbid_acute_tee": {"type": "boolean"}
+   }
+  },
+  "netclasses": {
+   "type": "object",
+   "description": "按网络类覆盖默认值。键为 SIG / CLK / ANALOG / XTAL / RF50 / USB90 / PWR_LOW / PWR_MAIN / SW / HV / GND 或自定义类名",
+   "additionalProperties": {
+    "type": "object",
+    "properties": {
+     "width": {"type": ["number", "null"]},
+     "min_width": {"type": ["number", "null"]},
+     "clearance": {"type": "number"},
+     "via_budget": {"type": ["integer", "null"]},
+     "tau_max": {"type": ["number", "null"], "description": "绕行率上限 = 走线长度 / 八方向最短距离"},
+     "max_len_mm": {"type": "number"},
+     "skew_mm": {"type": "number"},
+     "skew_max_mm": {"type": "number"},
+     "critical": {"type": "boolean"},
+     "allow_arc": {"type": "boolean"},
+     "no_branch": {"type": "boolean"}
+    }
+   }
+  },
+  "nets": {
+   "type": "object",
+   "description": "网络名 → 网络类。confidence 低于 0.8 的是自动推导、需要人确认的",
+   "additionalProperties": {"type": "object", "properties": {"class": {"type": "string"}, "confidence": {"type": "number"}}, "required": ["class"]}
+  },
+  "confirm": {"type": "array", "items": {"type": "string"}},
+  "priority": {"type": "array", "items": {"type": "string"}, "description": "布线与修复顺序（先关键网络）"},
+  "budgets": {"type": "object"},
+  "bundles": {
+   "type": "array",
+   "items": {"type": "object", "required": ["id", "nets"], "properties": {"id": {"type": "string"}, "nets": {"type": "array", "items": {"type": "string"}}, "pitch_mm": {"type": "number"}}}
+  },
+  "exempt_zones": {
+   "type": "array",
+   "items": {"type": "object", "required": ["poly", "rules"], "properties": {"id": {"type": "string"}, "poly": {"type": "array", "items": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}}, "rules": {"type": "array", "items": {"type": "string"}}, "reason": {"type": "string"}}}
+  },
+  "keepouts": {
+   "type": "array",
+   "items": {"type": "object", "required": ["poly"], "properties": {"id": {"type": "string"}, "poly": {"type": "array"}, "layers": {"type": "array", "items": {"type": "string"}}, "reason": {"type": "string"}}}
+  },
+  "channels": {"type": "array", "description": "全局布线通道（M6 全局布线器使用，当前未实现）"},
+  "escape": {"type": "array", "description": "器件扇出方案（M5 详细布线器使用，当前未实现）"},
+  "locks": {"type": "array", "items": {"type": "object", "properties": {"net": {"type": "string"}, "reason": {"type": "string"}}}, "description": "修复器不改动的网络"}
+ }
+}

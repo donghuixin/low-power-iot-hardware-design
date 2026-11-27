@@ -545,6 +545,18 @@ def emit(profile, tier_id, layers, copper=1, margin=0.0):
     return dru, "\n".join(md), classes
 
 
+def routing_dru(layers, fab_min_track):
+    """布线几何规则（锐角、短线段、零过孔网络类、各网络类最小线宽），由 route_lint.py 的默认约束生成。
+    网络类线宽下限不会低于板厂下限。角度与线段长度规则的语法未经 kicad-cli 实测，见 references/16-routing-constraints.md 第 7 节。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import route_lint
+    cons = route_lint.make_constraints({"layers": [], "nets": [], "board": {"w": 1, "h": 1}}, layers)
+    for k, v in cons["netclasses"].items():
+        if v.get("min_width"):
+            v["min_width"] = round(max(v["min_width"], fab_min_track), 3)
+    return route_lint.kicad_dru(cons)
+
+
 # ---------------------------------------------------------------- 命令行
 def main(argv=None):
     ap = argparse.ArgumentParser(description="设计规则与板厂工艺：读取、对照、生成")
@@ -586,7 +598,9 @@ def main(argv=None):
         out = Path(a.output); out.mkdir(parents=True, exist_ok=True)
         (out / "fab.kicad_dru").write_text(dru, encoding="utf-8")
         (out / "netclasses.md").write_text(md, encoding="utf-8")
-        print(f"已写入 {out / 'fab.kicad_dru'} 和 {out / 'netclasses.md'}")
+        tier = next(t for t in prof["tiers"] if t["id"] == a.tier or t["name"] == a.tier)
+        (out / "routing.kicad_dru").write_text(routing_dru(a.layers, tier_rules(prof, tier, a.layers, a.copper)["track_width"]), encoding="utf-8")
+        print(f"已写入 {out / 'fab.kicad_dru'}、{out / 'netclasses.md'} 和 {out / 'routing.kicad_dru'}（布线几何规则，与 fab.kicad_dru 合并使用）")
     return 0
 
 

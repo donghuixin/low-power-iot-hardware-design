@@ -79,7 +79,7 @@
 
 ```bash
 python scripts/fab_rules.py show [--profile 档案.json] [--layers 4]     # 看档位、下限、价格参考、来源
-python scripts/fab_rules.py emit --tier standard --layers 4 -o rules/   # 生成 fab.kicad_dru 和 netclasses.md
+python scripts/fab_rules.py emit --tier standard --layers 4 -o rules/   # 生成 fab.kicad_dru、netclasses.md 和 routing.kicad_dru
 python scripts/fab_rules.py read board.kicad_pro board.kicad_pcb        # 读出规则、网络类、严重等级、实际尺寸（JSON）
 python scripts/fab_rules.py check board.kicad_pro board.kicad_pcb -o 对照.md
 ```
@@ -104,7 +104,7 @@ python scripts/fab_rules.py check board.kicad_pro board.kicad_pcb -o 对照.md
 - 问题列表：超出能力（P0）、规则小于工艺下限或自相矛盾（P1）、规则比实际松或焊环偏小（P2）、在下限与建议值之间或严重等级偏松（P3）。
 - 有 P0 时命令返回 1。
 
-**生成规则（`emit`）** 输出两个文件。`fab.kicad_dru` 是板厂下限的 KiCad 自定义规则，粘贴到"电路板设置 → 自定义规则"后，用 KiCad 的语法检查确认一遍（脚本的输出没有在 KiCad 里实测过）。`netclasses.md` 是四个网络类的建议表：信号、电源、射频、细间距扇出。它们只是起点：电源线宽按电流核算，射频线宽按叠层计算。`--margin 0.02` 可以在工艺下限上再加余量。
+**生成规则（`emit`）** 输出三个文件。`fab.kicad_dru` 是板厂下限的 KiCad 自定义规则，粘贴到"电路板设置 → 自定义规则"后，用 KiCad 的语法检查确认一遍（脚本的输出没有在 KiCad 里实测过）。`netclasses.md` 是四个网络类的建议表：信号、电源、射频、细间距扇出。它们只是起点：电源线宽按电流核算，射频线宽按叠层计算。`--margin 0.02` 可以在工艺下限上再加余量。`routing.kicad_dru` 是布线几何规则：禁止锐角（`track_angle`）、最小线段长度（`track_segment_length`）、晶振和射频网络类不打过孔（`via_count`）、各网络类最小线宽。这几条规则的写法在 KiCad 版本间有差异，第一次用时必须按 `16-routing-constraints.md` 第 7 节用坏样板跑 `kicad-cli pcb drc` 自检。任意角度、抖动和出焊盘方向 KiCad 规则表达不了，用 `route_lint.py` 检查。
 
 ## 5. 用户自己的板厂工艺
 

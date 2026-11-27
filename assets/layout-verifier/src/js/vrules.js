@@ -17,6 +17,19 @@
     'VF-13': { name: '表面温度', sev: 'P0', check: 'THM-01' },
     'VF-14': { name: '地铜孤岛', sev: 'P2', check: 'PI-08' },
     'VF-15': { name: '绕线过长', sev: 'P3', max_ratio: 1.3, slack_mm: 2, check: 'RT-05' },
+    // 布线几何与质量（scripts/route_lint.py 计算，结果在铜皮数据包 checks.routing；规则见 references/16-routing-constraints.md）
+    'VF-16': { name: '任意角度走线', sev: 'P1', weight: 15, check: 'RTG-01' },
+    'VF-17': { name: '锐角', sev: 'P1', weight: 10, check: 'RTG-02' },
+    'VF-18': { name: '短段、抖动与出线', sev: 'P2', weight: 8, check: 'RTG-05' },
+    'VF-19': { name: '多余拐弯', sev: 'P3', weight: 8, check: 'RTG-06' },
+    'VF-20': { name: '过孔预算', sev: 'P2', weight: 10, check: 'RTV-01' },
+    'VF-21': { name: '地平面完整性', sev: 'P1', weight: 12, check: 'RTY-05' },
+    'VF-22': { name: '绕行率', sev: 'P2', weight: 8, check: 'RTL-01' },
+    'VF-23': { name: '成束整齐度', sev: 'P3', weight: 7, check: 'RTS-03' },
+    'VF-24': { name: '层方向与层使用', sev: 'P2', weight: 6, check: 'RTY-02' },
+    'VF-25': { name: '走线密度', sev: 'P3', weight: 6, check: 'RTS-05' },
+    'VF-26': { name: '网络类约束', sev: 'P1', weight: 10, check: 'RTW-01' },
+    'VF-27': { name: '布线质量总分', sev: 'P3', min_score: 75, check: 'RT-08' },
   };
   function rule(v, id) { return { ...RULES[id], ...((v && v.rules && v.rules[id]) || {}) }; }
   /**

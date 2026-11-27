@@ -194,13 +194,15 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 7. **EMC / ESD**：保护器件靠近入口、板边地、接口滤波。
 8. **热**：充电芯片、LDO、PA 的散热。
 9. **DFM / DFA / DFT**：封装核对、钢网、拼板、基准点、测试点、丝印。
-10. **走线与接点几何**。按[走线与接点几何复核](references/07-layout.md#走线与接点几何复核)逐网逐层检查短折线、直角、焊盘入口、过孔两侧和参考走线线尾。从截图发现问题时，将同类检查覆盖整板。交付时分别记录中心线复核与原生 DRC 的结果。
+10. **走线与接点几何**。按[走线与接点几何复核](references/07-layout.md#走线与接点几何复核)逐网逐层检查短折线、直角、焊盘入口、过孔两侧和参考走线线尾。从截图发现问题时，将同类检查覆盖整板。交付时分别记录中心线复核与原生 DRC 的结果。有板文件时用 `python scripts/route_lint.py lint <板子.kicad_pcb>` 自动查任意角度、锐角、抖动、斜出焊盘、过孔预算、底层跳线和地破碎度并打分（`references/16-routing-constraints.md`），几何问题用 `route_fix.py` 自动修复。
 
 **布线后验证**（用户已在 EDA 里布完线时推荐）：请用户提供 `.kicad_pcb`（铺铜已填充），或 Gerber + 板框 + IPC-D-356 网表（嘉立创 EDA 导出 Gerber 时勾选 IPC 网表），用 `python scripts/extract_copper.py ... -o copper-pack.json` 提取铜皮，再用 `make_layout_project.py <布局.json> --verifier --copper copper-pack.json` 生成页面，或让用户把数据包拖进已有的验证器页面。阶段 R 的结论（瓶颈、压降、过孔电流、射频参考平面、并行耦合、地铜孤岛、平面谐振、温度）按 `references/13-layout-verifier.md` 第 8 节并入评审报告，注明是简化模型。
 
 **设计规则与板厂工艺**（布线前和下单前都做）：按 `references/15-design-rules-and-process.md`。布线前用 `python scripts/fab_rules.py show` 看目标板厂的价格档位（内置嘉立创；用户有自己的板厂工艺表、PDF 或截图时，先用 `import` 导入成工艺档案），用 `emit --tier standard --layers N` 生成板厂下限规则和网络类建议，填进 EDA 后再布线。下单前用 `check <.kicad_pro> <.kicad_pcb>` 对照，把价格档位、决定档位的参数、降档办法和超限项写进评审。规则按"板厂下限 / 设计默认 / 电气要求"三层来写。报价格时说明检索日期，并提醒以下单系统的实时报价为准；档案超过三个月或用户要下单时，重新查官方页面更新。
 
 **布线过程**（用户在 EDA 里布线、或让 Claude 通过 EDA 工具布线时）：按 `references/14-routing-practice.md`。先建网络类，关键网手工布好并锁定；再逐网布线，每完成一个网络 DRC 保持为零；每根连接按"同层绕行 → 推挤 → 中间点 → 换层"的阶梯逐级尝试；自动布线多跑几次，只取全部连通且零 DRC 的结果。该文件还给出开源 2 层板的线宽、间距、过孔和焊盘密度基准，以及绕线判据。
+
+**走线几何与布线约束**（Claude 落线时必须遵守）：按 `references/16-routing-constraints.md`。只许 0/45/90/135° 线段，不许锐角、锐角 T 分支、Z 形抖动和斜着出焊盘；各网络类的线宽、线长、过孔预算、层使用见该文件第 4 节。布线前用 `route_lint.py constraints` 生成约束文件，确认推导出的网络类。**线段坐标必须按八方向构造，不能把两端焊盘直接连成一条线**；每批线段写入 EDA 前写成 `plan.json` 跑 `route_lint.py gate`，不通过先 `route_fix.py`。布完用 `route_lint.py lint` 评分，有 P0 或得分低于 75 不交付。
 
 收尾时用 `references/checklists.md` 的 layout 清单扫一遍（含"布线过程"一段）；用了验证器时加"布局布线验证"一段。
 
@@ -218,7 +220,9 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 - `scripts/make_layout_project.py <project.json> [-o out.html] [--check]`：校验布局规划器的项目数据，生成该项目专用的单文件页面。`assets/layout-planner.html` 内置示例，可直接打开试用；改动页面源码后用 `scripts/build_layout_planner.py` 重新构建。
 - `scripts/make_layout_project.py <布局.json> --verifier [--copper copper-pack.json]`：生成布局布线验证器页面（电流与回流、电磁、温度）；不给铜皮数据包时是布线前估计，给了是布线后验证。`assets/layout-verifier.html` 内置示例；改动源码后用 `scripts/build_layout_verifier.py` 重新构建。
 - `scripts/fab_rules.py show | template | import <工艺表> | read <设计文件…> | check <设计文件…> [--profile 档案.json] | emit --tier <档位> --layers N`：读取板厂工艺（内置 `assets/fab-profiles/jlcpcb.json`，也可导入用户的工艺表）、读取设计规则与实际最小线宽和过孔、对照价格档位、生成 KiCad 规则和网络类建议。只依赖标准库。
-- `scripts/extract_copper.py <board.kicad_pcb> | --gerber ... --outline ... --ipc356 ... [--project 布局.json] -o copper-pack.json`：从布好的 PCB 提取铜皮，生成验证器的铜皮数据包（需要 numpy、scipy、Pillow）。
+- `scripts/extract_copper.py <board.kicad_pcb> | --gerber ... --outline ... --ipc356 ... [--project 布局.json] -o copper-pack.json`：从布好的 PCB 提取铜皮，生成验证器的铜皮数据包（需要 numpy、scipy、Pillow），同时附上布线质量检查结果。
+- `scripts/route_lint.py lint <板子.kicad_pcb | copper-pack.json> | gate <plan.json> | constraints <板子> --layers N`：布线几何检查与质量评分（VF-16…27）、写入 EDA 前的八方向闸门、生成布线约束文件和网络类推导。
+- `scripts/route_fix.py <板子.kicad_pcb | plan.json> [-o 输出] [--diff diff.json]`：把任意角度、锐角、抖动、斜出焊盘、悬空线头和重叠线段自动修成八方向折线，保持连通关系和间距，修不了的标为 needs_manual。
 - `scripts/hw_calc.py`：常用小计算——I2C 上拉取值范围 (`i2c-pullup`)、脉冲负载所需储能电容 (`bulk-cap`)、分压器电流与输出阻抗 (`divider`)、晶体负载电容 (`xtal`)、续航 (`life`)。运行 `python scripts/hw_calc.py -h` 查看参数。
   扩展模块另有：时钟抖动限制的 SNR 或允许抖动 (`jitter --fin-mhz 10 --snr-db 74`)、由 ADC LSB / 噪声底与 PSRR 反推纹波上限 (`ripple --fs-vpp 2 --bits 12 --psrr-db 40 --margin-db 10`)、高压脉冲峰值电流与 burst 储能电容 (`hvcap --cel-pf 100 --channels 32 --dv 60 --tr-ns 20 --droop-v 1 --cycles 8 --prf-khz 10`)、采集数据率与存储量 (`datarate --channels 8 --fs-msps 30 --bits 12 --window-us 200 --shots 4 --lines 80 --fps 5 --link-mbps 20`)。
 
@@ -238,9 +242,10 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 | `references/10-easyeda-execution.md` | 嘉立创EDA 自动绘图、器件标准化、资料归档、失败恢复与保存验收 |
 | `references/11-eda-mcp-setup.md` | 设计开始时接入嘉立创 EDA 或 KiCad 的 MCP，或排查连接问题 |
 | `references/12-layout-planner.md` | 用交互式布局规划器摆放主器件：生成项目数据、页面功能、指标与规则、解读导出结果 |
-| `references/13-layout-verifier.md` | 布局后或布线后做电流回流、电磁、温度验证：`verify` 块、提取铜皮、规则 VF-01…15、解读验证报告 |
+| `references/13-layout-verifier.md` | 布局后或布线后做电流回流、电磁、温度验证：`verify` 块、提取铜皮、规则 VF-01…27、解读验证报告 |
 | `references/14-routing-practice.md` | 布线实操（取自 CADET）：开源 2 层板的规则与密度基准、逐网布线顺序、升级阶梯、换层与过孔、绕线判据、自动布线器能做到多少 |
 | `references/15-design-rules-and-process.md` | 写设计规则的八条做法、嘉立创工艺与价格档位、导入用户的板厂工艺、用 `fab_rules.py` 对照设计并生成规则 |
+| `references/16-routing-constraints.md` | 落线前、落线时和评审走线时：八方向几何、线宽 / 线长 / 过孔 / 间距 / 层约束、质量评分、检查器与修复器、写入闸门、给 AI 的布线规程 |
 | `references/20-hv-pulser-tr-safety.md` | 扩展模块：电压 >50 V；高压脉冲、T/R 与接收保护、高压电源与档位、储能、联锁、PCB 间距 |
 | `references/21-ultrasound-afe-clock.md` | 扩展模块：ADC ≥10 MSPS；超声 AFE 噪声、TGC、抗混叠、IQ 解调、时钟抖动与多普勒同源时钟 |
 | `references/22-low-noise-power-thermal.md` | 扩展模块：持续功耗 >1 W 或有高速 ADC；持续功耗模型、1S 电源路径、纹波推导、开关同步、手持热设计 |

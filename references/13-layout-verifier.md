@@ -21,7 +21,7 @@
 3. `verify` 块：电源、负载、功耗、干扰源
 4. 布线后：提取铜皮
 5. 三类验证怎么算
-6. 规则 VF-01 … VF-15
+6. 规则 VF-01 … VF-27
 7. 页面功能
 8. 解读导出报告
 9. 局限
@@ -121,7 +121,7 @@ python scripts/extract_copper.py --gerber top.gtl in1.g2 in2.g3 bottom.gbl --out
 
 所有数值都是简化模型的定性结果。相对比较（改动前后、方案 A 与 B）比绝对值可靠。
 
-## 6. 规则 VF-01 … VF-15
+## 6. 规则 VF-01 … VF-27
 
 阈值可在 `verify.rules` 里覆盖。"对应条目"指 `references/checklists.md` 中 layout 清单的条目。
 
@@ -142,6 +142,23 @@ python scripts/extract_copper.py --gerber top.gtl in1.g2 in2.g3 bottom.gbl --out
 | VF-13 | 表面温度 | P0 | 板面最高温度 > `env.contact_limit_c`（未设置时不检查） | P / R | THM-01 |
 | VF-14 | 地铜孤岛 | P2 | 某层地铜（> 1 mm²）经过孔也连不到主地 | R | PI-08 |
 | VF-15 | 绕线过长 | P3（射频、时钟、模拟、开关节点为 P2） | 网络走线总长 > `max_ratio`（1.3）× 焊盘最小生成树长度 + `slack_mm`（2 mm）；靠铺铜连接的网络不查（判据见 `14-routing-practice.md` 第 7 节） | R | RT-05 |
+
+**布线几何与质量（VF-16 … VF-27，只在阶段 R）**：`extract_copper.py` 生成数据包时调用 `route_lint.py` 检查走线几何、线宽、线长、过孔和层使用，结果放在 `checks.routing`（得分、11 项指标、违规列表，最多 300 条）。验证器把同一规则、同一网络、同一层的多处违规合并成一条结论，标第一处的位置；等级沿用检查器给的 P0–P3。绕行率（RTL-01/02）已由 VF-15 报告，这里不重复。规则定义和阈值见 `16-routing-constraints.md` 第 4、5 节。
+
+| 规则 | 名称 | 来源规则 | 对应条目 |
+|---|---|---|---|
+| VF-16 | 任意角度走线 | RTG-01、RTG-10 | RTG-01 |
+| VF-17 | 锐角 | RTG-02、RTG-03 | RTG-02 |
+| VF-18 | 短段、抖动与出线 | RTG-05、06、07、09、12 | RTG-05、RTG-07 |
+| VF-19 | 多余拐弯 | 只计分 | — |
+| VF-20 | 过孔预算 | RTV-01、RTV-05 | RTV |
+| VF-21 | 地平面完整性 | RTY-04、RTY-05 | RTY |
+| VF-22 | 绕行率 | 只计分（结论见 VF-15） | RT-05 |
+| VF-23 | 成束整齐度 | RTS-03 | — |
+| VF-24 | 层方向与层使用 | RTY-02、RTL-11 | RTY |
+| VF-25 | 走线密度 | 只计分 | — |
+| VF-26 | 网络类约束 | RTW、RTL-03/06/07、RTV-02/07 | RTW、RTL |
+| VF-27 | 布线质量总分 | 总分 < `min_score`（75）时给出，< 60 为 P2，列出扣分最多的三项 | RT-08 |
 
 阶段 P 的结论标题前加"估计："，等级最高到 P1。
 
@@ -208,6 +225,7 @@ python scripts/extract_copper.py --gerber top.gtl in1.g2 in2.g3 bottom.gbl --out
 ```bash
 node --test tests/*.test.js                       # 求解器、单调性、阶段 R（含 tests/verifier-r.test.js）
 python -m unittest tests/test_extract_copper.py   # 铜皮提取：KiCad 合成板、Gerber + IPC-D-356
+python -m unittest tests/test_routing.py          # 布线几何检查、评分与自动修复（见 16-routing-constraints.md 第 6.5 节）
 python tests/fixtures/make_demo_pcb.py            # 重新生成两块合成 KiCad 板（好板 / 坏板）
 python tests/browser_verifier_smoke.py /tmp/shots # 可选：浏览器冒烟测试（Playwright），检查 Worker、脚本错误和帧耗时并截图
 ```

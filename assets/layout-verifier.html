@@ -1384,6 +1384,60 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     outlinePolygon, outlineBBox, outlineArea, pointInPolygon, pointInBoard, distToBoardEdge,
     rectInBoard, rectEdgeDistance, faceOutside,
   };
+
+  // Optional mechanical and circuit clearances from the layout being edited, in board mm.
+  const compiledLimits = new WeakMap();
+  function limitsFor(spec) {
+    if (compiledLimits.has(spec)) return compiledLimits.get(spec);
+    const regions = (spec.regions || []).map(region => {
+      const [x0, y0, x1, y1] = region.box;
+      return { ...region, rect: {x0, y0, x1, y1}, except: new Set(region.except) };
+    });
+    const separation = new Map();
+    function add(refs, against, rule) {
+      const entry = { against: new Set(against), gap: rule.gap, name: rule.name };
+      for (const ref of refs) {
+        if (!separation.has(ref)) separation.set(ref, []);
+        separation.get(ref).push(entry);
+      }
+    }
+    for (const rule of spec.separation || []) {
+      add(rule.a, rule.b, rule);
+      add(rule.b, rule.a, rule);
+    }
+    const limits = {regions, separation, edgeExempt:new Set(spec.edgeExempt)};
+    compiledLimits.set(spec, limits);
+    return limits;
+  }
+  function placementViolation(project, item, pose, box, occupied) {
+    const spec = project.placementLimits;
+    if (!spec) return null;
+    const {regions, separation, edgeExempt} = limitsFor(spec);
+    if (spec.edgeMm > 0 && !edgeExempt.has(item.ref) && !rectInBoard(project.board.outline, expand(box, spec.edgeMm))) {
+      return {reason:'outside', with:'板边退让'};
+    }
+    for (const region of regions) {
+      if (!item.through && region.side && region.side !== 'both' && region.side !== pose.side) continue;
+      if (!region.except.has(item.ref) && overlaps(box, region.rect, region.gap)) {
+        return {reason:'keepout', with:region.name || '禁布区'};
+      }
+    }
+    const rules = separation.get(item.ref) || [];
+    for (const other of occupied) {
+      if (other.item.ref === item.ref) continue;
+      const sameSide = item.through || other.item.through || other.side === 'both' || other.side === pose.side;
+      if (spec.gapMm > 0 && sameSide && overlaps(box, other.rect, spec.gapMm)) {
+        return {reason:'overlap', with:other.item.ref};
+      }
+      for (const rule of rules) {
+        if (rule.against.has(other.item.ref) && rectDist(box,other.rect) + EPS < rule.gap) {
+          return {reason:'keepout', with:(rule.name || '器件间距') + ' · ' + other.item.ref};
+        }
+      }
+    }
+    return null;
+  }
+  LP.placementLimits = {violation:placementViolation};
 })(globalThis.LP = globalThis.LP || {});
 
 /* ---- ../../layout-planner/src/js/model.js ---- */
@@ -1602,6 +1656,98 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     return p;
   }
 
+  /** Viewed names may change; reference designators remain the electrical identity. */
+  function faceName(item) {
+    const passive = !!item.kind || /^(?:R|C|L|FB|RT)\d/i.test(item.ref);
+    const candidates = [item.display_name, passive && item.value, item.name, item.mpn,
+      item.model, item.label, item.value, (SAT_KINDS[item.kind] || ROLES[item.role] || {}).label];
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string') continue;
+      let name = candidate.trim();
+      if (name.startsWith(item.ref)) {
+        const suffix = name.slice(item.ref.length);
+        if (/^(?:\s+|[·:：|—–-])/.test(suffix)) name = suffix.replace(/^[\s·:：|—–-]+/, '');
+      }
+      if (name && name !== item.ref) return name.trim();
+    }
+    return '器件';
+  }
+
+  const CHIP_KINDS = { res: 'resistor', cap: 'capacitor', ferrite: 'ferrite', thermistor: 'thermistor' };
+  // Nominal package bodies for older EasyEDA exports (imperial chip codes). The footprint envelope includes land overhang.
+  const CHIP_BODIES = { '0201': [0.6, 0.3], '0402': [1.0, 0.5], '0603': [1.6, 0.8], '0805': [2.0, 1.25],
+    '1206': [3.2, 1.6], '1210': [3.2, 2.5], '2010': [5.0, 2.5], '2512': [6.3, 3.2] };
+
+  /** Board-local mm. Keep land, visible body and terminations separate from the placement envelope. */
+  function passiveGeometry(item) {
+    const spec = item.visualPackage;
+    const shape = item.shape || SAT_KINDS[item.kind]?.shape;
+    const footprint = typeof item.footprint === 'string' ? item.footprint : '';
+    const chip = /^(?:[^:]+:)?([RCL])_?(\d{4})(?:_\d{4}Metric)?$/i.exec(footprint);
+    const family = chip && ({R:'resistor', C:'capacitor'})[chip[1].toUpperCase()];
+    let kind = spec?.kind || CHIP_KINDS[shape] || family;
+    if (!kind) return null;
+    const nativeBody = spec?.body;
+    const pads = Array.isArray(spec?.pads) ? spec.pads.filter(p => p && isNum(p.x) && isNum(p.y) && isPos(p.w) && isPos(p.h)) : [];
+    const centers = pads.length ? pads : (item.physicalPads || []).flatMap(p =>
+      (p.xy || []).filter(q => Array.isArray(q) && isNum(q[0]) && isNum(q[1])).map(([x,y]) => ({x,y})));
+    const special = item.through || item.polarized || /(?:array|network|electroly|tantal|radial|axial|polar|^CP[_-]|排阻|排容|钽|电解)/i.test(footprint);
+    if (!Object.values(CHIP_KINDS).includes(kind) || special || (spec && pads.length !== 2) ||
+        (centers.length && centers.length !== 2) || (item.pins?.length > 2)) kind = 'generic';
+    const horizontal = centers.length === 2
+      ? Math.abs(centers[1].x - centers[0].x) >= Math.abs(centers[1].y - centers[0].y)
+      : (nativeBody?.w || item.w) >= (nativeBody?.h || item.h);
+    let body = {x: 0, y: 0, w: item.w, h: item.h};
+    if (isPos(nativeBody?.w) && isPos(nativeBody?.h)) {
+      body = {x: isNum(nativeBody.x) ? nativeBody.x : 0, y: isNum(nativeBody.y) ? nativeBody.y : 0, w: nativeBody.w, h: nativeBody.h};
+    } else if (!spec && kind !== 'generic' && centers.length === 2) {
+      const size = chip && CHIP_BODIES[chip[2]];
+      if (size) {
+        const [w,h] = horizontal ? size : [size[1], size[0]];
+        if (w <= item.w * 1.05 && h <= item.h * 1.05) {
+          body = {x: (centers[0].x + centers[1].x) / 2, y: (centers[0].y + centers[1].y) / 2, w, h};
+        }
+      }
+    }
+    const width = horizontal ? body.h : body.w;
+    // Imported 2D footprints have an envelope and no measured thickness. A role's default IC height is unsuitable.
+    const visualHeight = kind === 'resistor' ? Math.min(width * 0.48, 0.65) : width * 0.75;
+    const height = isPos(nativeBody?.z) ? nativeBody.z : (!spec && !footprint && item.z) || visualHeight;
+    const terminals = [];
+    if (kind !== 'generic') {
+      const length = horizontal ? body.w : body.h;
+      const end = Math.min(length * 0.21, width * 0.43);
+      const orderedPads = pads.slice().sort((a, b) => horizontal ? a.x - b.x : a.y - b.y);
+      for (const sign of [-1, 1]) {
+        const offset = sign * (length - end) / 2;
+        const index = sign < 0 ? 0 : 1;
+        terminals.push({n: orderedPads[index]?.n ?? index + 1, x: body.x + (horizontal ? offset : 0), y: body.y + (horizontal ? 0 : offset),
+          w: horizontal ? end : body.w, h: horizontal ? body.h : end});
+      }
+    }
+    return {kind, body, pads, terminals, height};
+  }
+
+  function faceRect(item, pl = item.placed) {
+    const pkg = passiveGeometry(item);
+    if (!pkg) return footprint(item, pl);
+    const {body} = pkg, center = toWorld(body.x, body.y, pl);
+    const [w,h] = dims(body.w, body.h, pl.rot || 0);
+    return G.rectFromCenter(center.x, center.y, w, h);
+  }
+
+  /** A mounted BGA exposes the package index on top; its solder balls face the board. */
+  function bgaMark(item) {
+    const footprint = typeof item.footprint === 'string' ? item.footprint.split(':').pop() : '';
+    if (item.shape !== 'bga' && !/^[A-Z]*BGA(?=[\d_\s-]|$)/i.test(footprint)) return null;
+    const a1 = item.physicalPads?.find(p => p.n === 'A1')?.xy?.[0];
+    const corner = /[-_](TL|TR|BL|BR)$/i.exec(footprint)?.[1].toUpperCase();
+    const sx = isNum(a1?.[0]) && a1[0] !== 0 ? Math.sign(a1[0]) : corner?.endsWith('R') ? 1 : -1;
+    const sy = isNum(a1?.[1]) && a1[1] !== 0 ? Math.sign(a1[1]) : corner?.startsWith('B') ? -1 : 1;
+    const r = Math.min(0.28, Math.min(item.w, item.h) * 0.08);
+    return {x: sx * (item.w / 2 - 2.4 * r), y: sy * (item.h / 2 - 2.4 * r), r};
+  }
+
   // ---------- 坐标变换 ----------
   function dims(w, h, rot) { return rot === 90 || rot === 270 ? [h, w] : [w, h]; }
   function footprint(part, pl) {
@@ -1665,6 +1811,21 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
   function partByRef(p, ref) { return p.parts.find((x) => x.ref === ref) || null; }
   function satByRef(p, ref) { return p.satellites.find((x) => x.ref === ref) || null; }
   function itemByRef(p, ref) { return partByRef(p, ref) || satByRef(p, ref); }
+  function isChipPeripheral(item) {
+    return /^(res|cap|ferrite|thermistor)$/.test(item.shape) ||
+      ['resistor', 'capacitor', 'ferrite', 'thermistor'].includes(item.visualPackage?.kind) ||
+      /^[RC](?:\d{4}|_\d{4}_\d{4}Metric)$/i.test((item.footprint || '').split(':').pop());
+  }
+  function placementOwner(item) {
+    if (!item) return null;
+    if (item.placementRole) return item.placementRole === 'satellite' ? item.placementParent?.[0] || null : null;
+    return isChipPeripheral(item) ? item.orbitParent || item.associatedParent || null : null;
+  }
+  function placementChildren(p, ref) { return p.parts.filter(x => placementOwner(x) === ref); }
+  function isTrayPart(item) {
+    if (item.placementRole) return item.placementRole === 'primary' || item.placementRole === 'main';
+    return !item.kind && !isChipPeripheral(item);
+  }
   function placedParts(p) { return p.parts.filter((x) => x.placed); }
   function partTags(pt) {
     const t = new Set([pt.role, 'part']);
@@ -1827,8 +1988,13 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
   function definitionHash(p) {
     const d = clone(p);
     delete d.result;
-    for (const x of d.parts || []) { delete x.placed; delete x.locked; }
-    for (const x of d.satellites || []) { delete x.placed; delete x.pinned; }
+    delete d.orbitFocus;
+    delete d.placementLimits;
+    for (const x of d.parts || []) {
+      delete x.placed; delete x.locked; delete x.orbitParent; delete x.visualPackage;
+      delete x.placementRole; delete x.placementParent; delete x.placementOffset;
+    }
+    for (const x of d.satellites || []) { delete x.placed; delete x.pinned; delete x.visualPackage; }
     if (d.board) { delete d.board.outline; delete d.board.mask; delete d.board.holes; }
     const s = stableStringify(d);
     let h = 5381;
@@ -1932,8 +2098,8 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
 
   LP.model = {
     TOOL_VERSION, ROLES, SAT_KINDS, NET_CLASSES, SIDES, ROTS, SENSOR_ROLES,
-    validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint,
-    partByRef, satByRef, itemByRef, placedParts, partTags, satTags, connectedParts, parseCap,
+    validate, normalize, clone, dims, footprint, toWorld, dirToWorld, pinLocal, pinWorld, worldSide, satFootprint, faceName, faceRect, passiveGeometry, bgaMark,
+    partByRef, satByRef, itemByRef, placementOwner, placementChildren, isTrayPart, placedParts, partTags, satTags, connectedParts, parseCap,
     snapshot, restore, definitionHash, exportLayout, resultObject, exportCSV, r2, remapBoardFeatures, partsArea, BOARD_SHAPES, outlineFromShape, shapeOf, toEditablePolygon, exportDXF,
     HOLE_SIZES, HOLE_EDGE, holeFits, cornerHoles, suggestHole,
   };
@@ -2779,6 +2945,19 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     'VF-13': { name: '表面温度', sev: 'P0', check: 'THM-01' },
     'VF-14': { name: '地铜孤岛', sev: 'P2', check: 'PI-08' },
     'VF-15': { name: '绕线过长', sev: 'P3', max_ratio: 1.3, slack_mm: 2, check: 'RT-05' },
+    // 布线几何与质量（scripts/route_lint.py 计算，结果在铜皮数据包 checks.routing；规则见 references/16-routing-constraints.md）
+    'VF-16': { name: '任意角度走线', sev: 'P1', weight: 15, check: 'RTG-01' },
+    'VF-17': { name: '锐角', sev: 'P1', weight: 10, check: 'RTG-02' },
+    'VF-18': { name: '短段、抖动与出线', sev: 'P2', weight: 8, check: 'RTG-05' },
+    'VF-19': { name: '多余拐弯', sev: 'P3', weight: 8, check: 'RTG-06' },
+    'VF-20': { name: '过孔预算', sev: 'P2', weight: 10, check: 'RTV-01' },
+    'VF-21': { name: '地平面完整性', sev: 'P1', weight: 12, check: 'RTY-05' },
+    'VF-22': { name: '绕行率', sev: 'P2', weight: 8, check: 'RTL-01' },
+    'VF-23': { name: '成束整齐度', sev: 'P3', weight: 7, check: 'RTS-03' },
+    'VF-24': { name: '层方向与层使用', sev: 'P2', weight: 6, check: 'RTY-02' },
+    'VF-25': { name: '走线密度', sev: 'P3', weight: 6, check: 'RTS-05' },
+    'VF-26': { name: '网络类约束', sev: 'P1', weight: 10, check: 'RTW-01' },
+    'VF-27': { name: '布线质量总分', sev: 'P3', min_score: 75, check: 'RT-08' },
   };
   function rule(v, id) { return { ...RULES[id], ...((v && v.rules && v.rules[id]) || {}) }; }
   /**
@@ -3708,6 +3887,45 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     }
     for (const q of ck.islands || []) out.push(F.finding(v, 'VF-14', { value: q.area, where: { x: q.x, y: q.y },
       title: `L${q.layer + 1} 有一块 ${q.area} mm² 的地铜没有连到主地`, advice: '打过孔连到地平面，或删除这块铜', assume: '按地网络的连通性' }));
+    return out.concat(routingFindings(v, ck.routing));
+  }
+
+  const RT_ADVICE = {
+    'RTG-01': '改成 0/45/90° 折线：python scripts/route_fix.py 板子.kicad_pcb 可自动重建',
+    'RTG-02': '锐角会积酸、蚀刻过度，信号上也是阻抗突变：改成两个 45° 拐弯', 'RTG-03': '分支改成 90° T 接或两个 45°',
+    'RTG-05': '合并到相邻线段，或整段按八方向重走', 'RTG-06': '拉直：去掉小于 2 倍线宽的错位和来回拐弯',
+    'RTG-07': '先沿焊盘长轴直出到焊盘外，再拐弯', 'RTG-09': '线宽只在焊盘颈缩或分支处变化',
+    'RTG-10': '圆弧只用在射频、柔性弯折区或高压区，并在约束里声明豁免区', 'RTG-12': '删除悬空线头',
+    'RTV-01': '少打过孔：晶振、射频、时钟线同层直连', 'RTV-02': '换层过孔 2 mm 内打一个地过孔给回流',
+    'RTV-05': '过孔移出焊盘；必须盘中孔时向板厂要求树脂塞孔电镀盖帽', 'RTV-07': '差分线过孔成对、对称放置',
+    'RTL-03': '晶振靠近芯片放置，走线 ≤ 5 mm', 'RTL-06': '射频线不分叉；匹配元件串在线上', 'RTL-07': '在长的一根上加蛇形补偿到 ≤ 0.5 mm',
+    'RTL-11': '2 层板底层留给地：信号跳线 ≤ 10 mm，换层两端就近打地孔', 'RTY-02': '按层主方向走线，逆向走线换到另一层',
+    'RTY-04': '内层地平面上不走线', 'RTY-05': '底层地被走线切碎：缩短或挪走底层跳线，补地孔缝合', 'RTS-03': '成束的线保持等间距平行',
+    'RTW-01': '加宽到网络类要求的线宽', 'RTW-09': '线宽低于板厂下限，必须加宽',
+  };
+  /** 布线几何检查结果 → 结论。同一规则、网络、层的多处合并成一条，标第一处的位置。 */
+  function routingFindings(v, rt) {
+    if (!rt) return [];
+    const out = [], groups = new Map();
+    for (const x of rt.violations || []) {
+      if (x.rule === 'RTL-01' || x.rule === 'RTL-02') continue;     // 绕行已由 VF-15 报告
+      const id = x.metric && F.RULES[x.metric] ? x.metric : 'VF-26';
+      const k = `${x.rule}|${x.net || ''}|${x.layer ?? ''}`;
+      if (!groups.has(k)) groups.set(k, { id, x, n: 0 });
+      groups.get(k).n++;
+    }
+    for (const { id, x, n } of groups.values()) {
+      out.push(F.finding(v, id, { obj: x.net || null, value: x.value ?? n, sev: x.sev, where: x.at ? { x: x.at[0], y: x.at[1] } : null,
+        title: `${x.rule}${x.layer != null ? ' L' + (x.layer + 1) : ''}${x.net ? ' ' + x.net : ''}：${x.msg}${n > 1 ? `（共 ${n} 处）` : ''}`,
+        advice: RT_ADVICE[x.rule] || '', assume: '规则与阈值见 references/16-routing-constraints.md' }));
+    }
+    const r27 = F.rule(v, 'VF-27');
+    if (rt.score != null && rt.score < r27.min_score) {
+      const worst = Object.entries(rt.metrics || {}).filter(([, e]) => e.deduct > 0).sort((a, b) => b[1].deduct - a[1].deduct).slice(0, 3);
+      out.push(F.finding(v, 'VF-27', { value: rt.score, sev: rt.score < 60 ? 'P2' : 'P3',
+        title: `布线质量 ${rt.score} / 100（${rt.grade}）`, advice: '主要扣分：' + worst.map(([k, e]) => `${k} ${F.RULES[k] ? F.RULES[k].name : ''} −${e.deduct}`).join('，'),
+        assume: '11 项加权扣分，任一 P0 即不通过' }));
+    }
     return out;
   }
 
@@ -3809,7 +4027,7 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
       const o = { ...opts };
       if (st.stage === 'R') o.netGeom = LP.copper.netGeom(st);
       const r = LP.emi.analyze(st, o);
-      if (st.stage === 'R') r.findings = r.findings.concat(LP.copper.emiChecks(st));
+      if (st.stage === 'R') r.findings = F.sortFindings(r.findings.concat(LP.copper.emiChecks(st)));
       r.findings = F.forStage(r.findings, st.stage);
       return r;
     });
@@ -4092,6 +4310,60 @@ const t="170",e={LEFT:0,MIDDLE:1,RIGHT:2,ROTATE:0,DOLLY:1,PAN:2},n={ROTATE:0,PAN
     outlinePolygon, outlineBBox, outlineArea, pointInPolygon, pointInBoard, distToBoardEdge,
     rectInBoard, rectEdgeDistance, faceOutside,
   };
+
+  // Optional mechanical and circuit clearances from the layout being edited, in board mm.
+  const compiledLimits = new WeakMap();
+  function limitsFor(spec) {
+    if (compiledLimits.has(spec)) return compiledLimits.get(spec);
+    const regions = (spec.regions || []).map(region => {
+      const [x0, y0, x1, y1] = region.box;
+      return { ...region, rect: {x0, y0, x1, y1}, except: new Set(region.except) };
+    });
+    const separation = new Map();
+    function add(refs, against, rule) {
+      const entry = { against: new Set(against), gap: rule.gap, name: rule.name };
+      for (const ref of refs) {
+        if (!separation.has(ref)) separation.set(ref, []);
+        separation.get(ref).push(entry);
+      }
+    }
+    for (const rule of spec.separation || []) {
+      add(rule.a, rule.b, rule);
+      add(rule.b, rule.a, rule);
+    }
+    const limits = {regions, separation, edgeExempt:new Set(spec.edgeExempt)};
+    compiledLimits.set(spec, limits);
+    return limits;
+  }
+  function placementViolation(project, item, pose, box, occupied) {
+    const spec = project.placementLimits;
+    if (!spec) return null;
+    const {regions, separation, edgeExempt} = limitsFor(spec);
+    if (spec.edgeMm > 0 && !edgeExempt.has(item.ref) && !rectInBoard(project.board.outline, expand(box, spec.edgeMm))) {
+      return {reason:'outside', with:'板边退让'};
+    }
+    for (const region of regions) {
+      if (!item.through && region.side && region.side !== 'both' && region.side !== pose.side) continue;
+      if (!region.except.has(item.ref) && overlaps(box, region.rect, region.gap)) {
+        return {reason:'keepout', with:region.name || '禁布区'};
+      }
+    }
+    const rules = separation.get(item.ref) || [];
+    for (const other of occupied) {
+      if (other.item.ref === item.ref) continue;
+      const sameSide = item.through || other.item.through || other.side === 'both' || other.side === pose.side;
+      if (spec.gapMm > 0 && sameSide && overlaps(box, other.rect, spec.gapMm)) {
+        return {reason:'overlap', with:other.item.ref};
+      }
+      for (const rule of rules) {
+        if (rule.against.has(other.item.ref) && rectDist(box,other.rect) + EPS < rule.gap) {
+          return {reason:'keepout', with:(rule.name || '器件间距') + ' · ' + other.item.ref};
+        }
+      }
+    }
+    return null;
+  }
+  LP.placementLimits = {violation:placementViolation};
 })(globalThis.LP = globalThis.LP || {});
 
 </script>

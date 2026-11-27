@@ -85,3 +85,16 @@ test('热分析使用真实铜覆盖率', () => {
   let loss = 0; for (const q of t.parts) loss += q.p;
   assert.ok(Math.abs(loss - P) < 1e-6);
 });
+
+test('布线几何（VF-16…27）：坏板的任意角度电源线能报出来，好板没有任意角度和锐角', () => {
+  const sg = LP.analysis.init(proj, good); const eg = LP.analysis.emi({});
+  assert.ok(good.checks.routing && typeof good.checks.routing.score === 'number');
+  for (const id of ['VF-16', 'VF-17']) assert.ok(!rules(eg.findings).has(id), id);
+  const sb = LP.analysis.init(proj, bad); const eb = LP.analysis.emi({});
+  const f16 = eb.findings.filter((f) => f.rule === 'VF-16');
+  assert.ok(f16.length >= 1);
+  assert.ok(f16.some((f) => f.obj === 'VDD' && f.where && /共 \d+ 处|任意角度/.test(f.title)));
+  assert.ok(bad.checks.routing.score < good.checks.routing.score);
+  assert.ok(eb.findings.some((f) => f.rule === 'VF-27'));       // 坏板总分低于 75，给出总分结论
+  void sg; void sb;
+});

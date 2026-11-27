@@ -36,7 +36,7 @@ class Board:
         self.layers = []            # 铜层名称，按叠层顺序（顶层在前）
         self.outline = []           # [(x, y)]，源坐标
         self.nets = {}              # 名称 → 序号（从 1 开始）
-        self.segs = []              # (layer, x1, y1, x2, y2, w, net)
+        self.segs = []              # (layer, x1, y1, x2, y2, w, net[, 是否圆弧])
         self.pads = []              # dict(ref, pin, layer(-1 全层), x, y, shape, w, h, rot, net)
         self.vias = []              # (x, y, d, net)
         self.zones = []             # (layer, net, [(x, y)])
@@ -184,13 +184,13 @@ def parse_kicad(path):
     for s in find(root, "segment"):
         st, en, w, L = first(s, "start"), first(s, "end"), first(s, "width"), first(s, "layer")
         if L and L[1] in li:
-            b.segs.append((li[L[1]], num(st[1]), num(st[2]), num(en[1]), num(en[2]), num(w[1]), netof(s)))
+            b.segs.append((li[L[1]], num(st[1]), num(st[2]), num(en[1]), num(en[2]), num(w[1]), netof(s), False))
     for a in find(root, "arc"):
         st, md, en, w, L = first(a, "start"), first(a, "mid"), first(a, "end"), first(a, "width"), first(a, "layer")
         if L and L[1] in li and md:
             pts = arc3((num(st[1]), num(st[2])), (num(md[1]), num(md[2])), (num(en[1]), num(en[2])))
             for p, q in zip(pts, pts[1:]):
-                b.segs.append((li[L[1]], p[0], p[1], q[0], q[1], num(w[1]), netof(a)))
+                b.segs.append((li[L[1]], p[0], p[1], q[0], q[1], num(w[1]), netof(a), True))     # 末位 True：圆弧折线
     for v in find(root, "via"):
         at, size = first(v, "at"), first(v, "size")
         b.vias.append((num(at[1]), num(at[2]), num(size[1]), netof(v)))
@@ -454,7 +454,7 @@ class Raster:
         dr.polygon([self.px(x, y) for x, y in pts], fill=val)
 
 
-def build_pack(b, project=None, res=0.05, cells=200):
+def build_pack(b, project=None, res=0.05, cells=200, routing=True):
     if not b.outline:
         raise SystemExit("找不到板框（KiCad 的 Edge.Cuts 层，或 --outline 文件）")
     xs, ys = [p[0] for p in b.outline], [p[1] for p in b.outline]
@@ -556,17 +556,21 @@ def build_pack(b, project=None, res=0.05, cells=200):
     seg_by_net, via_by_net, pad_by_net = {}, {}, {}
     for s in b.segs:
         xa, ya = T(s[1], s[2]); xb, yb = T(s[3], s[4])
-        seg_by_net.setdefault(s[6], []).append([s[0], round(xa, 3), round(ya, 3), round(xb, 3), round(yb, 3), round(s[5], 3)])
+        seg_by_net.setdefault(s[6], []).append([s[0], round(xa, 3), round(ya, 3), round(xb, 3), round(yb, 3), round(s[5], 3)] + ([1] if len(s) > 7 and s[7] else []))
     for vx, vy, vd, net in b.vias:
         x, y = T(vx, vy)
         via_by_net.setdefault(net, []).append([round(x, 3), round(y, 3), round(vd, 3)])
     for pd in b.pads:
         x, y = T(pd["x"], pd["y"])
-        pad_by_net.setdefault(pd["net"], []).append([pd["ref"], pd["pin"], pd["layer"], round(x, 3), round(y, 3)])
+        # 末尾的尺寸、方向（数据包坐标 y 向上，局部 x 轴的方向角，度）和形状供布线检查用；验证器只读前五项
+        pad_by_net.setdefault(pd["net"], []).append([pd["ref"], pd["pin"], pd["layer"], round(x, 3), round(y, 3),
+                                                     round(pd["w"], 3), round(pd["h"], 3), round(pd.get("rot", 0) or 0, 2), pd.get("shape", "rect")])
 
     for name, nid in sorted(b.nets.items(), key=lambda t: t[1]):
         segs = seg_by_net.get(name, [])
         o = {"name": name, "class": classes[name], "group": groups[name], "segs": segs, "vias": via_by_net.get(name, []), "pads": pad_by_net.get(name, [])}
+        if any(z[1] == name for z in b.zones):
+            o["zone"] = True
         if segs:
             w = min(s[5] for s in segs)
             s0 = min(segs, key=lambda s: s[5])
@@ -607,7 +611,7 @@ def build_pack(b, project=None, res=0.05, cells=200):
     # ---------- 离线检查 ----------
     gnd_ids = [nid for n, nid in b.nets.items() if classes[n] == "ground"]
     gnd_vias = [(x, y) for n in b.nets if classes[n] == "ground" for x, y, _ in via_by_net.get(n, [])]
-    checks = {"rf": [], "coupling": [], "islands": [], "detours": []}
+    checks = {"rf": [], "coupling": [], "islands": [], "detours": [], "planes": []}
 
     def at(l, x, y):
         px, py = R.px(x, y)
@@ -697,19 +701,41 @@ def build_pack(b, project=None, res=0.05, cells=200):
                     y_ = H - cm[0] * res
                     checks["islands"].append({"layer": key[0], "x": round(cm[1] * res, 2), "y": round(y_, 2), "area": round(area, 1)})
 
+    # 各层地铜覆盖率与破碎度（布线检查 VF-21 用）：破碎度 = 1 − 最大连通块面积 / 该层地铜面积
+    if gnd_ids:
+        board_area = max(poly_area(outline), 1e-6)
+        for l in range(nL):
+            m = np.isin(labels[l], gnd_ids)
+            area = float(m.sum()) * res * res
+            if area <= 0:
+                continue
+            c, n = ndimage.label(m, structure=np.ones((3, 3)))
+            sizes = ndimage.sum(m, c, index=range(1, n + 1)) if n else [0]
+            big = [s_ for s_ in sizes if s_ * res * res >= 1.0]
+            checks["planes"].append({"layer": l, "gnd_frac": round(min(1.0, area / board_area), 3),
+                                     "frag": round(1 - float(max(sizes)) * res * res / area, 3), "pieces": len(big)})
+
     zone_nets = {z[1] for z in b.zones}
     if b.source != "kicad":                                 # Gerber：用覆盖率判断哪些网络有大块铜皮
         zone_nets = {n["name"] for n in nets_out if n.get("cov") and classes[n["name"]] in ("ground", "power")}
     checks["detours"] = detour_checks({n: (seg_by_net.get(n, []), pad_by_net.get(n, [])) for n in b.nets},
                                       skip=zone_nets | {n for n in b.nets if classes[n] == "ground"})
 
-    return {
+    pack = {
         "kind": "copper-pack", "version": VERSION, "source": b.source, "units": "mm", "res": res,
+        "frame": {"x0": round(x0, 4), "y0": round(y0, 4), "y1": round(y1, 4), "ydown": bool(b.ydown)},
         "board": {"w": round(W, 3), "h": round(H, 3), "outline": [[round(x, 3), round(y, 3)] for x, y in outline]},
         "layers": b.layers,
         "grid": {"cell": cell, "nx": gnx, "ny": gny, "x0": 0, "y0": 0},
         "nets": nets_out, "cov": cov, "parts": parts, "checks": checks,
     }
+    if routing:                                             # 布线几何检查与评分（route_lint.py），结果放进 checks.routing 给验证器显示
+        import route_lint
+        rep = route_lint.analyze(pack)
+        checks["routing"] = {"score": rep["score"], "grade": rep["grade"], "pass": rep["pass"],
+                             "metrics": {k: {"value": e["value"], "level": e["level"], "deduct": e["deduct"], "weight": e["weight"]} for k, e in rep["metrics"].items()},
+                             "violations": rep["violations"][:300], "total": len(rep["violations"])}
+    return pack
 
 
 def mst_length(pts):

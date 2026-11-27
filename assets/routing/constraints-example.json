@@ -1,0 +1,260 @@
+{
+ "_comment": "由 route_lint.py constraints 从 tests/fixtures/route-good.kicad_pcb 生成后手工补了一条成束、一个豁免区、一个禁布区和一条锁定，供参考。坐标单位 mm，与 KiCad 坐标一致（y 向下）。",
+ "schema": "lpiot-routing/1.0",
+ "board": {
+  "layers": 2,
+  "copper_oz": 1,
+  "fab": "JLC-standard",
+  "units": "mm",
+  "fab_min_track": 0.127
+ },
+ "layers": [
+  {
+   "name": "F.Cu",
+   "role": "signal",
+   "preferred_dir": null
+  },
+  {
+   "name": "B.Cu",
+   "role": "gnd_plane",
+   "routing": "jumpers_only",
+   "max_jumper_mm": 10
+  }
+ ],
+ "geometry": {
+  "angles_deg": [
+   0,
+   45,
+   90,
+   135
+  ],
+  "angle_tol_um": 1,
+  "min_seg": {
+   "k_w": 1.0,
+   "abs_mm": 0.15
+  },
+  "fanout_k_w": 0.5,
+  "jog_k_w": 2.0,
+  "jitter_window_k_w": 5.0,
+  "forbid_acute": true,
+  "chamfer_min": {
+   "k_w": 2.0,
+   "abs_mm": 0.2
+  },
+  "forbid_acute_tee": true
+ },
+ "netclasses": {
+  "SIG": {
+   "width": 0.2,
+   "min_width": 0.127,
+   "via_budget": 2,
+   "tau_max": 1.3
+  },
+  "CLK": {
+   "width": 0.2,
+   "min_width": 0.127,
+   "via_budget": 1,
+   "tau_max": 1.15,
+   "critical": true
+  },
+  "ANALOG": {
+   "width": 0.2,
+   "min_width": 0.15,
+   "via_budget": 2,
+   "tau_max": 1.15,
+   "critical": true
+  },
+  "XTAL": {
+   "width": 0.2,
+   "min_width": 0.127,
+   "via_budget": 0,
+   "tau_max": 1.15,
+   "max_len_mm": 5.0,
+   "critical": true
+  },
+  "RF50": {
+   "width": null,
+   "min_width": 0.15,
+   "via_budget": 0,
+   "tau_max": 1.15,
+   "critical": true,
+   "allow_arc": true,
+   "no_branch": true
+  },
+  "USB90": {
+   "width": 0.2,
+   "min_width": 0.127,
+   "via_budget": 2,
+   "tau_max": 1.15,
+   "critical": true,
+   "skew_mm": 0.5,
+   "skew_max_mm": 1.25
+  },
+  "PWR_LOW": {
+   "width": 0.3,
+   "min_width": 0.25,
+   "via_budget": null,
+   "tau_max": null
+  },
+  "PWR_MAIN": {
+   "width": 0.6,
+   "min_width": 0.5,
+   "via_budget": null,
+   "tau_max": null
+  },
+  "SW": {
+   "width": null,
+   "min_width": 0.3,
+   "via_budget": null,
+   "tau_max": null
+  },
+  "HV": {
+   "width": 0.3,
+   "min_width": 0.3,
+   "via_budget": 2,
+   "tau_max": 1.3
+  },
+  "GND": {
+   "width": null,
+   "min_width": null,
+   "via_budget": null,
+   "tau_max": null
+  }
+ },
+ "nets": {
+  "GND": {
+   "class": "GND",
+   "confidence": 0.95
+  },
+  "VDD": {
+   "class": "PWR_LOW",
+   "confidence": 0.85
+  },
+  "SDA": {
+   "class": "SIG",
+   "confidence": 0.85
+  },
+  "SCL": {
+   "class": "SIG",
+   "confidence": 0.85
+  },
+  "LED": {
+   "class": "SIG",
+   "confidence": 0.6
+  },
+  "XIN": {
+   "class": "XTAL",
+   "confidence": 0.85
+  },
+  "XOUT": {
+   "class": "XTAL",
+   "confidence": 0.85
+  },
+  "MISO": {
+   "class": "SIG",
+   "confidence": 0.85
+  },
+  "BTN": {
+   "class": "SIG",
+   "confidence": 0.6
+  }
+ },
+ "confirm": [
+  "LED",
+  "BTN"
+ ],
+ "priority": [
+  "RF50",
+  "XTAL",
+  "SW",
+  "PWR_MAIN",
+  "USB90",
+  "CLK",
+  "ANALOG",
+  "HV",
+  "PWR_LOW",
+  "SIG",
+  "GND"
+ ],
+ "budgets": {
+  "vias_per_net": {
+   "SIG": 2,
+   "XTAL": 0
+  },
+  "bottom_jumper_total_ratio": 0.1
+ },
+ "keepouts": [
+  {
+   "id": "MOUNT1",
+   "poly": [
+    [
+     1,
+     1
+    ],
+    [
+     4,
+     1
+    ],
+    [
+     4,
+     4
+    ],
+    [
+     1,
+     4
+    ]
+   ],
+   "layers": [
+    "F.Cu",
+    "B.Cu"
+   ],
+   "reason": "安装孔"
+  }
+ ],
+ "exempt_zones": [
+  {
+   "id": "ANT",
+   "poly": [
+    [
+     30,
+     1
+    ],
+    [
+     39,
+     1
+    ],
+    [
+     39,
+     5
+    ],
+    [
+     30,
+     5
+    ]
+   ],
+   "rules": [
+    "RTG-01",
+    "RTG-10"
+   ],
+   "reason": "天线馈线允许圆弧与 135° 以外的角度"
+  }
+ ],
+ "channels": [],
+ "bundles": [
+  {
+   "id": "I2C",
+   "nets": [
+    "SDA",
+    "SCL"
+   ],
+   "pitch_mm": 4.0
+  }
+ ],
+ "escape": [],
+ "locks": [
+  {
+   "net": "XIN",
+   "reason": "晶振走线已人工确认，修复器不动"
+  }
+ ]
+}
