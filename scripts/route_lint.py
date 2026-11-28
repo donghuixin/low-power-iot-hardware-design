@@ -785,8 +785,8 @@ def analyze(pack, cons=None):
     ex = statistics.mean(stats["excess"]) if stats["excess"] else None
     put("VF-19", round(ex, 2) if ex is not None else None, ramp(ex, 0.5, 2.0) if ex is not None else 0,
         "每段连接的多余转角（45° 记 0.5、90° 记 1，扣除连接本身必需的转角）的平均值")
-    n20 = over_budget + cnt({"RTV-05"})
-    put("VF-20", n20, 0 if n20 == 0 else (0.5 if n20 <= 2 else 1.0), "超预算的网络 + 盘中孔")
+    n20 = over_budget + cnt({"RTV-05", "RTV-08"})
+    put("VF-20", n20, 0 if n20 == 0 else (0.5 if n20 <= 2 else 1.0), "超预算的网络 + 盘中孔 + 裸露焊盘过孔不足")
     if gnd_layers:
         F = max(p.get("frag", 0) for p in gnd_layers)
         put("VF-21", round(F, 3), 1.0 if cnt({"RTY-04"}) else ramp(F, 0.05, 0.15), "最大破碎度 = 1 − 最大连通地铜 / 该层地铜")

@@ -204,6 +204,8 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 
 **走线几何与布线约束**（Claude 落线时必须遵守）：按 `references/16-routing-constraints.md`。只许 0/45/90/135° 线段，不许锐角、锐角 T 分支、Z 形抖动和斜着出焊盘；各网络类的线宽、线长、过孔预算、层使用见该文件第 4 节。布线前用 `route_lint.py constraints` 生成约束文件，确认推导出的网络类。**线段坐标必须按八方向构造，不能把两端焊盘直接连成一条线**；每批线段写入 EDA 前写成 `plan.json` 跑 `route_lint.py gate`，不通过先 `route_fix.py`。布完用 `route_lint.py lint` 评分，有 P0 或得分低于 75 不交付。
 
+**布线的工作方法与指导思想**（`references/18-routing-philosophy.md`，必须遵守）：按功能块推进，每块走一遍“读懂电路（先找大电流环路、高 dv/dt 与 di/dt 节点、敏感节点、回流路径）→ 查证（datasheet 的 Layout 章节、参考设计、应用笔记；联网检索、下载手册或读取用户文件前先征得用户同意）→ 定约束和走法（说不出为什么这样走的线先别画）→ 布这一块 → 立即检查”的循环，块与块按优先级排序，冲突时回到布局。指导思想综合 ADI AN-1142 与 TI ZHCAAE6B：电流走环路、单一完整地加分区布局（不盲目分割 AGND/DGND）、去耦电容选对放近且与芯片同层不隔过孔、敏感层不挨噪声层、裸露焊盘打过孔阵列、开尔文连接；走线只用 0/45/90/135°、**优先 45° 拐弯，绝不出现随机角度的折线**。
+
 **走线原则**（`references/17-routing-principles.md`）：关键信号优先，按档位布线——射频 → 晶振 → 开关回路与高压 → 高速差分 → 时钟 → 模拟 → 电源 → 一般信号 → 地，`route_lint.py order` 给出逐网顺序，前几档布好后锁定；就近原则（去耦电容贴电源引脚、负载电容贴晶振、ESD 贴接口并串在线上、串阻贴驱动端、地焊盘旁打地过孔）；差分线两根一起布，同层、并行、等距、等长、过孔成对、中间不穿线；攻击网络不与模拟、晶振、射频长距离并行。`lint` 报告里的 RTP / RTD / RTO / RTS-06 就是这些原则的检查结果，属于布局和拓扑问题，`route_fix.py` 不会自动改。
 
 收尾时用 `references/checklists.md` 的 layout 清单扫一遍（含"布线过程"一段）；用了验证器时加"布局布线验证"一段。
@@ -250,6 +252,7 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 | `references/15-design-rules-and-process.md` | 写设计规则的八条做法、嘉立创工艺与价格档位、导入用户的板厂工艺、用 `fab_rules.py` 对照设计并生成规则 |
 | `references/16-routing-constraints.md` | 落线前、落线时和评审走线时：八方向几何、线宽 / 线长 / 过孔 / 间距 / 层约束、质量评分、检查器与修复器、写入闸门、给 AI 的布线规程 |
 | `references/17-routing-principles.md` | 定布线顺序和评审走线时：布线优先级（关键信号优先）、就近原则、差分线原则、隔离原则及对应检查器 |
+| `references/18-routing-philosophy.md` | 开始 Layout 前和每个功能块布线时：边读懂、边查证、边思考、边设计的工作方法，来自 ADI AN-1142 与 TI ZHCAAE6B 的布线指导思想 |
 | `references/20-hv-pulser-tr-safety.md` | 扩展模块：电压 >50 V；高压脉冲、T/R 与接收保护、高压电源与档位、储能、联锁、PCB 间距 |
 | `references/21-ultrasound-afe-clock.md` | 扩展模块：ADC ≥10 MSPS；超声 AFE 噪声、TGC、抗混叠、IQ 解调、时钟抖动与多普勒同源时钟 |
 | `references/22-low-noise-power-thermal.md` | 扩展模块：持续功耗 >1 W 或有高速 ADC；持续功耗模型、1S 电源路径、纹波推导、开关同步、手持热设计 |

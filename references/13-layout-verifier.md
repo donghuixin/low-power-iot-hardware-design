@@ -151,7 +151,7 @@ python scripts/extract_copper.py --gerber top.gtl in1.g2 in2.g3 bottom.gbl --out
 | VF-17 | 锐角 | RTG-02、RTG-03 | RTG-02 |
 | VF-18 | 短段、抖动与出线 | RTG-05、06、07、09、12 | RTG-05、RTG-07 |
 | VF-19 | 多余拐弯 | 只计分 | — |
-| VF-20 | 过孔预算 | RTV-01、RTV-05 | RTV |
+| VF-20 | 过孔预算 | RTV-01、RTV-05、RTV-08 | RTV |
 | VF-21 | 地平面完整性 | RTY-04、RTY-05 | RTY |
 | VF-22 | 绕行率 | 只计分（结论见 VF-15） | RT-05 |
 | VF-23 | 成束整齐度 | RTS-03 | — |
@@ -160,7 +160,7 @@ python scripts/extract_copper.py --gerber top.gtl in1.g2 in2.g3 bottom.gbl --out
 | VF-26 | 网络类约束 | RTW、RTL-03/06/07、RTV-02/07 | RTW、RTL |
 | VF-27 | 布线质量总分 | 总分 < `min_score`（75）时给出，< 60 为 P2，列出扣分最多的三项 | RT-08 |
 | VF-28 | 差分对 | RTD-01…07（同层、耦合、线距、等长、过孔成对、对内穿线、对外间距） | RTD |
-| VF-29 | 就近 | RTP-01…07（去耦电容、地过孔、负载电容、ESD、串阻） | RTP |
+| VF-29 | 就近 | RTP-01…08（去耦电容、电容与芯片间过孔、地过孔、负载电容、ESD、串阻） | RTP |
 | VF-30 | 优先级与隔离 | RTO-01 优先级倒挂、RTS-06 攻击与敏感网络并行 | RTO |
 
 VF-28…30 的规则见 `17-routing-principles.md`。

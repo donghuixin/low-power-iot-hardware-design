@@ -101,6 +101,11 @@ class NetPaths:
 
     def path(self, i, j):
         """焊盘 i → 焊盘 j 的最短走线路径：(长度, 折线点)；不连通返回 (None, None)。"""
+        L, keys = self.path_keys(i, j)
+        return (None, None) if keys is None else (L, [self.pos[k] for k in keys])
+
+    def path_keys(self, i, j):
+        """同 path，但返回节点序列（含 ("v", 序号) 过孔节点）。"""
         src, dst = ("p", i), ("p", j)
         if src not in self.adj or dst not in self.adj:
             return None, None
@@ -118,13 +123,13 @@ class NetPaths:
                     heapq.heappush(pq, (nd, v))
         if dst not in dist:
             return None, None
-        pts, u = [], dst
+        keys, u = [], dst
         while True:
-            pts.append(self.pos[u])
+            keys.append(u)
             if u == src:
                 break
             u = prev[u]
-        return dist[dst], pts[::-1]
+        return dist[dst], keys[::-1]
 
 
 def dist_along(pts, x, y):
@@ -179,6 +184,15 @@ def check_proximity(ctx, nets, classes, values, nL, has_plane):
                 L, how = route_len(pn, pi, j)
                 cap = parse_value(values.get(ref))
                 bulk = cap is not None and cap > 1.01e-6
+                # RTP-08（TI ZHCAAE6B）：电容与芯片同层，之间不经过过孔；过孔打在电容焊盘上再去电源平面
+                if not bulk:
+                    if pp["l"] != -1 and q["l"] != -1 and pp["l"] != q["l"]:
+                        ctx.add("RTP-08", "P2", pn, pp["l"], (pp["x"], pp["y"]), f"去耦电容 {ref} 与 {q['ref']} 不在同一层：电流要经过过孔，回路电感变大", metric="VF-29")
+                    elif not by[pn].get("zone"):
+                        _, keys = P(pn).path_keys(pi, j)
+                        nv = sum(1 for k in (keys or [])[1:-1] if k[0] == "v")
+                        if nv:
+                            ctx.add("RTP-08", "P2", pn, pp["l"], (pp["x"], pp["y"]), f"去耦电容 {ref} 到 {q['ref']}.{q['pin']} 之间经过 {nv} 个过孔（电容与芯片之间不打过孔，过孔打在电容焊盘外侧）", nv, metric="VF-29")
                 if bulk:
                     if L > 10.0:
                         ctx.add("RTP-02", "P3", pn, pp["l"], (pp["x"], pp["y"]), f"储能电容 {ref}（{values.get(ref)}）到 {q['ref']}.{q['pin']} {how}距离 {L:.1f} mm（建议 ≤ 10 mm）", round(L, 2), metric="VF-29")
@@ -513,7 +527,29 @@ def routing_order(nets, classes):
     return [{"tier": t, "tier_name": TIER_NAME[t], "net": nm, "class": c, "pads": k, "len": round(L, 1), "why": why[t]} for t, _, L, nm, c, k in rows]
 
 
+def check_ground(ctx, nets, classes, nL):
+    """裸露焊盘过孔（RTV-08，ADI AN-1142 / TI ZHCAAE6B）与多个地网络（RTY-06）。"""
+    gnds = [n for n in nets if classes[n["name"]] == "GND"]
+    for n in gnds:
+        for p in n["pads"]:
+            if p["l"] == -1 or not p.get("w") or not is_ic(p["ref"]):
+                continue
+            area = p["w"] * p["h"]
+            if area < 4.0:
+                continue
+            need = max(4, round(area / 1.5))
+            got = sum(1 for g in gnds for v in g["vias"] if RL.pt_in_pad(v[0], v[1], p, 0))
+            if got < need and nL >= 2:
+                ctx.add("RTV-08", "P2" if got else "P1", n["name"], p["l"], (p["x"], p["y"]),
+                        f"{p['ref']} 的裸露焊盘（{p['w']:.1f} × {p['h']:.1f} mm）只有 {got} 个地过孔，建议 ≥ {need}（约每 1.5 mm² 一个，阵列排布、塞孔）：它是芯片所有地的汇集点和主散热路径", got, metric="VF-20")
+    names = sorted(n["name"] for n in gnds if n["segs"] or n["vias"] or n.get("zone") or len(n["pads"]) > 1)
+    if len(names) > 1:
+        ctx.add("RTY-06", "P3", "、".join(names[:4]), None, None,
+                f"板上有 {len(names)} 个地网络（{'、'.join(names[:4])}）：确认没有把地平面切开，只在转换器下方或功率星点一处相连；一般单一完整地加分区布局更好", len(names))
+
+
 def analyze(ctx, nets, classes, values, nL, has_plane, routed_len):
+    check_ground(ctx, nets, classes, nL)
     check_proximity(ctx, nets, classes, values, nL, has_plane)
     pairs = check_diff_pairs(ctx, nets, classes, routed_len)
     check_isolation(ctx, nets, classes)

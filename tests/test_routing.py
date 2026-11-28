@@ -226,6 +226,16 @@ class Principles(unittest.TestCase):
         self.assertIn("CS", got["RTD-06"]["msg"])
         self.assertIn("LVDS", got["RTD-03"]["net"])
 
+    def test_ground_and_decap_vias(self):
+        r = self.by_rule(self.bad, "RTP-08")
+        self.assertTrue(r and "C2" in r[0]["msg"] and r[0]["value"] == 2)
+        e = self.by_rule(self.bad, "RTV-08")
+        self.assertTrue(e and e[0]["value"] == 1)
+        self.assertFalse(self.by_rule(self.good, "RTV-08"))
+        nets = [{"name": n, "segs": [[0, 0, 0, 1, 0, 0.2, False]], "vias": [], "pads": []} for n in ("AGND", "DGND", "SDA")]
+        rep = R.analyze({"layers": ["F.Cu", "B.Cu"], "nets": nets})
+        self.assertTrue(any(v["rule"] == "RTY-06" and v["sev"] == "P3" for v in rep["violations"]))
+
     def test_priority_and_isolation(self):
         inv = self.by_rule(self.bad, "RTO-01")
         self.assertEqual({v["net"] for v in inv}, {"XIN", "XOUT"})

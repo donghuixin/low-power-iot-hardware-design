@@ -196,6 +196,8 @@ $ python scripts/route_lint.py lint fixed.kicad_pcb
 得分 93.3 / 100   任意角度 0、锐角 0；剩下晶振过孔和底层跳线是拓扑问题，要人决定
 ```
 
+**布线指导思想**（[`references/18-routing-philosophy.md`](references/18-routing-philosophy.md)）：按功能块边读懂电路、边查证资料（联网或读文件前先征得同意）、边定约束、边布线、边检查；综合 ADI AN-1142《高速 ADC PCB 布局布线技巧》与 TI ZHCAAE6B《电机驱动器电路板布局的最佳实践》——电流走环路、单一完整地加分区、去耦电容与芯片同层不隔过孔、裸露焊盘过孔阵列、开尔文连接、优先 45° 拐弯、绝不出现随机角度。
+
 **走线原则**（[`references/17-routing-principles.md`](references/17-routing-principles.md)，检查器 `scripts/route_principles.py`）：
 
 - **关键信号优先**：射频 → 晶振 → 开关回路与高压 → 高速差分 → 时钟 → 模拟 → 电源 → 一般信号 → 地。`route_lint.py order` 按档位给出逐网布线顺序；`lint` 会抓“优先级倒挂”——关键网络因为直连通道被一般信号占了而绕行或打孔。
@@ -227,6 +229,7 @@ references/
   15-design-rules-and-process.md 设计规则与板厂工艺：写规则的八条做法、嘉立创价格档位、导入自有工艺、对照与生成
   16-routing-constraints.md      布线约束与质量评分：八方向几何、线宽线长过孔层约束、检查器与修复器、写入闸门、AI 布线规程
   17-routing-principles.md       走线原则：布线优先级、就近、差分、隔离及对应检查器
+  18-routing-philosophy.md       布线指导思想与工作方法（ADI AN-1142、TI ZHCAAE6B）
   20-hv-pulser-tr-safety.md      扩展：高压脉冲、T/R、高压电源与联锁、间距
   21-ultrasound-afe-clock.md     扩展：超声 AFE、采样与 IQ、时钟抖动
   22-low-noise-power-thermal.md  扩展：持续功耗模型、纹波与开关同步、手持热设计
