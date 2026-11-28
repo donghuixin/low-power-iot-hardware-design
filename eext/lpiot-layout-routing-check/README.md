@@ -4,6 +4,16 @@
 
 ![全流程演示](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/demo.gif)
 
+**分步演示**（演示板：BLE 运动传感器节点，走线全部为 135° 拐角）：
+
+| ① 逐级确认 | ② 布局检查 |
+|---|---|
+| ![逐级确认](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/step-confirm.gif) | ![布局检查](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/step-layout.gif) |
+| 每级核对摘要后手动输入确认码；前面改了，后面自动失效 | 功能分区扫入、器件按功能块落位；净空区、目标位置、去耦回路逐条动画 |
+| **③ 优先级逐档确认** | **④ 布线检查与修复** |
+| ![优先级逐档确认](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/step-priority.gif) | ![布线检查与修复](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/step-fix.gif) |
+| 按板子功能梳理 9 档，板子上只亮当前这一档的网络，逐档确认 | 去耦回路、差分与回流、顺序回放；修复预览红线 → 绿线，修复后没有直角 |
+
 > **这不是一键出板工具。** DRC 通过不代表板子能用。没有说清外壳和接口位置、没有功能分区、没有布线优先级就让工具“自动布完”，得到的往往是满板任意角度和长绕线。所以写回修复前必须先在“确认”页逐级确认，AI 代理也绕不过去。
 
 ## 使用

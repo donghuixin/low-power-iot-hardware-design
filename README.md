@@ -220,6 +220,15 @@ $ python scripts/route_lint.py lint fixed.kicad_pcb
 
 ![布局布线检查助手演示](eext/lpiot-layout-routing-check/docs/demo.gif)
 
+| ① 逐级确认 | ② 布局检查 |
+|---|---|
+| ![逐级确认](eext/lpiot-layout-routing-check/docs/step-confirm.gif) | ![布局检查](eext/lpiot-layout-routing-check/docs/step-layout.gif) |
+| 每级核对摘要后手动输入确认码；前面改了，后面自动失效 | 功能分区扫入、器件按功能块落位；净空区、目标位置、去耦回路逐条动画 |
+| **③ 优先级逐档确认** | **④ 布线检查与修复** |
+| ![优先级逐档确认](eext/lpiot-layout-routing-check/docs/step-priority.gif) | ![布线检查与修复](eext/lpiot-layout-routing-check/docs/step-fix.gif) |
+| 按板子功能梳理 9 档，板子上只亮当前这一档的网络，逐档确认 | 去耦回路、差分与回流、顺序回放；修复预览红线 → 绿线，修复后没有直角 |
+
+
 **走线原则**（[`references/17-routing-principles.md`](references/17-routing-principles.md)，检查器 `scripts/route_principles.py`）：
 
 - **关键信号优先**：射频 → 晶振 → 开关回路与高压 → 高速差分 → 时钟 → 模拟 → 电源 → 一般信号 → 地。`route_lint.py order` 按档位给出逐网布线顺序；`lint` 会抓“优先级倒挂”——关键网络因为直连通道被一般信号占了而绕行或打孔。
