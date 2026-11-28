@@ -4,7 +4,7 @@
 [![GitHub forks](https://img.shields.io/github/forks/donghuixin/low-power-iot-hardware-design?style=social)](https://github.com/donghuixin/low-power-iot-hardware-design/fork)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-一个面向**低功耗物联网硬件**的 Skill：从需求挖掘到原理图、交互式布局规划、Layout、bring-up 的完整设计与评审流程。
+一个面向**低功耗物联网硬件**的 Skill：从需求挖掘到原理图、交互式布局规划、Layout、bring-up 的完整设计与评审流程。但不要过度依赖AI，过于模糊不具备可行性的指令他会拒绝
 
 A Claude and Codex skill for designing and reviewing low-power IoT hardware: requirements elicitation, wireless and part selection, sensor placement, schematic reliability review, power budgeting, an interactive 2D/3D PCB placement planner, PCB layout review, and bring-up.
 
