@@ -243,11 +243,15 @@ export const TOOLS = [
 		}
 		return call('highlightNet', { net: a?.net ?? null });
 	} },
-	{ name: 'routing_fix_plan', description: '计算几何修复方案（直角斜切成两个 135° 拐角，任意角度、锐角、抖动、斜出焊盘、悬空线头、重叠线段 → 八方向折线），不修改板子', inputSchema: { type: 'object', properties: { nets: { type: 'array', items: { type: 'string' }, description: '只修这些网络（可选）' } } }, run: async (a) => {
-		const p = await call('fixPlan', { nets: a?.nets });
+	{ name: 'routing_fix_plan', description: '计算几何修复方案，不修改板子。local=true（默认）只改 P0：任意角度、锐角、锐角分支、直角（斜切成两个 135° 拐角），其他走线一根不动——真实板子用这个；local=false 还会重建抖动、短段和斜出焊盘，只适合草稿板。', inputSchema: { type: 'object', properties: { nets: { type: 'array', items: { type: 'string' }, description: '只修这些网络（可选）' }, local: { type: 'boolean', description: '只改 P0，默认 true' } } }, run: async (a) => {
+		const p = await call('fixPlan', { nets: a?.nets, local: a?.local !== false });
 		return { fixed: p.fixed.map(f => ({ net: f.net, layer: f.layer, issues: f.issues, how: f.how })), manual: p.manual, changes: p.changes.map(c => ({ net: c.net, remove: c.remove.length, add: c.add.length })), gate: p.gate };
 	} },
-	{ name: 'routing_fix_apply', description: '把上一次 routing_fix_plan 的方案写回 PCB。设计确认 G0–G4 未放行时拒绝；放行后嘉立创 EDA 会弹窗请用户确认，修改可一次撤销', inputSchema: { type: 'object', properties: {} }, run: async () => {
+	{ name: 'length_match_plan', description: '等长补偿方案，不修改板子：按设计确认 G4_routing_plan.length_groups（用户确认过的等长组，[{name, nets, tol_mm}]）找出偏短的网络，在它的直线段上加局部蛇形线（拐角都是 135°）补到和最长的一样长；放不下的列为人工处理，不会去改别的走线。写回用 routing_fix_apply。几 MHz 的烧写口电气上不需要等长，是否等长由用户在 G4 决定，不要自己加等长组。', inputSchema: { type: 'object', properties: { nets: { type: 'array', items: { type: 'string' } }, clearance: { type: 'number', description: '与其他网络的最小间距 mm，默认 0.1' } } }, run: async (a) => {
+		const p = await call('lengthPlan', { nets: a?.nets, clearance: a?.clearance });
+		return { rows: p.rows, fixed: p.fixed.map(f => ({ net: f.net, layer: f.layer, how: f.how })), manual: p.manual, gate: p.gate };
+	} },
+	{ name: 'routing_fix_apply', description: '把上一次 routing_fix_plan 或 length_match_plan 的方案写回 PCB。设计确认 G0–G4 未放行时拒绝；放行后嘉立创 EDA 会弹窗请用户确认，修改可一次撤销', inputSchema: { type: 'object', properties: {} }, run: async () => {
 		const r = await call('fixApply', { confirmed: false }, 600000);
 		return r?.cancelled ? { cancelled: true } : { removed: r.removed, added: r.added, score: r.report?.score };
 	} },

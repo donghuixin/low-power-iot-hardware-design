@@ -132,19 +132,24 @@ export function buildFinishModel(board: Board, parts: { ref: string; value?: str
 				const L = Math.hypot(qx - px, qy - py) || 1;
 				const d: Pt = [(qx - px) / L, (qy - py) / L];
 				let hit: [Junction['kind'], number, string | null, string | null] | null = null;
+				let skip = false;
 				for (const v of n.vias) {
 					if (Math.hypot(v[0] - px, v[1] - py) <= v[2] / 2 + 1e-6) {
-						hit = ['via', v[2], null, null];
+						// 另一端也在过孔里：是过孔里的残段，不是连接点
+						if (Math.hypot(v[0] - qx, v[1] - qy) <= v[2] / 2 + 1e-6)
+							skip = true;
+						else hit = ['via', v[2], null, null];
 						break;
 					}
 				}
-				if (!hit) {
+				if (!hit && !skip) {
 					for (const p of n.pads) {
 						if (p.l !== -1 && p.l !== l)
 							continue;
 						const r = padRect(p);
 						if (r[0] - 1e-6 <= px && px <= r[2] + 1e-6 && r[1] - 1e-6 <= py && py <= r[3] + 1e-6) {
-							hit = [p.l === -1 ? 'tht' : 'pad', Math.min(r[2] - r[0], r[3] - r[1]), p.ref ?? null, String(p.pin ?? '')];
+							if (!(r[0] - 1e-6 <= qx && qx <= r[2] + 1e-6 && r[1] - 1e-6 <= qy && qy <= r[3] + 1e-6)) // 整段都在焊盘里是残段
+								hit = [p.l === -1 ? 'tht' : 'pad', Math.min(r[2] - r[0], r[3] - r[1]), p.ref ?? null, String(p.pin ?? '')];
 							break;
 						}
 					}
@@ -170,12 +175,12 @@ function num(v: any, d: number | null = null): number | null {
 export function parseValueUnit(v: any): string | null {
 	if (!v)
 		return null;
-	const s = String(v).trim();
-	if (/\d\s*[pnuμm]?F\b/i.test(s) || (/\d[pnuμ]\d/i.test(s) && !/H/.test(s)))
+	const s = String(v).trim().split(/[,，;/\s]+/)[0]; // 只看第一段：“10uF, >4V” → 10uF；料号（GRM033R61A105…）认不出就不判
+	if (/^\d+(?:\.\d+)?\s*[pnuμm]?F$/i.test(s) || /^\d+[pnuμ]\d+$/i.test(s))
 		return 'F';
-	if (/\d\s*[pnuμm]?H\b/i.test(s))
+	if (/^\d+(?:\.\d+)?\s*[pnuμm]?H$/i.test(s))
 		return 'H';
-	if (/(\d\s*([ΩRkKM]|ohm)\b)|(\d[RkKM]\d)|^\d+(\.\d+)?$/.test(s))
+	if (/^\d+(?:\.\d+)?\s*(?:[ΩRkKM]|ohm)?$/.test(s) || /^\d+[RkKM]\d+$/.test(s))
 		return 'Ω';
 	return null;
 }
@@ -281,17 +286,22 @@ class Finish {
 			if (under.length)
 				this.add('SLK-08', 'P2', [t.owner || name, ...(under[0].ref !== t.owner ? [under[0].ref] : [])], `丝印“${name}”在 ${under[0].ref} 下面：贴片后被器件盖住，装配和维修时看不到`, '挪到器件旁边', c, t.bbox);
 		}
+		const seenLine = new Set<string>();
 		for (const ln of this.m.lines) {
 			const mid: Pt = [(ln.x1 + ln.x2) / 2, (ln.y1 + ln.y2) / 2];
-			const hit = pads.filter(([, q]) => same(ln.side, q) && segRectDist(ln.x1, ln.y1, ln.x2, ln.y2, q.rect) - ln.w / 2 < this.clear - 1e-6);
-			if (hit.length) {
+			// 封装自己的丝印框：只在压到自己的焊盘时报；离别的器件焊盘按设定距离；同一封装对同一焊盘只报一次
+			const hit = pads.filter(([r, q]) => same(ln.side, q) && segRectDist(ln.x1, ln.y1, ln.x2, ln.y2, q.rect) - ln.w / 2 < (r === ln.owner ? 0 : this.clear) - 1e-6);
+			if (hit.length && !seenLine.has(`${ln.owner}|${hit[0][0]}|${hit[0][1].pin}`)) {
 				const [r, q] = hit[0];
+				seenLine.add(`${ln.owner}|${r}|${q.pin}`);
 				this.add('SLK-01', 'P1', [ln.owner || r], `丝印线离 ${r}.${q.pin} 焊盘不到 ${fmtG(this.clear)} mm：会被裁掉，或者印到焊盘上影响焊接`, '修改封装丝印或挪开线条', mid);
 			}
 			if (ln.w < this.minW - TOL)
 				small('SLK-02', 'P1', ln.w, this.minW, `${ln.owner || '板上'} 的丝印线`, mid, null, '丝印线宽');
-			if (poly.length && !(pointInPoly(ln.x1, ln.y1, poly) && pointInPoly(ln.x2, ln.y2, poly)))
+			if (poly.length && !(pointInPoly(ln.x1, ln.y1, poly) && pointInPoly(ln.x2, ln.y2, poly)) && !seenLine.has(`out|${ln.owner}`)) {
+				seenLine.add(`out|${ln.owner}`);
 				this.add('SLK-04', 'P1', [ln.owner || '丝印线'], '丝印线超出板框', '挪回板内', mid);
+			}
 		}
 		const groups = [...thin.values()].sort((a, b) => (a.rule < b.rule ? -1 : a.rule > b.rule ? 1 : a.val - b.val));
 		for (const g of groups) {
@@ -477,7 +487,7 @@ class Finish {
 		if (policy === '不加')
 			return;
 		const excl = !['保留', false].includes(td.exclude_rf_diff);
-		const unknown = this.m.teardrop_source !== 'kicad';
+		const unknown = [undefined, null, 'none'].includes(this.m.teardrop_source);
 		const need: Junction[] = [];
 		for (const j of this.m.junctions) {
 			if (excl && SENSITIVE.has(j.cls)) {
@@ -503,7 +513,7 @@ class Finish {
 				continue;
 			seen.add(key);
 			const where = j.ref ? `${j.ref}.${j.pin}` : '过孔';
-			this.add('TDR-01', 'P1', [j.ref || j.net], `${j.net} 在 ${where} 的连接处没有泪滴（线宽 ${fmtG(j.trace_w)} mm，${j.kind === 'via' ? '过孔' : '焊盘'} ${fmtG(j.size)} mm）`, '执行泪滴，钻孔偏位时线不会被切断', [j.x, j.y]);
+			this.add('TDR-01', 'P2', [j.ref || j.net], `${j.net} 在 ${where} 的连接处没有泪滴（线宽 ${fmtG(j.trace_w)} mm，${j.kind === 'via' ? '过孔' : '焊盘'} ${fmtG(j.size)} mm）`, '执行泪滴，钻孔偏位时线不会被切断', [j.x, j.y]);
 		}
 	}
 

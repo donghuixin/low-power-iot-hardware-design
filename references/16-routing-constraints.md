@@ -102,7 +102,7 @@
 | RTL-04 | 去耦电容 | 走线 ≤ 2 mm（0402/0201 力争 ≤ 1 mm）；电源 → 电容焊盘 → 引脚；地过孔距焊盘 ≤ 0.5 mm | P1 | | [S] Nordic |
 | RTL-05 | DC-DC 热回路 | 输入电容紧贴 VIN/PGND，同层闭合不经过孔，≤ 3 mm | P1 | | [S] TI |
 | RTL-06 | 射频馈线 | 尽量短，0 过孔，不分叉 | P0 | ✓ 分叉 | [S] Espressif |
-| RTL-07 | 差分对内长度差 | 并入 `17-routing-principles.md` RTD-04（USB ≤ 0.5 mm，上限 1.25 mm） | P1 | ✓ | [S] Microchip AN26.2 |
+| RTL-07 | 等长组 | 用户在 G4 `length_groups` 里确认的组：以最长的为目标，比它短超过容差就报；`length_match.py` 加局部蛇形补齐（见 6.6）。差分对内长度差仍按 `17-routing-principles.md` RTD-04 | P1 | ✓ | [E] |
 | RTL-08 | USB 桩线 | ESD 串在线上，桩线 ≤ 1 mm | P1 | | [S] TI |
 | RTL-09 | SPI / 时钟（≤ 50 MHz） | 不端接时 ≤ 50 mm，超过加 22–33 Ω 串阻 | P2 | | [E] |
 | RTL-11 | 2 层板底层跳线 | 单根 ≤ 10 mm；底层信号总长 ≤ 顶层的 10%；不在射频、晶振、开关电源下方 | P2 | ✓ | [E] |
@@ -179,8 +179,10 @@ python scripts/route_lint.py lint copper-pack.json            # extract_copper.p
 ### 6.2 自动修复：`route_fix.py`
 
 ```bash
-python scripts/route_fix.py board.kicad_pcb --brief design-brief.json [-o fixed.kicad_pcb] [--diff diff.json] [--constraints c.json] [--clearance 0.15] [--no-chamfer]
+python scripts/route_fix.py board.kicad_pcb --brief design-brief.json [-o fixed.kicad_pcb] [--diff diff.json] [--constraints c.json] [--clearance 0.15] [--no-chamfer] [--local]
 ```
+
+**真实板子用 `--local`**：只改 P0（任意角度、锐角、锐角 T 分支、直角），不重布出线方向、短段和抖动，也不删线头，其他走线一根不动。不带 `--local` 的完整修复会重建每一段有毛病的走线，适合 AI 草稿板，在手工布好的密集板上反而会改坏、也慢（在 24.5 × 35.3 mm 的 6 层演示板上，完整修复 100 s 并引入新的直角，`--local` 3.5 s、P0 从 11 降到 8，其余列为人工处理）。扩展的“只改 P0（局部）”勾选项和 MCP `routing_fix_plan` 默认就是这个模式。
 
 修复顺序：合并重叠的共线线段 → 删除悬空线头 → 逐段重建有问题的走线 → 再查一遍（最多两轮）→ 最后一遍把所有网络（含电源、地线、射频）剩下的 90° 拐角斜切成两个 135° 拐角，斜切不了的列为人工处理。
 
@@ -224,6 +226,21 @@ python scripts/route_lint.py gate plan-fixed.json --brief design-brief.json    #
 ```
 
 `units` 为 `mm` 或 `mil`；`ydown` 表示坐标 y 向下；`pads` 只需要这批线段两端的焊盘（用来检查出线方向），`w`、`h` 是焊盘尺寸，`rot` 是焊盘角度。闸门打印的位置单位是 mm、y 向上。
+
+### 6.6 等长补偿：`length_match.py`
+
+```bash
+python scripts/length_match.py board.(kicad_pcb|json) --brief design-brief.json                       # 只报告
+python scripts/length_match.py board --brief design-brief.json -o out [--diff diff.json] [--clearance 0.1]   # 加蛇形线
+```
+
+- **等长组由用户决定**：写在 G4 `length_groups: [{name, nets, tol_mm}]`，随 G4 一起确认。工具不会自己给总线加等长；几 MHz 的 SWD / JTAG、25 MHz 的 SD 卡 SPI 电气上不需要等长，真正要紧的是 DDR、并行高速总线和差分对。
+- **只动偏短的网络、只动一段直线**：每组以最长的网络为目标，偏短的网络在它最长的直线段上放凸起；一段放不下时分到几段，最后一段按剩下的量精确算高度，补完和最长的差 < 0.001 mm。
+- **形状**：八方向，拐角都是 135°。凸起 = 45° 斜上 → 竖直 → 45° → 平顶 → 45° → 竖直 → 45° 回到基线，每个凸起加 2A − 4c(2 − √2)（A 高度，c 斜切 = 线宽），凸起间距 6 倍线宽，高度 ≤ 12 倍线宽；差得很少时用 45° 梯形小凸起（加 2A(√2 − 1)）。凸起位置先放中间，放不下就沿线段左右挪几步，两侧都试。
+- **间距**：与其他网络的走线、焊盘、过孔保持 `--clearance`（默认 0.15 mm，密集板按板厂规则给，例如 0.1 mm），与同一网络的其他走线保持 3 倍线宽，不出板框。
+- **放不下就交给人**：列为人工处理，不会挪别的走线、不会换层。
+- 检查端：`route_lint.py lint --constraints`（约束里的 `length_groups`）报 RTL-07；等长组里的网络，蛇形段不算短段、抖动和多余拐弯。
+- 扩展：“修复”页的“等长补偿”、MCP `length_match_plan`，写回和几何修复一样走“应用修复”，可一次撤销。
 
 ### 6.5 测试与示例板
 

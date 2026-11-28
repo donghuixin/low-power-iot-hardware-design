@@ -300,7 +300,8 @@ def dangling_chains(g):
 
 # ------------------------------------------------------------------ 修复器
 class Fixer:
-    def __init__(self, nets, layers, cons=None, clearance=0.15, outline=None, chamfer=True, log=None):
+    def __init__(self, nets, layers, cons=None, clearance=0.15, outline=None, chamfer=True, log=None, local=False):
+        self.local = local                  # 只改 P0（任意角度、锐角、锐角分支、直角），不重布出线方向、短段、抖动，不删线头
         self.nets = nets
         self.layers = layers
         self.cons = RL.merge_cons(cons)
@@ -536,7 +537,7 @@ class Fixer:
                 results.append({"net": n["name"], "layer": l, "issues": ["overlap"], "how": "merge", "segs_before": len(segs), "segs_after": len(merged)})
                 segs, changed = merged, True
             g = RL.Graph(segs, n["pads"], n["vias"], l)
-            if not n.get("zone"):
+            if not n.get("zone") and not self.local:
                 for _ in range(5):
                     dead = dangling_chains(g)
                     if not dead:
@@ -557,7 +558,7 @@ class Fixer:
                 if c["arc"]:
                     continue
                 issues = self.chain_needs_fix(g, c, w)
-                if not issues:
+                if not issues or (self.local and not set(issues) & {"angle", "acute", "tee"}):
                     continue
                 A, B = c["pts"][0], c["pts"][-1]
                 nA, nB = g.nodes[c["keys"][0]], g.nodes[c["keys"][-1]]
@@ -794,12 +795,12 @@ def snap(n):
     n["segs"] = [[s[0], round(s[1], 4), round(s[2], 4), round(s[3], 4), round(s[4], 4), s[5], s[6]] for s in n["segs"]]
 
 
-def fix_kicad(path, out=None, cons=None, clearance=0.15, chamfer=True, diff=None):
+def fix_kicad(path, out=None, cons=None, clearance=0.15, chamfer=True, diff=None, local=False):
     import extract_copper as X
     b = X.parse_kicad(path)
     nets = RL.nets_from_board(b, flip=False)
     before = {n["name"]: [list(s) for s in n["segs"]] for n in nets}
-    fx = Fixer(nets, b.layers, cons, clearance, b.outline, chamfer)
+    fx = Fixer(nets, b.layers, cons, clearance, b.outline, chamfer, local=local)
     res = fx.run()
     for n in nets:
         snap(n)
@@ -815,14 +816,14 @@ def fix_kicad(path, out=None, cons=None, clearance=0.15, chamfer=True, diff=None
     return rep
 
 
-def fix_plan(path, out=None, cons=None, clearance=0.15, chamfer=True, diff=None):
+def fix_plan(path, out=None, cons=None, clearance=0.15, chamfer=True, diff=None, local=False):
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     pack = RL.plan_to_pack(data)
     nets = [RL.norm_net(n) for n in pack["nets"]]
     k = 0.0254 if data.get("units") == "mil" else 1.0
     sy = -1.0 if data.get("ydown") else 1.0
     outline = [(x * k, y * k * sy) for x, y in data.get("outline", [])]
-    fx = Fixer(nets, pack["layers"], cons, clearance, outline, chamfer)
+    fx = Fixer(nets, pack["layers"], cons, clearance, outline, chamfer, local=local)
     res = fx.run()
     layers = pack["layers"]
     back = lambda v: round(v / k, 4)
@@ -846,6 +847,7 @@ def main(argv=None):
     ap.add_argument("--clearance", type=float, default=0.15, help="与其他网络的最小间距 mm（默认 0.15，约束文件里网络类的 clearance 优先）")
     ap.add_argument("--no-chamfer", action="store_true", help="不斜切 90° 拐角（不建议：直角拐角是 P0，lint 和闸门都不会通过）")
     ap.add_argument("--brief", help="design-brief.json：G0–G4 必须已由用户确认，否则拒绝修改走线（见 references/19-design-gate.md）")
+    ap.add_argument("--local", action="store_true", help="只改 P0（任意角度、锐角、锐角分支、直角），其他走线一根不动。真实板子建议用这个")
     a = ap.parse_args(argv)
     import design_gate as DG
     DG.require_or_exit(a.brief, "route")
@@ -853,11 +855,11 @@ def main(argv=None):
     src = Path(a.file)
     if src.suffix == ".kicad_pcb":
         out = a.output or str(src.with_name(src.stem + "-fixed.kicad_pcb"))
-        rep = fix_kicad(src, out, cons, a.clearance, not a.no_chamfer, a.diff)
+        rep = fix_kicad(src, out, cons, a.clearance, not a.no_chamfer, a.diff, a.local)
         print(f"已写入 {out}：修复 {len(rep['fixed'])} 段走线，删除 {rep['removed']} 条、新增 {rep['added']} 条线段")
     else:
         out = a.output or str(src.with_name(src.stem + "-fixed.json"))
-        rep = fix_plan(src, out, cons, a.clearance, not a.no_chamfer, a.diff)
+        rep = fix_plan(src, out, cons, a.clearance, not a.no_chamfer, a.diff, a.local)
         print(f"已写入 {out}：修复 {len(rep['fixed'])} 段走线")
     if rep["needs_manual"]:
         print(f"{len(rep['needs_manual'])} 处需要人工处理（拆线重布或回到布局）：")

@@ -274,7 +274,8 @@ def build_model(pack, texts, lines, tears, tear_source, silk_source):
                 hit = None
                 for v in n["vias"]:
                     if math.hypot(v[0] - px, v[1] - py) <= v[2] / 2 + 1e-6:
-                        hit = ("via", v[2], None, None)
+                        # 另一端也在过孔里：是过孔里的残段，不是连接点
+                        hit = None if math.hypot(v[0] - qx, v[1] - qy) <= v[2] / 2 + 1e-6 else ("via", v[2], None, None)
                         break
                 if not hit:
                     for p in n["pads"]:
@@ -282,16 +283,18 @@ def build_model(pack, texts, lines, tears, tear_source, silk_source):
                             continue
                         r = pad_rect(p)
                         if r[0] - 1e-6 <= px <= r[2] + 1e-6 and r[1] - 1e-6 <= py <= r[3] + 1e-6:
+                            if r[0] - 1e-6 <= qx <= r[2] + 1e-6 and r[1] - 1e-6 <= qy <= r[3] + 1e-6:
+                                break                   # 整段都在焊盘里（EDA 吸附留下的残段）
                             hit = ("tht" if p.get("l") == -1 else "pad", min(r[2] - r[0], r[3] - r[1]), p.get("ref"), str(p.get("pin", "")))
                             break
                 if not hit:
                     continue
                 kind, size, ref, pin = hit
                 tear = None
-                if tear_source == "kicad":
+                if tear_source not in (None, "none"):
                     lname = layer_names[l] if l < len(layer_names) else ""
-                    probe = (px + d[0] * (size / 2 + 0.15), py + d[1] * (size / 2 + 0.15))
-                    tear = any(t["net"] == n["name"] and t["layer"] == lname and in_poly(probe[0], probe[1], t["poly"]) for t in tears)
+                    probes = [(px + d[0] * (size / 2 + k), py + d[1] * (size / 2 + k)) for k in (0.02, 0.08, 0.15)]
+                    tear = any(t["net"] == n["name"] and t["layer"] == lname and any(in_poly(x, y, t["poly"]) for x, y in probes) for t in tears)
                 junctions.append({"net": n["name"], "cls": classes.get(n["name"], "SIG"), "kind": kind, "x": round(px, 4), "y": round(py, 4),
                                   "size": round(size, 4), "trace_w": w, "dir": [round(d[0], 4), round(d[1], 4)], "teardrop": tear,
                                   "ref": ref, "pin": pin, "layer": l})
@@ -326,12 +329,12 @@ def parse_value_unit(v):
     """返回 'Ω' / 'F' / 'H' / None。"""
     if not v:
         return None
-    s = str(v).strip()
-    if re.search(r"\d\s*[pnuμµm]?F\b", s, re.I) or re.search(r"\d[pnuμµ]\d", s, re.I) and not re.search(r"H", s):
+    s = re.split(r"[,，;/\s]+", str(v).strip())[0]          # 只看第一段：“10uF, >4V” → 10uF；料号（GRM033R61A105…）认不出就不判
+    if re.fullmatch(r"\d+(\.\d+)?\s*[pnuμµm]?F", s, re.I) or re.fullmatch(r"\d+[pnuμµ]\d+", s, re.I):
         return "F"
-    if re.search(r"\d\s*[pnuμµm]?H\b", s, re.I):
+    if re.fullmatch(r"\d+(\.\d+)?\s*[pnuμµm]?H", s, re.I):
         return "H"
-    if re.search(r"(\d\s*(Ω|ohm|R|k|K|M)\b)|(\d[RkKM]\d)|^\d+(\.\d+)?$", s):
+    if re.fullmatch(r"\d+(\.\d+)?\s*(Ω|ohm|R|k|K|M)?", s) or re.fullmatch(r"\d+[RkKM]\d+", s):
         return "Ω"
     return None
 
@@ -409,15 +412,20 @@ class Finish:
             if under:
                 self.add("SLK-08", "P2", [t["owner"] or name] + ([under[0]["ref"]] if under[0]["ref"] != t["owner"] else []),
                          f"丝印“{name}”在 {under[0]['ref']} 下面：贴片后被器件盖住，装配和维修时看不到", "挪到器件旁边", c, t["bbox"])
+        seen_line = set()
         for ln in self.m["lines"]:
             mid = ((ln["x1"] + ln["x2"]) / 2, (ln["y1"] + ln["y2"]) / 2)
-            hit = [(r, q) for r, q in pads if same(ln["side"], q) and seg_rect_dist(ln["x1"], ln["y1"], ln["x2"], ln["y2"], q["rect"]) - ln["w"] / 2 < self.clear - 1e-6]
-            if hit:
+            # 封装自己的丝印框：只在压到自己的焊盘时报；离别的器件焊盘按设定距离；同一封装对同一焊盘只报一次
+            hit = [(r, q) for r, q in pads if same(ln["side"], q)
+                   and seg_rect_dist(ln["x1"], ln["y1"], ln["x2"], ln["y2"], q["rect"]) - ln["w"] / 2 < (0.0 if r == ln["owner"] else self.clear) - 1e-6]
+            if hit and (ln["owner"], hit[0][0], hit[0][1]["pin"]) not in seen_line:
                 r, q = hit[0]
+                seen_line.add((ln["owner"], r, q["pin"]))
                 self.add("SLK-01", "P1", [ln["owner"] or r], f"丝印线离 {r}.{q['pin']} 焊盘不到 {self.clear:g} mm：会被裁掉，或者印到焊盘上影响焊接", "修改封装丝印或挪开线条", mid)
             if ln["w"] < self.min_w - TOL:
                 small("SLK-02", "P1", ln["w"], self.min_w, (ln["owner"] or "板上") + " 的丝印线", mid, None, "丝印线宽")
-            if poly and not (in_poly(ln["x1"], ln["y1"], poly) and in_poly(ln["x2"], ln["y2"], poly)):
+            if poly and not (in_poly(ln["x1"], ln["y1"], poly) and in_poly(ln["x2"], ln["y2"], poly)) and ("out", ln["owner"]) not in seen_line:
+                seen_line.add(("out", ln["owner"]))
                 self.add("SLK-04", "P1", [ln["owner"] or "丝印线"], "丝印线超出板框", "挪回板内", mid)
         for (rule, val), g in sorted(thin.items(), key=lambda kv: (kv[0][0], kv[0][1])):
             names = g["names"]
@@ -570,7 +578,7 @@ class Finish:
             return
         excl = td.get("exclude_rf_diff") not in ("保留", False)
         sensitive = {"RF50", "USB90", "DIFF100"}
-        unknown = self.m.get("teardrop_source") != "kicad"
+        unknown = self.m.get("teardrop_source") in (None, "none")
         need = []
         for j in self.m["junctions"]:
             if excl and j["cls"] in sensitive:
@@ -594,7 +602,7 @@ class Finish:
                 continue
             seen.add(key)
             where = f"{j['ref']}.{j['pin']}" if j.get("ref") else "过孔"
-            self.add("TDR-01", "P1", [j.get("ref") or j["net"]], f"{j['net']} 在 {where} 的连接处没有泪滴（线宽 {j['trace_w']:g} mm，{'过孔' if j['kind'] == 'via' else '焊盘'} {j['size']:g} mm）",
+            self.add("TDR-01", "P2", [j.get("ref") or j["net"]], f"{j['net']} 在 {where} 的连接处没有泪滴（线宽 {j['trace_w']:g} mm，{'过孔' if j['kind'] == 'via' else '焊盘'} {j['size']:g} mm）",
                      "执行泪滴，钻孔偏位时线不会被切断", (j["x"], j["y"]))
 
     def run(self):

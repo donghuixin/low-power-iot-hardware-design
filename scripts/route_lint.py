@@ -83,7 +83,7 @@ def infer_class(name, pads=()):
             cls, conf, why = "SIG", 0.6, "名字含 RF 但像控制线"
     if cls in ("SIG",) and conf < 0.9:                      # 拓扑只改写普通信号
         refs = [(str(p.get("ref", "")), str(p.get("pin", ""))) for p in pads]
-        if any(re.match(r"^(Y|X)\d", r) for r, _ in refs):
+        if any(re.match(r"^(Y|X)\d", r) and q in ("1", "2", "3", "4") for r, q in refs):   # 晶振只有 1–4 脚；X1.13 是模组
             return "XTAL", 0.9, "连到晶振"
         if any(re.match(r"^(J|USB|CN)", r) and q.upper() in ("A6", "A7", "B6", "B7", "D+", "D-", "DP", "DM") for r, q in refs):
             return "USB90", 0.85, "连到 USB 连接器的 D+/D- 脚"
@@ -432,6 +432,7 @@ METRIC_OF = {"RTG-01": "VF-16", "RTG-10": "VF-16", "RTG-02": "VF-17", "RTG-03": 
 
 
 def check_graph(ctx, g, net, cls, rules, stats):
+    meander = net in {x for grp in (ctx.cons.get("length_groups") or []) for x in grp.get("nets", [])}   # 等长组：蛇形段不算短段、抖动和多余拐弯
     """单个网络单层上的几何规则。"""
     geo = ctx.cons["geometry"]
     tol = geo.get("angle_tol_um", 1) / 1000.0
@@ -486,7 +487,7 @@ def check_graph(ctx, g, net, cls, rules, stats):
             Ls = math.dist(a, b)
             near_anchor = (i == 0 and g.nodes[c["keys"][0]]["anchor"]) or (i == len(pts) - 2 and g.nodes[c["keys"][-1]]["anchor"])
             lim = geo.get("fanout_k_w", 0.5) * w if near_anchor else max(kw * w, absmin)
-            if 1e-6 < Ls < lim - 1e-9 and len(pts) > 2:
+            if 1e-6 < Ls < lim - 1e-9 and len(pts) > 2 and not meander:
                 ctx.add("RTG-05", "P2", net, L, a, f"短线段 {Ls:.3f} mm（下限 {lim:.3f} mm）", round(Ls, 3))
                 stats["short"] += 1
         turns, cum, turn_sum = [], 0.0, 0.0
@@ -508,10 +509,11 @@ def check_graph(ctx, g, net, cls, rules, stats):
                 ux, uy = pad_axis(p)
                 if not any(abs(d[0] * ay - d[1] * ax) / math.hypot(*d) <= SIN1 for ax, ay in ((ux, uy), (-uy, ux))):
                     need += 0.5
-        stats["excess"].append(max(0.0, turn_sum - need))
+        if not meander:
+            stats["excess"].append(max(0.0, turn_sum - need))
         jogk = geo.get("jog_k_w", 2.0)
-        flagged = False
-        for i in range(len(pts) - 3):                       # Z 形微折：第 i 段与第 i+2 段平行同向、横向错开小于 2w
+        flagged = meander
+        for i in range(len(pts) if meander else 0, len(pts) - 3):   # Z 形微折：第 i 段与第 i+2 段平行同向、横向错开小于 2w
             a0, a1, b0, b1 = pts[i], pts[i + 1], pts[i + 2], pts[i + 3]
             u = (a1[0] - a0[0], a1[1] - a0[1]); v = (b1[0] - b0[0], b1[1] - b0[1])
             if angle_between(u, v) < 1.0 and math.hypot(*u) > 1e-6:
@@ -532,7 +534,11 @@ def check_graph(ctx, g, net, cls, rules, stats):
             p = nd["pad"]
             if p is None or not p.get("w") or p.get("shape") == "circle" or len(pts) < 2:
                 continue
-            a, b = (pts[0], pts[1]) if end == 0 else (pts[-1], pts[-2])
+            seq = pts if end == 0 else pts[::-1]
+            k = 1                                           # 跳过还在焊盘里的微小折线（EDA 吸附留下的残段），看真正离开焊盘的那一段
+            while k < len(seq) - 1 and pt_in_pad(seq[k][0], seq[k][1], p, 0):
+                k += 1
+            a, b = seq[k - 1], seq[k]
             d = (b[0] - a[0], b[1] - a[1])
             Ld = math.hypot(*d)
             if Ld < 1e-6:
@@ -542,6 +548,8 @@ def check_graph(ctx, g, net, cls, rules, stats):
             big, small = max(p["w"], p["h"]), min(p["w"], p["h"])
             if big / max(small, 1e-6) >= 1.3:
                 axes = [(ux, uy)] if p["w"] >= p["h"] else [(-uy, ux)]
+            else:                                           # 近似方形的焊盘（LGA、0402 以下）：45° 从角上出线也可以
+                axes += [((ux - uy) / math.sqrt(2), (uy + ux) / math.sqrt(2)), ((ux + uy) / math.sqrt(2), (uy - ux) / math.sqrt(2))]
             ok = any(abs(d[0] * ay - d[1] * ax) / Ld <= SIN1 for ax, ay in axes)
             if not ok:
                 sev = "P1" if small <= 0.35 else "P2"
@@ -724,7 +732,7 @@ def analyze(pack, cons=None):
                 if pt_in_pad(v[0], v[1], p, 0):
                     if owner != n["name"]:
                         ctx.add("RTV-05", "P0", n["name"], p["l"], (v[0], v[1]), f"过孔压在其他网络 {owner} 的焊盘 {p['ref']}.{p['pin']} 上")
-                    elif p["w"] * p["h"] < 2.0 and str(p["pin"]).upper() not in ("EP", "PAD", "0", "GND", "THERMAL"):
+                    elif p["w"] * p["h"] < 2.0 and str(p["pin"]).upper() not in ("EP", "PAD", "0", "GND", "THERMAL") and not (ctx.cons.get("board") or {}).get("via_in_pad_plugged"):
                         ctx.add("RTV-05", "P1", n["name"], p["l"], (v[0], v[1]), f"盘中孔：过孔在焊盘 {p['ref']}.{p['pin']} 内（标准工艺不塞孔会漏锡）")
             if nL >= 4 and cls not in ("GND", "PWR_LOW", "PWR_MAIN", "SW") and n["segs"]:
                 d = min((math.hypot(v[0] - x, v[1] - y) for x, y in gnd_vias), default=None)
@@ -770,6 +778,9 @@ def analyze(pack, cons=None):
     import route_principles as RP
     values = {p["ref"]: p.get("value") for p in pack.get("parts") or [] if p.get("value")}
     pairs = RP.analyze(ctx, nets, classes, values, nL, bool(gnd_layers), {p["net"]: p["len"] for p in per_net})
+    import length_match as LM
+    for x in LM.length_violations(nets, ctx.cons.get("length_groups") or []):
+        ctx.add(x["rule"], x["sev"], x["net"], None, None, x["msg"], x["value"], metric=x["metric"])
     # 密度
     cv, overload = density(nets, layers, pack.get("board"))
 

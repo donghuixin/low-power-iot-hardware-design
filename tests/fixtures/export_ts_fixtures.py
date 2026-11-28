@@ -20,14 +20,18 @@ SOURCES = {
     "principles-good": FIX / "principles-good.kicad_pcb", "principles-bad": FIX / "principles-bad.kicad_pcb",
     "demo-plane": FIX / "copper-demo-plane.json", "demo-trace": FIX / "copper-demo-trace.json",
     "demo-node": FIX / "demo-node.kicad_pcb",
+    "motherboard": FIX / "motherboard-pack.json",          # 真实板：nRF5340（MDBT53）6 层 24.5 × 35.3 mm，作者同意公开
 }
+# 带约束检查的板子（约束随板子一起导出，扩展用同样的约束检查）
+CONS = {"motherboard": FIX / "motherboard-constraints.json"}
 # 布局检查对齐：板子 → 用哪份设计确认
 LAYOUT = {"principles-good": "brief-principles.json", "principles-bad": "brief-principles.json", "demo-node": "demo-node-brief.json"}
 
 
 def export(name, src):
     pack, _ = R.load_any(src)
-    rep = R.analyze(pack)
+    cons = json.loads(CONS[name].read_text(encoding="utf-8")) if name in CONS else None
+    rep = R.analyze(pack, cons)
     nets = []
     for n in pack["nets"]:
         m = R.norm_net(n)
@@ -36,9 +40,11 @@ def export(name, src):
     board = {"layers": pack["layers"], "nets": nets,
              "parts": [{"ref": p["ref"], "value": p.get("value")} for p in pack.get("parts", [])],
              "planes": (pack.get("checks") or {}).get("planes") or []}
+    if pack.get("board", {}).get("outline") and name in CONS:
+        board["outline"] = pack["board"]["outline"]
     expect = {"score": rep["score"], "violations": [[v["rule"], v["sev"], v.get("net")] for v in rep["violations"]],
               "metrics": {k: e["deduct"] for k, e in rep["metrics"].items()}, "pairs": rep["pairs"]}
-    return {"board": board, "expect": expect}
+    return {"board": board, "expect": expect, **({"cons": cons} if cons else {})}
 
 
 def layout_expect():
@@ -94,6 +100,18 @@ def main(out):
            "codes": [DG.code_of(json.loads((FIX / "brief-principles.json").read_text(encoding="utf-8")), g) for g in DG.GATES]}
     (d / "finish-expect.json.txt").write_text(json.dumps(fin, ensure_ascii=False, indent=1), encoding="utf-8")
     print("finish-expect.json.txt")
+    # 等长组：真实板上的蛇形补偿，扩展要选同样的线段、同样的凸起数和高度
+    import length_match as LM
+    mb = json.loads((FIX / "motherboard-pack.json").read_text(encoding="utf-8"))
+    groups = [{"name": "JTAG 烧写口", "nets": ["TCK", "TMS", "TDI", "TDO"], "tol_mm": 0.05}, {"name": "I2S", "nets": ["BCLK", "LRCLK"], "tol_mm": 0.1},
+              {"name": "SD", "nets": ["SPI_CLK_SD", "SPI_MOSI_SD", "SPI_MISO_SD", "SPI_CS_SD"], "tol_mm": 0.05}]
+    nets = [R.norm_net(n) for n in mb["nets"]]
+    res = LM.plan(nets, groups, mb["board"]["outline"], 0.1)
+    LM.apply(nets, res["changes"])
+    lex = {"groups": groups, "rows": res["rows"], "fixed": [[f["net"], f["layer"], f["how"]] for f in res["fixed"]], "manual": [m["net"] for m in res["manual"]],
+           "after": {r["net"]: r["len"] for r in LM.length_rows(nets, groups)}}
+    (d / "length-expect.json.txt").write_text(json.dumps(lex, ensure_ascii=False, indent=1), encoding="utf-8")
+    print("length-expect.json.txt")
 
 
 if __name__ == "__main__":

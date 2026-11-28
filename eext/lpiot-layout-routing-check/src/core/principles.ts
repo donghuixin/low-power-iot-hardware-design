@@ -295,7 +295,7 @@ export function checkProximity(ctx: Ctx, nets: Net[], classes: Record<string, st
 		}
 		if (/^C\d/.test(ref) && pads.length === 2 && netsOf.includes('GND') && netsOf.includes('XTAL')) {
 			const [xn, xi, xp] = pads.find(t => classes[t[0]] === 'XTAL')!;
-			const ys = by.get(xn)!.pads.map((q, j) => [j, q] as [number, Pad]).filter(([, q]) => /^(Y|X)\d/.test(String(q.ref)));
+			const ys = by.get(xn)!.pads.map((q, j) => [j, q] as [number, Pad]).filter(([, q]) => /^(Y|X)\d/.test(String(q.ref)) && ['1', '2', '3', '4'].includes(String(q.pin)));
 			if (ys.length) {
 				const [j, q] = minBy(ys, ([, q2]) => dist([q2.x, q2.y], [xp.x, xp.y]));
 				const [L, how] = routeLen(xn, xi, j);

@@ -219,18 +219,21 @@ $ python scripts/route_lint.py lint fixed.kicad_pcb
 
 **布线指导思想**（[`references/18-routing-philosophy.md`](references/18-routing-philosophy.md)）：按功能块边读懂电路、边查证资料（联网或读文件前先征得同意）、边定约束、边布线、边检查；综合 ADI AN-1142《高速 ADC PCB 布局布线技巧》与 TI ZHCAAE6B《电机驱动器电路板布局的最佳实践》——电流走环路、单一完整地加分区、去耦电容与芯片同层不隔过孔、裸露焊盘过孔阵列、开尔文连接、拐角只用 135°、不接受直角、绝不出现随机角度。
 
-**嘉立创 EDA 扩展“布局布线检查助手”**（[`eext/lpiot-layout-routing-check`](eext/lpiot-layout-routing-check)，单独上架扩展广场）：在“确认”页逐级填写并确认设计信息（确认码只能由人输入），按板子的功能把网络梳理成 9 档优先级并逐档确认（板子上只亮这一档的网络），对照确认内容检查布局（固定件、分区、禁布区、天线净空、IMU 应力与热、磁力计、去耦距离，带动画），检查布线并打分，G0–G4 放行后一键修复（拐角只用 135°，可撤销），接入你自己的大模型；本地桥（MCP / HTTP + 令牌，枢纽 + 转发端）让本机 AI 客户端和 `scripts/eda_bridge.py` 与编辑器联动，拓扑见 [`references/26-eda-link.md`](references/26-eda-link.md)。安装包在 [`release/`](eext/lpiot-layout-routing-check/release)。
+**嘉立创 EDA 扩展“布局布线检查助手”**（[`eext/lpiot-layout-routing-check`](eext/lpiot-layout-routing-check)，单独上架扩展广场）：在“确认”页逐级填写并确认设计信息（确认码只能由人输入），按板子的功能把网络梳理成 9 档优先级并逐档确认（板子上只亮这一档的网络），对照确认内容检查布局（固定件、分区、禁布区、天线净空、IMU 应力与热、磁力计、去耦距离，带动画），检查布线并打分，G0–G4 放行后局部修复（只改 P0 拐角，其他走线不动，可撤销）和局部等长补偿，出图前检查丝印、位号和泪滴，接入你自己的大模型；本地桥（MCP / HTTP + 令牌，枢纽 + 转发端）让本机 AI 客户端和 `scripts/eda_bridge.py` 与编辑器联动，拓扑见 [`references/26-eda-link.md`](references/26-eda-link.md)。安装包在 [`release/`](eext/lpiot-layout-routing-check/release)。
 
-![布局布线检查助手演示](eext/lpiot-layout-routing-check/docs/demo.gif)
+**演示视频**（真实板：作者的 nRF5340 / MDBT53 可穿戴主板，6 层 24.5 × 35.3 mm、96 个器件，作者同意公开）：[▶ demo.mp4（1 分 44 秒）](eext/lpiot-layout-routing-check/docs/demo.mp4)
 
-| ① 逐级确认 | ② 布局检查 |
-|---|---|
-| ![逐级确认](eext/lpiot-layout-routing-check/docs/step-confirm.gif) | ![布局检查](eext/lpiot-layout-routing-check/docs/step-layout.gif) |
-| 每级核对摘要后手动输入确认码；前面改了，后面自动失效 | 功能分区扫入、器件按功能块落位；净空区、目标位置、去耦回路逐条动画 |
-| **③ 优先级逐档确认** | **④ 布线检查与修复** |
-| ![优先级逐档确认](eext/lpiot-layout-routing-check/docs/step-priority.gif) | ![布线检查与修复](eext/lpiot-layout-routing-check/docs/step-fix.gif) |
-| 按板子功能梳理 9 档，板子上只亮当前这一档的网络，逐档确认 | 去耦回路、差分与回流、顺序回放；修复预览红线 → 绿线，修复后没有直角 |
+[![演示视频](eext/lpiot-layout-routing-check/docs/demo-poster.jpg)](eext/lpiot-layout-routing-check/docs/demo.mp4)
 
+| ① 逐级确认 | ② 布局检查 | ③ 优先级逐档确认 |
+|---|---|---|
+| ![逐级确认](eext/lpiot-layout-routing-check/docs/step-confirm.gif) | ![布局检查](eext/lpiot-layout-routing-check/docs/step-layout.gif) | ![优先级逐档确认](eext/lpiot-layout-routing-check/docs/step-priority.gif) |
+| 每级核对摘要后手动输入确认码 | 磁力计离电感 5.7 mm、天线离 TF 卡座 2.6 mm | 按功能梳理成档，逐档确认 |
+| **④ 布线检查与局部修复** | **⑤ 等长补偿** | **⑥ 丝印、位号与泪滴** |
+| ![布线检查与局部修复](eext/lpiot-layout-routing-check/docs/step-fix.gif) | ![等长补偿](eext/lpiot-layout-routing-check/docs/step-length.gif) | ![丝印检查](eext/lpiot-layout-routing-check/docs/step-finish.gif) |
+| 只改 P0：直角斜切、锐角分支，其他走线不动 | 只在偏短的线上加一小段蛇形线，放不下交给人 | 出图前 20 个决定逐项回答，再检查 |
+
+**能力边界：检查图、改图，不是完全自由的自动布线。** 视频里的每一处改动都是局部的：P0 拐角斜切、偏短网络上的一小段蛇形线；放不下的列为人工处理。
 
 **走线原则**（[`references/17-routing-principles.md`](references/17-routing-principles.md)，检查器 `scripts/route_principles.py`）：
 
@@ -278,6 +281,8 @@ scripts/
   design_gate.py                 强制确认流程：模板、各闸门状态、摘要与确认码、记录确认、阶段放行检查
   layout_lint.py                 实板布局检查（对照设计确认文件）：LAY-01…15 与就近原则
   finish_lint.py                 出图前检查：丝印 SLK-01…13、位号编号 ANN-01…05、泪滴 TDR-00…02
+  length_match.py                等长组检查（RTL-07）与局部蛇形补齐（八方向、135° 拐角，放不下交给人）
+  epro_import.py                 读嘉立创 EDA 专业版工程包（.epro2）：铜皮数据包 + 丝印、位号、泪滴模型
   eda_bridge.py                  经本地桥与嘉立创 EDA 扩展联动：导出板子、同步设计确认、梳理优先级、交叉核对
   power_budget.py                功耗预算与峰值压降检查
   hw_calc.py                     I2C 上拉、储能电容、分压器、晶体负载电容、续航；抖动、纹波、高压储能、数据率
@@ -360,6 +365,10 @@ python scripts/design_gate.py summary design-brief.json T1
 python scripts/design_gate.py scope design-brief.json --nets RF_OUT,RF_ANT
 python scripts/design_gate.py ask design-brief.json G5
 python scripts/finish_lint.py board.kicad_pcb --brief design-brief.json --bom bom.csv --json finish-lint.json -o 出图前检查.md
+python scripts/epro_import.py 工程.epro2 -o board-pack.json --finish finish-model.json
+python scripts/route_lint.py lint board-pack.json --constraints constraints.json
+python scripts/route_fix.py board.kicad_pcb --brief design-brief.json --local -o fixed.kicad_pcb
+python scripts/length_match.py board-pack.json --brief design-brief.json -o matched.json --clearance 0.1
 python scripts/eda_bridge.py export -o board-pack.json
 python scripts/power_budget.py assets/power-budget-example.json
 python scripts/hw_calc.py i2c-pullup --vdd 1.8 --cb-pf 40 --speed 400k

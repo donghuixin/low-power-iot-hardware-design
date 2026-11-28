@@ -70,6 +70,7 @@ export function template(): any {
 			priorities: '待填：布线顺序 [{tier, class, nets:[…], method: 手工/工具辅助, rules}]，先射频、晶振、开关回路、高速差分',
 			diff_pairs: '待填：差分对 [{p, n, impedance_ohm, skew_mm}]，没有就写 无',
 			power_nets: '待填：电源网络 [{net, current_ma, width_mm}]',
+			length_groups: '无',
 			acceptance: { route_lint_min_score: 80, drc_zero: true, human_review: true },
 		},
 		G5_finish: finishTemplate(),
@@ -615,6 +616,19 @@ export function makeRequire(reports: Record<string, any> = {}): Record<Gate, Req
 			} },
 			reqList('G4_routing_plan.diff_pairs', '差分对', 1, [], true, '[{"p":"USB_DP","n":"USB_DM","impedance_ohm":90,"skew_mm":0.5}] 或 无'),
 			reqList('G4_routing_plan.power_nets', '电源网络与电流', 1, ['net', 'current_ma'], false, '[{"net":"VBAT","current_ma":300,"width_mm":0.5}]'),
+			{ field: { path: 'G4_routing_plan.length_groups', label: '等长组（可选；没有写 无）', kind: 'list', hint: '[{"name":"JTAG 烧写口","nets":["TCK","TMS","TDI","TDO"],"tol_mm":0.05}] 或 无' }, check: (b) => {
+				const v = get(b, 'G4_routing_plan.length_groups');
+				if (v === undefined || v === null || isBlank(v) || isNoneWord(v) || (Array.isArray(v) && !v.length))
+					return [];
+				if (!Array.isArray(v))
+					return ['等长组（G4_routing_plan.length_groups）：写成 [{name, nets, tol_mm}]，没有写 无'];
+				const out: string[] = [];
+				v.forEach((g: any, i: number) => {
+					if (!g || typeof g !== 'object' || isBlank(g.name) || !Array.isArray(g.nets) || g.nets.length < 2 || num(g.tol_mm) === null || num(g.tol_mm)! < 0)
+						out.push(`等长组第 ${i + 1} 项：要有 name、至少 2 个 nets 和 tol_mm（mm，≥ 0）`);
+				});
+				return out;
+			} },
 			{ field: { path: 'G4_routing_plan.acceptance.route_lint_min_score', label: '验收分数（≥ 75）', kind: 'number' }, check: (b) => {
 				const v = num(get(b, 'G4_routing_plan.acceptance.route_lint_min_score'));
 				return v === null || v < 75 ? ['验收分数（G4_routing_plan.acceptance.route_lint_min_score）：不低于 75'] : [];
@@ -640,7 +654,7 @@ export function makeRequire(reports: Record<string, any> = {}): Record<Gate, Req
 				if (un.length)
 					out.push(`还有 ${un.length} 个 P1 没改也没有用户同意保留：${un.slice(0, 4).map((v: any) => `${v.rule} ${(v.refs ?? []).join('、')}`).join('；')}${un.length > 4 ? ' 等' : ''}（改掉，或把用户同意保留的写进 accepted_exceptions，附原因）`);
 				const td = get(b, 'G5_finish.teardrops') ?? {};
-				if (rep.teardrop_source !== 'kicad' && td.policy !== undefined && td.policy !== '不加' && td.done !== '已执行并重新铺铜')
+				if ([undefined, null, 'none'].includes(rep.teardrop_source) && td.policy !== undefined && td.policy !== '不加' && td.done !== '已执行并重新铺铜')
 					out.push('读不到泪滴：在 EDA 里执行泪滴并重新铺铜，再把 G5_finish.teardrops.done 填成“已执行并重新铺铜”');
 				return out;
 			} },

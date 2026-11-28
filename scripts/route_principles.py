@@ -212,7 +212,7 @@ def check_proximity(ctx, nets, classes, values, nL, has_plane):
         # ---- 晶振负载电容
         if re.match(r"^C\d", ref) and len(pads) == 2 and "GND" in nets_of and "XTAL" in nets_of:
             xn, xi, xp = next(t for t in pads if classes[t[0]] == "XTAL")
-            ys = [(j, q) for j, q in enumerate(by[xn]["pads"]) if re.match(r"^(Y|X)\d", str(q["ref"]))]
+            ys = [(j, q) for j, q in enumerate(by[xn]["pads"]) if re.match(r"^(Y|X)\d", str(q["ref"])) and str(q.get("pin")) in ("1", "2", "3", "4")]
             if ys:
                 j, q = min(ys, key=lambda t: math.dist((t[1]["x"], t[1]["y"]), (xp["x"], xp["y"])))
                 L, how = route_len(xn, xi, j)

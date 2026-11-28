@@ -1,0 +1,147 @@
+{
+ "groups": [
+  {
+   "name": "JTAG 烧写口",
+   "nets": [
+    "TCK",
+    "TMS",
+    "TDI",
+    "TDO"
+   ],
+   "tol_mm": 0.05
+  },
+  {
+   "name": "I2S",
+   "nets": [
+    "BCLK",
+    "LRCLK"
+   ],
+   "tol_mm": 0.1
+  },
+  {
+   "name": "SD",
+   "nets": [
+    "SPI_CLK_SD",
+    "SPI_MOSI_SD",
+    "SPI_MISO_SD",
+    "SPI_CS_SD"
+   ],
+   "tol_mm": 0.05
+  }
+ ],
+ "rows": [
+  {
+   "group": "JTAG 烧写口",
+   "net": "TCK",
+   "len": 13.1484,
+   "target": 13.3462,
+   "deficit": 0.1477
+  },
+  {
+   "group": "JTAG 烧写口",
+   "net": "TMS",
+   "len": 13.1757,
+   "target": 13.3462,
+   "deficit": 0.1205
+  },
+  {
+   "group": "JTAG 烧写口",
+   "net": "TDI",
+   "len": 13.3462,
+   "target": 13.3462,
+   "deficit": 0.0
+  },
+  {
+   "group": "JTAG 烧写口",
+   "net": "TDO",
+   "len": 13.269,
+   "target": 13.3462,
+   "deficit": 0.0271
+  },
+  {
+   "group": "I2S",
+   "net": "BCLK",
+   "len": 22.5346,
+   "target": 22.5346,
+   "deficit": 0.0
+  },
+  {
+   "group": "I2S",
+   "net": "LRCLK",
+   "len": 20.3633,
+   "target": 22.5346,
+   "deficit": 2.0714
+  },
+  {
+   "group": "SD",
+   "net": "SPI_CLK_SD",
+   "len": 11.7493,
+   "target": 12.1987,
+   "deficit": 0.3994
+  },
+  {
+   "group": "SD",
+   "net": "SPI_MOSI_SD",
+   "len": 11.8382,
+   "target": 12.1987,
+   "deficit": 0.3105
+  },
+  {
+   "group": "SD",
+   "net": "SPI_MISO_SD",
+   "len": 12.1987,
+   "target": 12.1987,
+   "deficit": 0.0
+  },
+  {
+   "group": "SD",
+   "net": "SPI_CS_SD",
+   "len": 12.0444,
+   "target": 12.1987,
+   "deficit": 0.1043
+  }
+ ],
+ "fixed": [
+  [
+   "TCK",
+   0,
+   "serpentine ×1，A=0.24 mm，+0.20 mm"
+  ],
+  [
+   "TMS",
+   0,
+   "serpentine ×1，A=0.21 mm，+0.17 mm"
+  ],
+  [
+   "TDO",
+   0,
+   "serpentine ×1，A=0.09 mm，+0.08 mm"
+  ],
+  [
+   "SPI_CLK_SD",
+   5,
+   "serpentine ×1，A=0.40 mm，+0.45 mm"
+  ],
+  [
+   "SPI_CS_SD",
+   0,
+   "serpentine ×1，A=0.19 mm，+0.15 mm"
+  ]
+ ],
+ "manual": [
+  "LRCLK",
+  "SPI_MOSI_SD"
+ ],
+ "after": {
+  "TCK": 13.3463,
+  "TMS": 13.3462,
+  "TDI": 13.3462,
+  "TDO": 13.3462,
+  "BCLK": 22.5346,
+  "LRCLK": 20.3633,
+  "SPI_CLK_SD": 12.1986,
+  "SPI_MOSI_SD": 11.8382,
+  "SPI_MISO_SD": 12.1987,
+  "SPI_CS_SD": 12.1988
+ }
+}

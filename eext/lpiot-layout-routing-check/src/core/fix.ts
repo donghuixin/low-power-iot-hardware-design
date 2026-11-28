@@ -488,7 +488,8 @@ function astar(obs: Obstacles, S: Pt, T: Pt, w: number, net: string, layer: numb
 	return null;
 }
 
-export interface FixOptions { clearance?: number; outline?: Pt[]; cons?: Partial<Constraints> | null; nets?: string[] }
+/** local：只改 P0（任意角度、锐角、锐角分支、直角），不重布出线方向、短段和抖动，不删线头——真实板子上用这个 */
+export interface FixOptions { clearance?: number; outline?: Pt[]; cons?: Partial<Constraints> | null; nets?: string[]; local?: boolean }
 
 /** 只计算修复方案，不改板子 */
 export function planFix(board: Board, opt: FixOptions = {}): FixPlan {
@@ -543,7 +544,7 @@ export function planFix(board: Board, opt: FixOptions = {}): FixPlan {
 					changed = true;
 				}
 				let g = new Graph(segs, n.pads, n.vias, l);
-				if (!n.zone) {
+				if (!n.zone && !opt.local) {
 					for (let it = 0; it < 5; it++) {
 						const dead = g.chains.filter(c => !c.arc && [c.keys[0], c.keys[c.keys.length - 1]].some((k) => {
 							const nd = g.node(k);
@@ -582,7 +583,7 @@ export function planFix(board: Board, opt: FixOptions = {}): FixPlan {
 						}
 					}
 					const issues = [...new Set([...hard, ...soft, ...(jog ? ['jog'] : [])])].sort();
-					if (!issues.length)
+					if (!issues.length || (opt.local && !issues.some(x => ['angle', 'acute', 'tee'].includes(x))))
 						continue;
 					const A = c.pts[0];
 					const B = c.pts[c.pts.length - 1];

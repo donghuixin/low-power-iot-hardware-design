@@ -1,0 +1,393 @@
+{
+  "kind": "lpiot-design-brief",
+  "version": 2,
+  "project": {
+    "name": "MotherBoard（nRF5340 可穿戴主板，演示）",
+    "owner": "donghuixin"
+  },
+  "roles": {
+    "X1": "connector",
+    "VTRG1": "connector",
+    "CARD1": "connector",
+    "CN1": "battery",
+    "CRYSTAL1": "crystal",
+    "X2": "crystal",
+    "MDBT1": "rf_module",
+    "U1": "diode",
+    "U4": "res"
+  },
+  "G0_requirements": {
+    "function": "演示：基于 nRF5340（MDBT53 模组）的可穿戴录音与运动记录主板——PDM 麦克风 + ADAU1860 编解码，BMI270 + BMM150 运动与方向，TF 卡和 64 Mbit Flash 存储，USB-C 充电（BQ25120 + BQ27220 电量计），RGB 指示灯、按键，FPC 接副板",
+    "power": {
+      "source": "1S 锂电，USB-C 5 V 充电",
+      "peak_ma": 120,
+      "sleep_ua": 20
+    },
+    "wireless": "BLE 5.3（模组自带天线）",
+    "environment": "可穿戴，0–45 °C，塑料外壳",
+    "fab": {
+      "layers": 6,
+      "thickness_mm": 1.6,
+      "fab": "JLC",
+      "tier": "6 层 JLC06161H-3313，盘中孔树脂塞孔"
+    }
+  },
+  "G1_mechanical": {
+    "outline": {
+      "shape": "rect",
+      "w_mm": 24.511,
+      "h_mm": 35.306,
+      "file": ""
+    },
+    "enclosure": {
+      "material": "塑料",
+      "max_height_top_mm": 3.5,
+      "max_height_bottom_mm": 1.0
+    },
+    "holes": "无",
+    "fixed": [
+      {
+        "ref": "U7",
+        "what": "USB-C 接口",
+        "edge": "bottom",
+        "along_mm": 18.29,
+        "tol_mm": 1.0,
+        "side": "top",
+        "reason": "外壳下端开孔"
+      },
+      {
+        "ref": "X1",
+        "what": "FPC 座",
+        "edge": "left",
+        "along_mm": 14.99,
+        "tol_mm": 1.0,
+        "side": "top",
+        "reason": "排线从左侧接副板"
+      },
+      {
+        "ref": "CARD1",
+        "what": "TF 卡座",
+        "edge": "right",
+        "along_mm": 16.13,
+        "tol_mm": 1.0,
+        "side": "top",
+        "reason": "外壳右侧卡槽"
+      },
+      {
+        "ref": "SW1",
+        "what": "按键",
+        "edge": "bottom",
+        "along_mm": 6.73,
+        "tol_mm": 1.0,
+        "side": "top",
+        "reason": "外壳按键位置"
+      }
+    ],
+    "keepouts": "无"
+  },
+  "G2_partition": {
+    "blocks": [
+      {
+        "name": "无线主控",
+        "parts": [
+          "MDBT1",
+          "X2",
+          "C25",
+          "C26",
+          "J1"
+        ],
+        "region": [
+          0.138,
+          0.677,
+          0.999,
+          0.956
+        ],
+        "why": "主控模组贴上边，天线朝板外；调试口在模组左侧"
+      },
+      {
+        "name": "音频",
+        "parts": [
+          "U6",
+          "U12",
+          "CRYSTAL1",
+          "C3",
+          "C7"
+        ],
+        "region": [
+          0.115,
+          0.368,
+          0.44,
+          0.737
+        ],
+        "why": "PDM 麦克风和编解码在左侧中部，远离开关电源"
+      },
+      {
+        "name": "传感器",
+        "parts": [
+          "U2",
+          "U3"
+        ],
+        "region": [
+          0.382,
+          0.338,
+          0.551,
+          0.498
+        ],
+        "why": "IMU 和磁力计在板中部，离板边和电感有距离"
+      },
+      {
+        "name": "存储",
+        "parts": [
+          "U10",
+          "U11",
+          "CARD1"
+        ],
+        "region": [
+          0.295,
+          0.277,
+          1,
+          0.735
+        ],
+        "why": "Flash 与 TF 卡靠右边，TF 卡口朝外"
+      },
+      {
+        "name": "电源与充电",
+        "parts": [
+          "U5",
+          "U8",
+          "L1",
+          "U13",
+          "U14",
+          "CN1",
+          "SW1"
+        ],
+        "region": [
+          0.069,
+          0,
+          0.648,
+          0.468
+        ],
+        "why": "充电、电量计和负载开关集中在下部，开机键在下边"
+      },
+      {
+        "name": "指示与接口",
+        "parts": [
+          "U9",
+          "LED1",
+          "X1",
+          "VTRG1"
+        ],
+        "region": [
+          0,
+          0.239,
+          0.448,
+          0.954
+        ],
+        "why": "RGB 指示灯驱动、FPC 和排针在左边"
+      },
+      {
+        "name": "USB",
+        "parts": [
+          "U7",
+          "D1",
+          "R25",
+          "R26"
+        ],
+        "region": [
+          0.478,
+          0,
+          1,
+          0.287
+        ],
+        "why": "USB-C 贴下边，ESD 紧挨接口"
+      }
+    ],
+    "signal_flow": "USB-C(下) → 充电与电量计(下左) → 负载开关 → 1.8 V / 3.3 V → 主控模组(上)；麦克风与编解码(左) → I2S → 主控；传感器(中) → I2C → 主控；TF 卡与 Flash(右) → SPI → 主控",
+    "layout_review": {
+      "screenshot": "motherboard-layout.png",
+      "notes": "作者原始布局"
+    }
+  },
+  "G3_layout_check": {
+    "report": "待填：layout_lint.py 生成的 JSON 报告路径",
+    "accepted_exceptions": "无"
+  },
+  "G4_routing_plan": {
+    "stackup": [
+      {
+        "layer": "F.Cu",
+        "use": "器件与信号"
+      },
+      {
+        "layer": "In1.Cu",
+        "use": "参考地 1"
+      },
+      {
+        "layer": "In2.Cu",
+        "use": "电源层"
+      },
+      {
+        "layer": "In3.Cu",
+        "use": "数字信号"
+      },
+      {
+        "layer": "In4.Cu",
+        "use": "参考地 2"
+      },
+      {
+        "layer": "B.Cu",
+        "use": "信号与少量器件"
+      }
+    ],
+    "priorities": "待填：在扩展里“从板子梳理”后逐档确认",
+    "diff_pairs": [
+      {
+        "p": "USB_D+",
+        "n": "USB_D-",
+        "impedance_ohm": 90,
+        "skew_mm": 0.5
+      }
+    ],
+    "power_nets": [
+      {
+        "net": "V_BAT",
+        "current_ma": 300,
+        "width_mm": 0.4
+      },
+      {
+        "net": "VUSB",
+        "current_ma": 500,
+        "width_mm": 0.6
+      },
+      {
+        "net": "3V3",
+        "current_ma": 150,
+        "width_mm": 0.25
+      },
+      {
+        "net": "+1.8V",
+        "current_ma": 100,
+        "width_mm": 0.24
+      }
+    ],
+    "length_groups": [
+      {
+        "name": "JTAG 烧写口",
+        "nets": [
+          "TCK",
+          "TMS",
+          "TDI",
+          "TDO"
+        ],
+        "tol_mm": 0.05
+      },
+      {
+        "name": "TF 卡 SPI",
+        "nets": [
+          "SPI_CLK_SD",
+          "SPI_MOSI_SD",
+          "SPI_MISO_SD",
+          "SPI_CS_SD"
+        ],
+        "tol_mm": 0.1
+      }
+    ],
+    "constraints": {
+      "board": {
+        "via_in_pad_plugged": true
+      },
+      "netclasses": {
+        "SIG": {
+          "allow_arc": true
+        },
+        "CLK": {
+          "allow_arc": true
+        },
+        "ANALOG": {
+          "allow_arc": true
+        },
+        "PWR_LOW": {
+          "allow_arc": true
+        },
+        "PWR_MAIN": {
+          "allow_arc": true
+        },
+        "GND": {
+          "allow_arc": true
+        },
+        "SW": {
+          "allow_arc": true
+        },
+        "USB90": {
+          "allow_arc": true
+        },
+        "DIFF100": {
+          "allow_arc": true
+        },
+        "XTAL": {
+          "allow_arc": true
+        }
+      },
+      "nets": {
+        "I2C1_SDAR": {
+          "class": "SIG"
+        },
+        "PDMDIN1": {
+          "class": "SIG"
+        }
+      }
+    },
+    "acceptance": {
+      "route_lint_min_score": 75,
+      "drc_zero": true,
+      "human_review": true
+    }
+  },
+  "G5_finish": {
+    "silk": {
+      "process": "标准丝印",
+      "text_height_mm": 1.0,
+      "line_width_mm": 0.153,
+      "pad_clearance_mm": 0.15,
+      "designators": "只印关键器件",
+      "orientation": "0° 和 90°",
+      "polarity": "芯片 1 脚圆点，LED 阴极横杠，排针 1 脚方焊盘",
+      "labels": [
+        {
+          "ref": "J1",
+          "text": "SWD"
+        }
+      ],
+      "board_marking": {
+        "name": "MotherBoard",
+        "version": "V1.0"
+      },
+      "warnings": "无",
+      "compliance": "无",
+      "jlc_order_no": "板厂默认位置",
+      "bottom_silk": "不需要",
+      "review": {
+        "screenshot": "待填：用户看过的丝印截图",
+        "polarity_checked": "待填：是否已对照原理图逐个核对极性器件和 1 脚标记？（已核对）"
+      }
+    },
+    "annotation": {
+      "scheme": "保持现状",
+      "back_annotated": "没有改动",
+      "bom": ""
+    },
+    "teardrops": {
+      "policy": "全部焊盘与过孔",
+      "exclude_rf_diff": "去掉",
+      "done": "已执行并重新铺铜"
+    },
+    "report": "待填：finish_lint.py --json 的报告路径",
+    "accepted_exceptions": "无"
+  },
+  "G6_acceptance": {
+    "route_report": "待填",
+    "drc_errors": "待填",
+    "screenshots": "待填"
+  },
+  "confirmations": {}
+}

@@ -99,6 +99,7 @@ def template():
             "priorities": "待填：布线顺序 [{tier, class, nets:[…], method: 手工/工具辅助, rules}]，先射频、晶振、开关回路、高速差分",
             "diff_pairs": "待填：差分对 [{p, n, impedance_ohm, skew_mm}]，没有就写 无",
             "power_nets": "待填：电源网络 [{net, current_ma, width_mm}]",
+            "length_groups": "无",
             "acceptance": {"route_lint_min_score": 80, "drc_zero": True, "human_review": True},
         },
         "G5_finish": finish_template(),
@@ -457,7 +458,7 @@ def req_finish_report(b, base=None):
         ex = "；".join(f"{v.get('rule')} {'、'.join(v.get('refs') or [])}" for v in un[:4])
         out.append(f"还有 {len(un)} 个 P1 没改也没有用户同意保留：{ex}{' 等' if len(un) > 4 else ''}（改掉，或把用户同意保留的写进 accepted_exceptions，附原因）")
     td = get(b, "G5_finish.teardrops") or {}
-    if rep.get("teardrop_source") != "kicad" and td.get("policy") not in (None, "不加") and td.get("done") != "已执行并重新铺铜":
+    if rep.get("teardrop_source") in (None, "none") and td.get("policy") not in (None, "不加") and td.get("done") != "已执行并重新铺铜":
         out.append("读不到泪滴：在 EDA 里执行泪滴并重新铺铜，再把 G5_finish.teardrops.done 填成“已执行并重新铺铜”")
     return out
 
@@ -498,6 +499,21 @@ def route_scope(b, nets, plan_nets=None):
         extra = sorted(set(plan_nets) - set(names))
         if extra:
             out.append(f"走线里还有没点名的网络：{'、'.join(extra[:6])}{' 等' if len(extra) > 6 else ''}。只能写用户点名的网络。")
+    return out
+
+
+def req_length_groups(b, base=None):
+    """等长组（可选）：[{name, nets: [≥ 2 个], tol_mm}]，没有写 无。由用户决定哪些线要等长。"""
+    v = get(b, "G4_routing_plan.length_groups")
+    if v is None or is_blank(v) or is_none_word(v) or v == []:
+        return []
+    if not isinstance(v, list):
+        return ["等长组（G4_routing_plan.length_groups）：写成 [{name, nets, tol_mm}]，没有写 无"]
+    out = []
+    for i, g in enumerate(v):
+        if not isinstance(g, dict) or is_blank(g.get("name")) or not isinstance(g.get("nets"), list) or len(g["nets"]) < 2 \
+                or num(g.get("tol_mm")) is None or num(g.get("tol_mm")) < 0:
+            out.append(f"等长组第 {i + 1} 项：要有 name、至少 2 个 nets 和 tol_mm（mm，≥ 0）")
     return out
 
 
@@ -671,6 +687,7 @@ REQUIRE = {
         req_tiers_confirmed,
         req_list("G4_routing_plan.diff_pairs", "差分对", allow_none=True),
         req_list("G4_routing_plan.power_nets", "电源网络与电流", 1, ("net", "current_ma")),
+        req_length_groups,
         req_min_score,
     ],
     "G5": [

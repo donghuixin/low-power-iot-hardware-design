@@ -7,6 +7,7 @@ import type { Chain } from './graph';
 import type { Board, ClassRule, Constraints, Net, Violation } from './model';
 import { angleBetween, dist, hypot, isOcti, mean, octiDev, octMst, padAxis, pointInPoly, pstdev, ptInPad, ptSeg, round, segLen, SIN1, TURN_TOL } from './geom';
 import { Graph } from './graph';
+import { lengthViolations } from './length';
 import { classRules, inferClass, mergeCons } from './model';
 import { analyzePrinciples, pairNames } from './principles';
 
@@ -71,6 +72,7 @@ function padAlignedExit(g: Graph, e: { ka: string; kb: string }, dx: number, dy:
 
 /** 单个网络单层上的几何规则 */
 export function checkGraph(ctx: Ctx, g: Graph, segs: Seg[], net: string, _cls: string, rules: ClassRule, stats: Stats): void {
+	const meander = (ctx.cons.length_groups ?? []).some(grp => grp.nets.includes(net)); // 等长组：蛇形段不算短段、抖动和多余拐弯
 	const geo = ctx.cons.geometry;
 	const tol = (geo.angle_tol_um ?? 1) / 1000;
 	const L = g.layer;
@@ -126,7 +128,7 @@ export function checkGraph(ctx: Ctx, g: Graph, segs: Seg[], net: string, _cls: s
 			const Ls = dist(pts[i], pts[i + 1]);
 			const nearAnchor = (i === 0 && g.node(c.keys[0]).anchor) || (i === pts.length - 2 && g.node(c.keys[c.keys.length - 1]).anchor);
 			const lim = nearAnchor ? (geo.fanout_k_w ?? 0.5) * w : Math.max(kw * w, absmin);
-			if (Ls > 1e-6 && Ls < lim - 1e-9 && pts.length > 2) {
+			if (Ls > 1e-6 && Ls < lim - 1e-9 && pts.length > 2 && !meander) {
 				ctx.add('RTG-05', 'P2', net, L, pts[i], `短线段 ${Ls.toFixed(3)} mm（下限 ${lim.toFixed(3)} mm）`, round(Ls, 3), undefined, idsOf(segs, g, [c.edges[i]]));
 				stats.short++;
 			}
@@ -155,10 +157,11 @@ export function checkGraph(ctx: Ctx, g: Graph, segs: Seg[], net: string, _cls: s
 					need += 0.5;
 			}
 		}
-		stats.excess.push(Math.max(0, turnSum - need));
+		if (!meander)
+			stats.excess.push(Math.max(0, turnSum - need));
 		const jogk = geo.jog_k_w ?? 2;
-		let flagged = false;
-		for (let i = 0; i < pts.length - 3; i++) {
+		let flagged = meander;
+		for (let i = 0; i < (meander ? 0 : pts.length - 3); i++) {
 			const [a0, a1, b0, b1] = [pts[i], pts[i + 1], pts[i + 2], pts[i + 3]];
 			const u: Pt = [a1[0] - a0[0], a1[1] - a0[1]];
 			const v: Pt = [b1[0] - b0[0], b1[1] - b0[1]];
@@ -187,7 +190,11 @@ export function checkGraph(ctx: Ctx, g: Graph, segs: Seg[], net: string, _cls: s
 			const p = nd.pad;
 			if (!p || !p.w || p.shape === 'circle' || pts.length < 2)
 				continue;
-			const [a, b] = end === 0 ? [pts[0], pts[1]] : [pts[pts.length - 1], pts[pts.length - 2]];
+			const seq = end === 0 ? pts : [...pts].reverse();
+			let k = 1; // 跳过还在焊盘里的微小折线（EDA 吸附留下的残段），看真正离开焊盘的那一段
+			while (k < seq.length - 1 && ptInPad(seq[k][0], seq[k][1], p, 0))
+				k++;
+			const [a, b] = [seq[k - 1], seq[k]];
 			const d: Pt = [b[0] - a[0], b[1] - a[1]];
 			const Ld = hypot(d[0], d[1]);
 			if (Ld < 1e-6)
@@ -199,6 +206,8 @@ export function checkGraph(ctx: Ctx, g: Graph, segs: Seg[], net: string, _cls: s
 			const small = Math.min(p.w, ph);
 			if (big / Math.max(small, 1e-6) >= 1.3)
 				axes = p.w >= ph ? [[ux, uy]] : [[-uy, ux]];
+			else // 近似方形的焊盘（LGA、0402 以下）：45° 从角上出线也可以
+				axes.push([(ux - uy) / Math.SQRT2, (uy + ux) / Math.SQRT2], [(ux + uy) / Math.SQRT2, (uy - ux) / Math.SQRT2]);
 			if (!axes.some(([ax, ay]) => Math.abs(d[0] * ay - d[1] * ax) / Ld <= SIN1)) {
 				ctx.add('RTG-07', small <= 0.35 ? 'P1' : 'P2', net, L, a, `从焊盘 ${p.ref}.${p.pin} 斜着或沿短轴出线（应沿焊盘长轴直出）`, undefined, undefined, idsOf(segs, g, [end === 0 ? c.edges[0] : c.edges[c.edges.length - 1]]));
 				stats.exit++;
@@ -488,7 +497,7 @@ export function analyze(board: Board, consIn?: Partial<Constraints> | null): Rep
 				if (ptInPad(v[0], v[1], p, 0)) {
 					if (owner !== n.name)
 						ctx.add('RTV-05', 'P0', n.name, p.l, [v[0], v[1]], `过孔压在其他网络 ${owner} 的焊盘 ${p.ref}.${p.pin} 上`, undefined, undefined, v[3] ? [v[3]] : undefined);
-					else if ((p.w ?? 0) * (p.h ?? 0) < 2 && !['EP', 'PAD', '0', 'GND', 'THERMAL'].includes(String(p.pin).toUpperCase()))
+					else if ((p.w ?? 0) * (p.h ?? 0) < 2 && !['EP', 'PAD', '0', 'GND', 'THERMAL'].includes(String(p.pin).toUpperCase()) && !ctx.cons.board?.via_in_pad_plugged)
 						ctx.add('RTV-05', 'P1', n.name, p.l, [v[0], v[1]], `盘中孔：过孔在焊盘 ${p.ref}.${p.pin} 内（标准工艺不塞孔会漏锡）`, undefined, undefined, v[3] ? [v[3]] : undefined);
 				}
 			}
@@ -537,6 +546,8 @@ export function analyze(board: Board, consIn?: Partial<Constraints> | null): Rep
 			values[p.ref] = p.value;
 	}
 	const pairs = analyzePrinciples(ctx, nets, classes, values, nL, gndLayers.length > 0, Object.fromEntries(perNet.map(p => [p.net, p.len])));
+	for (const v of lengthViolations(board, ctx.cons.length_groups ?? []))
+		ctx.add(v.rule, v.sev, v.net, null, null, v.msg, v.value, v.metric);
 	const [cv, overload] = density(nets);
 
 	// ---------------- 评分

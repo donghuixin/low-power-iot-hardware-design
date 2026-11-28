@@ -3,7 +3,7 @@
  * 在嘉立创 EDA 里通过 eda.sys_MessageBus 与扩展主线程通信；单独打开（没有 eda 对象）时进入演示模式，用内置示例板。
  */
 import type { Board, FinishModel, FinishReport, FixPlan, Gate, LayoutIssue, LayoutReport, Net, OrderRow, Pad, Pt, Report, Seg, Violation } from '../core';
-import { analyze, status as briefStatus, template as briefTemplate, confirm as confirmGate, confirmTier, dist, draftPriorities, fields, FINISH_QUESTIONS, finishAnswered, finishCheck, GATES, summary as gateSummary, layoutCheck, planFix, requireStage, routingOrder, TIERS, tierStates } from '../core';
+import { analyze, status as briefStatus, template as briefTemplate, confirm as confirmGate, confirmTier, dist, draftPriorities, fields, FINISH_QUESTIONS, finishAnswered, finishCheck, GATES, summary as gateSummary, layoutCheck, planFix, planLengthMatch, requireStage, routingOrder, TIERS, tierStates } from '../core';
 import demoBrief from './demo-brief.json';
 import demoFinish from './demo-finish.json';
 import demo from './demo.json';
@@ -35,11 +35,16 @@ if (HAS_EDA) {
 	}
 	catch {}
 }
-const demoKey: keyof typeof demo = 'demo-node';
+const demoKey: keyof typeof demo = 'motherboard';
 let demoBoard: Board = clone((demo as any)[demoKey]);
 let demoPlan: FixPlan | null = null;
-const demoBriefs: Record<string, any> = { 'demo-node': clone(demoBrief) };
-const DEMO_OUTLINE: Record<string, Pt[]> = { 'demo-node': [[0, 0], [50, 0], [50, 32], [0, 32]] };
+const demoBriefs: Record<string, any> = { motherboard: clone(demoBrief) };
+const DEMO_OUTLINE: Record<string, Pt[]> = {};
+/** 演示板的检查约束：设计确认 G4 里的约束和等长组 */
+function demoCons(): any {
+	const g4 = demoBriefs[demoKey]?.G4_routing_plan ?? {};
+	return { ...(g4.constraints ?? {}), ...(Array.isArray(g4.length_groups) ? { length_groups: g4.length_groups } : {}) };
+}
 function demoView(): any {
 	const b = demoBriefs[demoKey];
 	return { brief: b, status: briefStatus(b), tiers: tierStates(b), summaries: Object.fromEntries(GATES.map(g => [g, gateSummary(b, g)])) };
@@ -54,9 +59,9 @@ async function mock(cmd: string, _args: any): Promise<any> {
 	const args = _args ?? {};
 	switch (cmd) {
 		case 'check': {
-			const report = analyze(board);
+			const report = analyze(board, demoCons());
 			const b = demoBriefs[demoKey];
-			return { board, bbox: bb, report, order: routingOrder(board.nets, report.classes), warnings: ['演示模式：内置示例板'], gate: { route: requireStage(b, 'route'), deliver: requireStage(b, 'deliver') } };
+			return { board, bbox: bb, report, order: routingOrder(board.nets, report.classes), warnings: ['演示模式：真实板 MotherBoard（nRF5340，6 层 24.5 × 35.3 mm，作者同意公开）'], gate: { route: requireStage(b, 'route'), deliver: requireStage(b, 'deliver') } };
 		}
 		case 'briefGet':
 			return demoView();
@@ -105,16 +110,23 @@ async function mock(cmd: string, _args: any): Promise<any> {
 			const report = finishCheck(model, b, null);
 			if (args.record)
 				b.G5_finish = { ...(b.G5_finish ?? {}), report: '扩展出图前检查', result: report };
-			return { model, report, warnings: ['演示模式：内置丝印示例板（30 × 20 mm）'], brief: demoView() };
+			return { model, report, warnings: ['演示模式：真实板 MotherBoard 的丝印、位号与泪滴'], brief: demoView() };
 		}
 		case 'routeRecord': {
-			const report = analyze(board);
+			const report = analyze(board, demoCons());
 			demoBriefs[demoKey].G6_acceptance = { ...(demoBriefs[demoKey].G6_acceptance ?? {}), route_report: '扩展布线检查', route_result: { score: report.score, pass: report.pass, p0: report.violations.filter(v => v.sev === 'P0').length } };
 			return demoView();
 		}
 		case 'fixPlan':
-			demoPlan = planFix(board);
+			demoPlan = planFix(board, { local: !!args.local, cons: demoCons(), clearance: 0.1 });
 			return { ...demoPlan, gate: requireStage(demoBriefs[demoKey], 'route') };
+		case 'lengthPlan': {
+			const groups = demoCons().length_groups ?? [];
+			if (!groups.length)
+				throw new Error('没有等长组：先在“确认”页 G4 里写等长组');
+			demoPlan = planLengthMatch(board, groups, { clearance: 0.1 });
+			return { ...demoPlan, gate: requireStage(demoBriefs[demoKey], 'route') };
+		}
 		case 'fixApply': {
 			const miss = requireStage(demoBriefs[demoKey], 'route');
 			if (miss.length)
@@ -964,6 +976,15 @@ function drawLoop(v: Violation | undefined, now: number): void {
 function drawFix(now: number): void {
 	const t = ((now - modeT0) / 1000) % 3.6;
 	for (const it of plan!.fixed) {
+		if (it.issues.includes('length')) {
+			// 等长补偿：原来的直线淡红虚线，蛇形段先亮一圈光晕再画出来，画完停住
+			const k = Math.max(0, Math.min(1, ((now - modeT0) / 1000 - 0.3) / 1.2));
+			const total = it.after.reduce((s, p, i) => (i ? s + dist(it.after[i - 1], p) : 0), 0);
+			poly(it.before, 0.15, '#ff3b5c', 0.45, [3, 3]);
+			poly(it.after, 0.42, '#3ccf7a', 0.22, undefined, k * total);
+			poly(it.after, 0.16, '#5dfc9e', 1, undefined, k * total);
+			continue;
+		}
 		if (it.before.length > 1)
 			poly(it.before, 0.2, '#ff3b5c', Math.max(0.15, 1 - t / 1.4), [4, 4]);
 		if (it.after.length > 1) {
@@ -1250,20 +1271,21 @@ function renderOrder(): void {
 		el.onclick = () => selectNet(el.dataset.on!);
 	});
 }
-const ISSUE: Record<string, string> = { right: '直角拐角', angle: '任意角度', exit: '斜出焊盘', acute: '锐角', tee: '锐角分支', short: '短线段', jog: '抖动', stub: '悬空线头', overlap: '重叠线段', connectivity: '会改变连通', degenerate: '退化' };
+const ISSUE: Record<string, string> = { length: '等长补偿（局部蛇形线）', right: '直角拐角', angle: '任意角度', exit: '斜出焊盘', acute: '锐角', tee: '锐角分支', short: '短线段', jog: '抖动', stub: '悬空线头', overlap: '重叠线段', connectivity: '会改变连通', degenerate: '退化' };
 const issueText = (xs: string[]) => xs.map(x => ISSUE[x] ?? x).join('、');
 function renderFix(): void {
 	const pane = $('p-fix');
 	if (!plan) {
-		pane.innerHTML = '<div class="empty">点“修复预览”计算修复方案。只修几何（任意角度、锐角、抖动、斜出焊盘、悬空线头、重叠线段），不改过孔和连接关系。</div>';
+		pane.innerHTML = `${FIXBAR}<div class="empty">点“修复预览”计算修复方案：只修几何，不改过孔和连接关系。勾选“只改 P0”时只动任意角度、锐角、锐角分支和直角，其他走线一根不动。“等长补偿”按 G4 里确认的等长组，在偏短的网络上加局部蛇形线。</div>`;
+		bindFixBar();
 		return;
 	}
 	const nAdd = plan.changes.reduce((s, c) => s + c.add.length, 0);
 	const nRm = plan.changes.reduce((s, c) => s + c.remove.length, 0);
 	const gateMiss: string[] = (plan as any).gate ?? [];
-	let html = gateMiss.length ? `<div class="warnbox">设计确认未放行，现在只能预览：${gateMiss.map(esc).join('；')}</div>` : '';
+	let html = FIXBAR + (gateMiss.length ? `<div class="warnbox">设计确认未放行，现在只能预览：${gateMiss.map(esc).join('；')}</div>` : '');
 	html += `<div class="group"><h4><span>可自动修复 ${plan.fixed.length} 处（${plan.changes.length} 个网络，删 ${nRm} 段 / 建 ${nAdd} 段）</span></h4>`;
-	html += plan.fixed.map(it => `<div class="item"><div class="row"><span class="sev P3">${esc(it.how === 'remove' ? '删除' : it.how === 'merge' ? '合并' : it.how === 'chamfer' ? '斜切' : '重建')}</span><span class="rule">${esc(it.net)} · L${it.layer + 1}</span></div><div class="msg">${esc(issueText(it.issues))}</div></div>`).join('');
+	html += plan.fixed.map((it, i) => `<div class="item" data-fx="${i}"><div class="row"><span class="sev P3">${esc(it.how === 'remove' ? '删除' : it.how === 'merge' ? '合并' : it.how === 'chamfer' ? '斜切' : it.issues.includes('length') ? '蛇形' : '重建')}</span><span class="rule">${esc(it.net)} · L${it.layer + 1}</span></div><div class="msg">${esc(issueText(it.issues))}${it.issues.includes('length') ? `：${esc(it.how)}` : ''}</div></div>`).join('');
 	html += '</div>';
 	if (plan.manual.length) {
 		html += `<div class="group"><h4><span>需要人工处理 ${plan.manual.length} 处</span></h4>`;
@@ -1272,6 +1294,34 @@ function renderFix(): void {
 	}
 	html += '<div class="note">画布上红色虚线是原走线，绿色是修复后的走线；黄框是修不了的位置。应用后请在嘉立创 EDA 里重新铺铜并跑一次 DRC。</div>';
 	pane.innerHTML = html;
+	bindFixBar();
+	pane.querySelectorAll<HTMLElement>('[data-fx]').forEach((el) => {
+		el.onclick = () => {
+			const it = plan!.fixed[Number(el.dataset.fx)];
+			const pts = it.after.length ? it.after : it.before;
+			if (pts.length) {
+				const xs = pts.map(p => p[0]);
+				const ys = pts.map(p => p[1]);
+				zoomTo([(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2], Math.max(view.s, it.issues.includes('length') ? 150 : 40));
+				modeT0 = performance.now();
+			}
+			caption(`${it.net}：${issueText(it.issues)}${it.issues.includes('length') ? `，${it.how}` : ''}`);
+		};
+	});
+}
+let localFix = true;
+const FIXBAR = '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 10px"><label style="display:inline-flex;gap:6px;align-items:center;white-space:nowrap;margin:0"><input type="checkbox" id="fxLocal" style="width:auto;margin:0" />只改 P0（局部，推荐）</label><button id="fxLen" style="white-space:nowrap">等长补偿</button></div>';
+function bindFixBar(): void {
+	const cb = document.getElementById('fxLocal') as HTMLInputElement | null;
+	if (cb) {
+		cb.checked = localFix;
+		cb.onchange = () => {
+			localFix = cb.checked;
+		};
+	}
+	const b = document.getElementById('fxLen');
+	if (b)
+		b.onclick = () => lengthPreview();
 }
 // ------------------------------------------------------------------ 设计确认与布局
 function getPath(d: any, path: string): any {
@@ -1691,8 +1741,8 @@ function renderFinish(): void {
 	if (F) {
 		const R = F.report;
 		html += `<div class="group"><h4><span>P0 ${R.p0} · P1 ${R.p1}（未处理 ${R.unresolved_p1}）· P2 ${R.p2} · P3 ${R.p3}</span><span>${R.pass ? '通过' : '不通过'}</span></h4></div>`;
-		if (R.teardrop_source !== 'kicad' || R.silk_graphics_source !== 'full')
-			html += `<div class="warnbox">扩展读不到${R.teardrop_source !== 'kicad' ? '泪滴' : ''}${R.teardrop_source !== 'kicad' && R.silk_graphics_source !== 'full' ? '和' : ''}${R.silk_graphics_source !== 'full' ? '封装自带的丝印线（1 脚、极性标记）' : ''}：请在 EDA 里执行泪滴并重新铺铜，对照原理图逐个看极性标记，再回答上面对应的问题。</div>`;
+		if (R.teardrop_source === 'none' || R.silk_graphics_source !== 'full')
+			html += `<div class="warnbox">扩展读不到${R.teardrop_source === 'none' ? '泪滴' : ''}${R.teardrop_source === 'none' && R.silk_graphics_source !== 'full' ? '和' : ''}${R.silk_graphics_source !== 'full' ? '封装自带的丝印线（1 脚、极性标记）' : ''}：请在 EDA 里执行泪滴并重新铺铜，对照原理图逐个看极性标记，再回答上面对应的问题。</div>`;
 		for (const sv of ['P0', 'P1', 'P2', 'P3']) {
 			const idx = R.issues.map((v, i) => [v, i] as const).filter(([v]) => v.sev === sv);
 			if (!idx.length)
@@ -1865,7 +1915,7 @@ async function fixPreview(): Promise<void> {
 	btn.disabled = true;
 	btn.innerHTML = '<span class="spinner"></span>计算中';
 	try {
-		plan = await rpc('fixPlan');
+		plan = await rpc('fixPlan', { local: localFix });
 		mode = 'fix';
 		modeT0 = performance.now();
 		renderFix();
@@ -1881,6 +1931,23 @@ async function fixPreview(): Promise<void> {
 	finally {
 		btn.disabled = false;
 		btn.textContent = '修复预览';
+	}
+}
+async function lengthPreview(): Promise<void> {
+	if (!D)
+		await check();
+	try {
+		plan = await rpc('lengthPlan');
+		mode = 'fix';
+		modeT0 = performance.now();
+		renderFix();
+		tab('fix');
+		($('btnApply') as HTMLButtonElement).disabled = !plan?.changes.length;
+		const rows = ((plan as any).rows ?? []) as { net: string; deficit: number }[];
+		caption(plan?.changes.length ? `等长补偿：${plan.fixed.map(f => f.net).join('、')} 加局部蛇形线（点列表里的一项放大看）` : rows.some(r => r.deficit > 0) ? '有网络偏短，但找不到地方加蛇形线：见“需要人工处理”' : '等长组都在容差内');
+	}
+	catch (e: any) {
+		caption(`等长补偿计算失败：${e?.message ?? e}`);
 	}
 }
 async function fixApply(): Promise<void> {
@@ -2001,4 +2068,4 @@ resize();
 requestAnimationFrame(frame);
 loadAi();
 check().then(loadBrief);
-(window as any).__lpiot = { runFinish, selectFinishIssue, setFinish, get finish() { return F; }, get layout() { return L; }, get brief() { return BR; }, runLayout, selectLayoutIssue, tab, get data() { return D; }, get plan() { return plan; }, selectNet, selectViolation, playOrder, fixPreview, check, rpc, get mode() { return mode; } };
+(window as any).__lpiot = { lengthPreview, runFinish, selectFinishIssue, setFinish, get finish() { return F; }, get layout() { return L; }, get brief() { return BR; }, runLayout, selectLayoutIssue, tab, get data() { return D; }, get plan() { return plan; }, selectNet, selectViolation, playOrder, fixPreview, check, rpc, get mode() { return mode; } };

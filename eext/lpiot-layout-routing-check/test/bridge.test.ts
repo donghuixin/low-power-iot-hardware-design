@@ -47,7 +47,7 @@ it('本地桥：枢纽 + 转发端共用一条编辑器连接；HTTP 必须带�
 	const info = JSON.parse(fs.readFileSync(path.join(home, 'bridge.json'), 'utf8'));
 	assert.equal(info.token.length, 48);
 	// 假扩展：用核心对示例板做检查
-	const board = (demo as any)['demo-node'] as Board;
+	const board = (demo as any).motherboard as Board;
 	const ws = new WebSocket('ws://127.0.0.1:49841');
 	await new Promise(r => ws.on('open', r));
 	ws.send(JSON.stringify({ hello: 'lpiot-layout-routing-check', version: '0.4.0', protocol: 1 }));

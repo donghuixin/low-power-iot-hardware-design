@@ -75,7 +75,7 @@ export function inferClass(name: string, pads: Pad[] = []): [string, number, str
 	}
 	if (cls === 'SIG' && conf < 0.9) {
 		const refs = pads.map(p => [String(p.ref ?? ''), String(p.pin ?? '')]);
-		if (refs.some(([r]) => /^(Y|X)\d/.test(r)))
+		if (refs.some(([r, q]) => /^(Y|X)\d/.test(r) && ['1', '2', '3', '4'].includes(q))) // 晶振只有 1–4 脚；X1.13 是模组
 			return ['XTAL', 0.9, '连到晶振'];
 		if (refs.some(([r, q]) => /^(J|USB|CN)/.test(r) && ['A6', 'A7', 'B6', 'B7', 'D+', 'D-', 'DP', 'DM'].includes(q.toUpperCase())))
 			return ['USB90', 0.85, '连到 USB 连接器的 D+/D- 脚'];
@@ -91,13 +91,14 @@ export interface Constraints {
 	geometry: { angle_tol_um: number; min_seg: { k_w: number; abs_mm: number }; fanout_k_w: number; jog_k_w: number; jitter_window_k_w: number; forbid_right_angle?: boolean };
 	netclasses: Record<string, Partial<ClassRule>>;
 	nets: Record<string, { class?: string }>;
+	length_groups?: { name: string; nets: string[]; tol_mm: number }[];
 	layers: { name?: string; role?: string; preferred_dir?: 'H' | 'V' | null }[];
 	bundles: { id: string; nets: string[]; pitch_mm?: number }[];
 	exempt_zones: { poly: Pt[]; rules: string[]; reason?: string }[];
 	keepouts: { poly: Pt[] }[];
 	locks: { net: string }[];
 	pairs: { p: string; n: string }[];
-	board: { fab_min_track?: number };
+	board: { fab_min_track?: number; via_in_pad_plugged?: boolean };
 }
 
 export function mergeCons(c?: Partial<Constraints> | null): Constraints {

@@ -2,17 +2,22 @@
 
 嘉立创 EDA 专业版扩展。布局和布线之前，先和设计者逐级确认设计信息；按板子的功能梳理网络优先级并逐档确认；对照确认内容检查器件摆放；按成文的走线规则检查布线、打分，用板子动画讲清楚问题；确认放行后一键修复几何问题（所有拐角都是 135°，不留直角）。可以接入你自己的大模型，也可以通过本地桥让本机的 AI 客户端（Claude Code、Codex 等）调用。
 
-![全流程演示](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/demo.gif)
+**演示视频**（真实板：nRF5340 / MDBT53 可穿戴主板，6 层 24.5 × 35.3 mm、96 个器件，作者同意公开）：[▶ 观看 demo.mp4（1 分 44 秒）](https://github.com/donghuixin/low-power-iot-hardware-design/blob/main/eext/lpiot-layout-routing-check/docs/demo.mp4)
 
-**分步演示**（演示板：BLE 运动传感器节点，走线全部为 135° 拐角）：
+[![演示视频](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/demo-poster.jpg)](https://github.com/donghuixin/low-power-iot-hardware-design/blob/main/eext/lpiot-layout-routing-check/docs/demo.mp4)
+
+**分步演示**：
 
 | ① 逐级确认 | ② 布局检查 |
 |---|---|
 | ![逐级确认](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/step-confirm.gif) | ![布局检查](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/step-layout.gif) |
-| 每级核对摘要后手动输入确认码；前面改了，后面自动失效 | 功能分区扫入、器件按功能块落位；净空区、目标位置、去耦回路逐条动画 |
-| **③ 优先级逐档确认** | **④ 布线检查与修复** |
-| ![优先级逐档确认](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/step-priority.gif) | ![布线检查与修复](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/step-fix.gif) |
-| 按板子功能梳理 9 档，板子上只亮当前这一档的网络，逐档确认 | 去耦回路、差分与回流、顺序回放；修复预览红线 → 绿线，修复后没有直角 |
+| 每级核对摘要后手动输入确认码；前面改了，后面自动失效 | 实板上找出磁力计离电感 5.7 mm、天线离 TF 卡座 2.6 mm |
+| **③ 优先级逐档确认** | **④ 布线检查与局部修复** |
+| ![优先级逐档确认](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/step-priority.gif) | ![布线检查与局部修复](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/step-fix.gif) |
+| 按板子功能梳理成档，板子上只亮当前这一档，逐档确认 | 找出直角、锐角分支；“只改 P0”只动这些拐角，其他走线不动 |
+| **⑤ 等长补偿** | **⑥ 丝印、位号与泪滴** |
+| ![等长补偿](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/step-length.gif) | ![丝印检查](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/step-finish.gif) |
+| 按你在 G4 确认的等长组，只在偏短的线上加一小段蛇形线；放不下的交给人 | 出图前 20 个决定逐项回答，再检查丝印、位号和泪滴 |
 
 > **能力边界：检查图、改图，不是完全自由的自动布线。** 本扩展检查布局、布线、丝印和位号，修复已有走线的几何问题；外部 AI 代理写走线时，必须点名这一批网络（每批不超过 8 个、在已确认的优先级里）。“全局布线”“把剩下的都布了”会被直接拒绝。
 >
@@ -80,14 +85,16 @@
 
 14 项指标加权成 100 分，任一 P0 即不通过。规则、阈值和出处见 [low-power-iot-hardware-design](https://github.com/donghuixin/low-power-iot-hardware-design) 的 references/16–19。
 
-| 去耦回路 | 差分对与回流 | 布线顺序回放 | 修复预览 |
+| 布线检查 | 局部修复 | 等长补偿 | 丝印检查 |
 |---|---|---|---|
-| ![](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/decap-loop.jpg) | ![](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/diff-return.jpg) | ![](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/order-replay.jpg) | ![](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/fix-preview.jpg) |
+| ![](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/route-check.jpg) | ![](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/fix-preview.jpg) | ![](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/length-match.jpg) | ![](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-layout-routing-check/docs/finish-check.jpg) |
 
 - **电流流动**：点一根走线，电流沿铜皮从芯片端流向各个焊盘；差分对两根同步流动。
 - **回流路径**：信号换层的过孔到最近地过孔的回流路径用流动虚线画出，超过 2 mm 标橙色。
 - **去耦回路**：画出 芯片引脚 → 电容 → 地过孔 的电流回路，面积越大越红。
 - **布线顺序回放**：按优先级档位逐网“生长”出走线，字幕说明这一档为什么先布。
+- **局部修复（推荐）**：勾选“只改 P0”时只动任意角度、锐角、锐角分支和直角，其他走线一根不动——手工布好的真实板子用这个。不勾选时还会重建抖动、短段和斜出焊盘，只适合草稿板。
+- **等长补偿**：在“确认”页 G4 写等长组（哪几根线要等长、容差多少，由你决定），点“等长补偿”：每组以最长的为目标，只在偏短网络的直线段上加 135° 拐角的小凸起，补完长度相等；放不下的列为人工处理，不会挪别的走线、不会换层。几 MHz 的烧写口、SD 卡 SPI 电气上并不需要等长，演示里只是“你要求等长”的例子。
 - **修复预览**：红色虚线是原走线，绿色是修复后的走线。直角斜切成两个 135° 拐角（斜切段优先 max(2w, 0.2 mm)，空间不够时缩短），任意角度、抖动、斜出焊盘重建为八方向折线；修不了的位置画黄框，列为人工处理。
 
 ## AI 与本地联动

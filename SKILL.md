@@ -260,6 +260,9 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 ## 工具
 
 - `scripts/design_gate.py init | status | ask <brief> G… | summary <brief> G0…G6|T1…T9 | confirm <brief> G… --quote "用户原话" | priorities <brief> --board 板子 [--write] | confirm-tier <brief> <档位> --quote "用户原话" | scope <brief> --nets A,B | require <brief> --stage place|route|finish|deliver`：强制确认流程。生成待填模板、查看每级缺什么、列出要问用户的问题（G5 带选项、推荐值和理由）、生成发给用户的摘要和确认码、记录用户确认、按板子功能梳理布线优先级并逐档确认、检查这一批网络是否在能力边界内、检查能否进入摆放 / 布线 / 出图 / 交付。
+- `scripts/epro_import.py 工程.epro2 -o board-pack.json --finish finish-model.json`：读嘉立创 EDA 专业版工程包（`.epro2`），得到铜皮数据包（`route_lint.py` / `layout_lint.py` / `length_match.py` 直接读）和出图前检查模型（位号、丝印线、泪滴，`finish_lint.py` 直接读）。
+- `scripts/length_match.py 板子 --brief design-brief.json [-o 输出] [--clearance 0.1]`：等长组检查（RTL-07）与局部蛇形补齐。等长组由用户在 G4 `length_groups` 里确认；只在偏短网络的直线段上加 135° 拐角的小凸起，放不下列为人工处理（`references/16-routing-constraints.md` 6.6）。
+- `scripts/route_fix.py … --local`：只改 P0（任意角度、锐角、锐角分支、直角），其他走线不动。真实板子用这个。
 - `scripts/finish_lint.py 板子.kicad_pcb --brief design-brief.json [--bom bom.csv] --json finish-lint.json [-o 报告.md]`：出图前检查。丝印 SLK-01…13（离焊盘距离、线宽字高、超出板框、重叠、位号缺失 / 指认不清 / 被器件盖住、阅读方向、底面镜像、1 脚与极性标记、板名版本与接口说明、订单号位置）、位号编号 ANN-01…05（未编号、重复、前缀与值不符、编号顺序与跳号、与 BOM 不一致）、泪滴 TDR-00…02（按策略缺泪滴、射频和差分线上加了泪滴、读不到泪滴时转人工确认）。
 - `scripts/layout_lint.py <板子.kicad_pcb | copper-pack.json> --brief design-brief.json [--json layout-lint.json]`：实板布局检查（LAY-01…15 + 就近原则 RTP），对照设计确认文件查固定件位置、功能分区、禁布区、天线净空与干扰源间距、IMU 应力与热、磁力计、电感与敏感传感器、电源流向、去耦和晶振负载电容距离（器件角色按位号和型号推断，`roles` 可覆盖）；JSON 报告是 G3 的依据。
 - `scripts/eda_bridge.py status | check | layout | export -o 板子.json | brief-pull | brief-push | priorities [--write] [--ai] | crosscheck`：经本地桥和嘉立创 EDA 扩展联动：导出编辑器里的板子给本地脚本、同步设计确认、让扩展梳理优先级、扩展与 Python 规则交叉核对（拓扑见 `references/26-eda-link.md`）。

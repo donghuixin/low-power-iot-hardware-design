@@ -1,0 +1,57 @@
+{
+ "board": {
+  "via_in_pad_plugged": true
+ },
+ "netclasses": {
+  "SIG": {
+   "allow_arc": true
+  },
+  "CLK": {
+   "allow_arc": true
+  },
+  "ANALOG": {
+   "allow_arc": true
+  },
+  "PWR_LOW": {
+   "allow_arc": true
+  },
+  "PWR_MAIN": {
+   "allow_arc": true
+  },
+  "GND": {
+   "allow_arc": true
+  },
+  "SW": {
+   "allow_arc": true
+  },
+  "USB90": {
+   "allow_arc": true
+  },
+  "DIFF100": {
+   "allow_arc": true
+  },
+  "XTAL": {
+   "allow_arc": true
+  }
+ },
+ "length_groups": [
+  {
+   "name": "JTAG 烧写口",
+   "nets": [
+    "TCK",
+    "TMS",
+    "TDI",
+    "TDO"
+   ],
+   "tol_mm": 0.05
+  }
+ ],
+ "nets": {
+  "I2C1_SDAR": {
+   "class": "SIG"
+  },
+  "PDMDIN1": {
+   "class": "SIG"
+  }
+ }
+}

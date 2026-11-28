@@ -18,7 +18,7 @@ import type { AiConfig } from './ai';
 import type { Board, FixPlan, Gate, LayoutReport, Report } from './core';
 import extensionConfig from '../extension.json' with { type: 'json' };
 import { boardPrompt, callModel, DEFAULT_AI, priorityPrompt, violationPrompt } from './ai';
-import { analyze, BOUNDARY, status as briefStatus, template as briefTemplate, buildFinishModel, confirm as confirmGate, confirmTier, draftPriorities, finishCheck, gate, GATES, summary as gateSummary, layoutCheck, migrate, partsOf, planFix, requireStage, routeScope, routingOrder, tierStates } from './core';
+import { analyze, BOUNDARY, status as briefStatus, template as briefTemplate, buildFinishModel, confirm as confirmGate, confirmTier, draftPriorities, finishCheck, gate, GATES, summary as gateSummary, layoutCheck, migrate, partsOf, planFix, planLengthMatch, requireStage, routeScope, routingOrder, tierStates } from './core';
 import { applyChanges, locate, readBoard, readSilk } from './eda';
 
 const REQ = 'lpiot-req';
@@ -66,10 +66,18 @@ async function refresh(): Promise<State> {
 	state.board = r.board;
 	state.bbox = r.bbox;
 	state.warnings = r.warnings;
-	state.report = analyze(r.board);
+	state.report = analyze(r.board, consOf(await loadBrief()));
 	state.plan = undefined;
 	state.at = Date.now();
 	return state;
+}
+
+/** 检查用的约束：设计确认 G4 里用户确认的约束（可选：网络类覆盖、允许圆弧、盘中孔塞孔）和等长组 */
+function consOf(b: any): any {
+	const c = b?.G4_routing_plan?.constraints;
+	const g = b?.G4_routing_plan?.length_groups;
+	const out = { ...(c && typeof c === 'object' && !Array.isArray(c) ? c : {}), ...(Array.isArray(g) && g.length ? { length_groups: g } : {}) };
+	return Object.keys(out).length ? out : null;
 }
 
 // ------------------------------------------------------------------ 设计确认（按工程保存）
@@ -248,8 +256,20 @@ async function handle(cmd: string, args: any = {}, source: Source = 'agent'): Pr
 		case 'fixPlan': {
 			if (!state.board)
 				await refresh();
-			state.plan = planFix(state.board!, { nets: args.nets });
+			// local：只改 P0（任意角度、锐角、锐角分支、直角），其他走线不动——真实板子用这个
+			state.plan = planFix(state.board!, { nets: args.nets, local: !!args.local, clearance: args.clearance });
 			return { ...state.plan, gate: requireStage(await loadBrief(), 'route') };
+		}
+		case 'lengthPlan': {
+			// 等长补偿：按 G4 里用户确认的等长组，在偏短的网络上加局部蛇形线（拐角都是 135°）；写回和几何修复一样走“应用修复”
+			if (!state.board || args.refresh)
+				await refresh();
+			const b = await loadBrief();
+			const groups = Array.isArray(args.groups) ? args.groups : (consOf(b)?.length_groups ?? []);
+			if (!groups.length)
+				throw new Error('没有等长组：先在“确认”页 G4 里写等长组（哪几根线要等长、容差多少），由你确认后再补偿');
+			state.plan = planLengthMatch(state.board!, groups, { clearance: args.clearance ?? 0.1, nets: args.nets });
+			return { ...state.plan, gate: requireStage(b, 'route') };
 		}
 		case 'fixApply': {
 			await requireRoute('写回修复');

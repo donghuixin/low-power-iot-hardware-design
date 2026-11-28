@@ -9,7 +9,7 @@ export default antfu({
 
 	typescript: true,
 
-	ignores: ['build/dist/', 'iframe/', 'test/.out/', 'test/fixtures/', 'src/panel/demo.json', 'coverage/', 'dist/', 'node_modules/', '.eslintcache', 'debug.log'],
+	ignores: ['build/dist/', 'iframe/', 'test/.out/', 'test/fixtures/', 'src/panel/demo.json', 'src/panel/demo-finish.json', 'coverage/', 'dist/', 'node_modules/', '.eslintcache', 'debug.log'],
 
 	rules: {
 		'no-console': ['warn', { allow: ['log', 'warn', 'error'] }],
