@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test as it } from 'node:test';
 import vm from 'node:vm';
+import demoBrief from '../src/panel/demo-brief.json';
 import demo from '../src/panel/demo.json';
 
 const MIL = 0.0254;
@@ -54,6 +55,7 @@ function fakeEda(boardName: 'route-bad' | 'principles-bad') {
 		return { cancel() {} };
 	};
 	const log: string[] = [];
+	const store = new Map<string, any>();
 	const eda = {
 		pcb_Layer: { getTheNumberOfCopperLayers: async () => nL },
 		pcb_PrimitiveLine: {
@@ -76,12 +78,13 @@ function fakeEda(boardName: 'route-bad' | 'principles-bad') {
 		pcb_Net: { selectNet: async () => true, highlightNet: async () => true, unhighlightAllNets: async () => true },
 		pcb_Document: { navigateToRegion: async () => log.push('navigate'), beginCommandGroup: async () => ({ groupId: 'g1' }), commitCommandGroup: async () => log.push('commit'), rollbackCommandGroup: async () => log.push('rollback') },
 		sys_MessageBus: { publish: pub, publishPublic: pub, subscribe: sub, subscribePublic: sub },
-		sys_Storage: { getExtensionUserConfig: () => undefined, setExtensionUserConfig: async () => true },
+		sys_Storage: { getExtensionUserConfig: (k: string) => store.get(k), setExtensionUserConfig: async (k: string, v: any) => (store.set(k, JSON.parse(JSON.stringify(v))), true) },
+		dmt_Project: { getCurrentProjectInfo: async () => ({ uuid: 'proj-1' }) },
 		sys_Dialog: { showConfirmationMessage: (_c: string, _t: string, _a: string, _b: string, cb: (ok: boolean) => void) => cb(true), showInformationMessage: (c: string) => log.push(`info ${c.split('\n')[0]}`) },
 		sys_ToastMessage: { showMessage: (m: string) => log.push(`toast ${m}`) },
 		sys_IFrame: { openIFrame: async () => true },
 	};
-	return { eda, lines, log, sub, pub };
+	return { eda, lines, log, sub, pub, store };
 }
 
 function loadExt(eda: any): any {
@@ -116,18 +119,51 @@ it('扩展经消息总线读板、检查，结果与核心一致（单位换算�
 	assert.ok(f.log.includes('navigate'));
 });
 
-it('修复预览 → 确认 → 写回，得分提高，放在一个命令组里', async () => {
+function routeBrief(): any {
+	const b = JSON.parse(JSON.stringify(demoBrief));
+	b.roles = {};
+	b.G1_mechanical.fixed = [{ ref: 'J1', what: '排针', edge: 'right', tol_mm: 6, reason: '外壳右侧开口' }];
+	b.G2_partition.blocks = [{ name: '主控', parts: ['U1', 'Y1', 'U2'], region: 'any', why: '测试' }, { name: '接口', parts: ['J1', 'R1', 'R2', 'R3'], region: 'any', why: '测试' }];
+	return b;
+}
+
+it('设计确认未放行时拒绝写回；面板逐级确认后才能写回，得分提高，放在一个命令组里', async () => {
 	const f = fakeEda('route-bad');
 	const ext = loadExt(f.eda);
 	ext.activate();
 	const before = await rpc(f, 'check');
+	assert.ok(before.gate.route.length >= 5);
 	const plan = await rpc(f, 'fixPlan');
-	assert.ok(plan.changes.length >= 5);
+	assert.ok(plan.changes.length >= 5 && plan.gate.length >= 5);
+	await assert.rejects(rpc(f, 'fixApply'), /设计确认闸门未放行/);
+	assert.ok(!f.log.includes('commit'));
+	// 填写内容不能顺带写入确认记录
+	await assert.rejects(rpc(f, 'briefUpdate', { set: { 'confirmations.G0': { code: 'x' } } }), /不能直接修改确认记录/);
+	let v = await rpc(f, 'briefUpdate', { brief: { ...routeBrief(), confirmations: { G0: { code: 'forged', hash: 'forged' } } } });
+	assert.equal(v.status.gates[0].state, 'pending');
+	await assert.rejects(rpc(f, 'briefConfirm', { gate: 'G0', typed: '好的' }), /确认码/);
+	for (const g of ['G0', 'G1', 'G2']) {
+		const code = v.status.gates.find((x: any) => x.gate === g).code;
+		v = await rpc(f, 'briefConfirm', { gate: g, typed: `确认 ${code}` });
+	}
+	const lay = await rpc(f, 'layoutCheck', { record: true });
+	assert.equal(lay.layout.p0, 0, JSON.stringify(lay.layout.issues.filter((x: any) => x.sev === 'P0')));
+	v = lay.brief;
+	for (const g of ['G3', 'G4']) {
+		const code = v.status.gates.find((x: any) => x.gate === g).code;
+		v = await rpc(f, 'briefConfirm', { gate: g, typed: code });
+	}
+	assert.equal(v.status.stages.route.length, 0);
+	await rpc(f, 'fixPlan');
 	const r = await rpc(f, 'fixApply');
 	assert.ok(r.added > 0 && r.removed > 0);
 	assert.ok(f.log.includes('commit'));
 	assert.ok(r.report.score > before.report.score + 25, `${before.report.score} -> ${r.report.score}`);
-	assert.equal(r.report.violations.filter((v: any) => ['RTG-01', 'RTG-02', 'RTG-03'].includes(v.rule)).length, 0);
+	assert.equal(r.report.violations.filter((x: any) => ['RTG-01', 'RTG-02', 'RTG-03'].includes(x.rule)).length, 0);
+	// 改了 G1 之后写回又被拒绝
+	await rpc(f, 'briefUpdate', { set: { 'G1_mechanical.enclosure.max_height_top_mm': 9 } });
+	await rpc(f, 'fixPlan');
+	await assert.rejects(rpc(f, 'fixApply'), /G1/);
 });
 
 it('快速检查弹出得分', async () => {

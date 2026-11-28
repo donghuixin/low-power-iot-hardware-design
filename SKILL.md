@@ -1,6 +1,6 @@
 ---
 name: low-power-iot-hardware-design
-description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉立创 EDA 与 KiCad 的 MCP 接入、交互式需求澄清、设计资料收集与核验、需求挖掘(含用户没想到的隐性需求及其对应的硬件形态)、器件与无线选型(BLE/WiFi/Thread/LoRa/蜂窝)、传感器放置(如IMU是否需要居中)、首稿电源地符号与紧凑排版、原理图可靠性审查(上拉下拉、三态、开漏/推挽、电平匹配、驱动电压电流、峰值/静态电流、电源树与去耦)、交互式 PCB 布局规划(2D/3D 摆放主器件、卫星器件自动贴放、实时布线复杂度与规则反馈)、布局布线验证(电流与回流、EMI 受扰与平面谐振、温度与散热片对比，布线前估计、布线后从 KiCad/Gerber 提取铜皮复核)、设计规则与板厂工艺(嘉立创线宽线距过孔的价格档位、导入自有板厂工艺、规则对照与生成)、PCB布局布线(射频与天线、信号完整性、电源完整性、EMC、DFM、测试点)以及打样后的bring-up；满足门槛时启用高性能混合信号/医疗手持扩展：手持超声等医疗手持设备、FPGA+高速ADC/AFE、LVDS、高压脉冲(超过 50 V)、混合信号低噪声电源与时钟抖动、1S数瓦供电与接触温升。适用电池供电设备、可穿戴、传感器节点、nRF52/nRF53/nRF54/ESP32/STM32L/STM32WB 等低功耗SoC的硬件、原理图或PCB评审、续航/功耗预算、睡眠电流偏大、天线或射频布局、器件该怎么摆、"帮我看看这个板子/这张原理图"等。Low-power IoT and mixed-signal hardware design, schematic drafting and review, power budgeting, and PCB planning.
+description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉立创 EDA 与 KiCad 的 MCP 接入、交互式需求澄清、设计资料收集与核验、需求挖掘(含用户没想到的隐性需求及其对应的硬件形态)、器件与无线选型(BLE/WiFi/Thread/LoRa/蜂窝)、传感器放置(如IMU是否需要居中)、首稿电源地符号与紧凑排版、原理图可靠性审查(上拉下拉、三态、开漏/推挽、电平匹配、驱动电压电流、峰值/静态电流、电源树与去耦)、布局布线前的强制确认流程(需求、板框外壳与固定件、功能分区与布局截图、布局检查、布线优先级逐级由用户确认，未确认不摆放、不布线、不宣布完成；一句话要求“帮我布完”时先逐级提问)、实板布局检查、交互式 PCB 布局规划(2D/3D 摆放主器件、卫星器件自动贴放、实时布线复杂度与规则反馈)、布局布线验证(电流与回流、EMI 受扰与平面谐振、温度与散热片对比，布线前估计、布线后从 KiCad/Gerber 提取铜皮复核)、设计规则与板厂工艺(嘉立创线宽线距过孔的价格档位、导入自有板厂工艺、规则对照与生成)、PCB布局布线(射频与天线、信号完整性、电源完整性、EMC、DFM、测试点)以及打样后的bring-up；满足门槛时启用高性能混合信号/医疗手持扩展：手持超声等医疗手持设备、FPGA+高速ADC/AFE、LVDS、高压脉冲(超过 50 V)、混合信号低噪声电源与时钟抖动、1S数瓦供电与接触温升。适用电池供电设备、可穿戴、传感器节点、nRF52/nRF53/nRF54/ESP32/STM32L/STM32WB 等低功耗SoC的硬件、原理图或PCB评审、续航/功耗预算、睡眠电流偏大、天线或射频布局、器件该怎么摆、"帮我看看这个板子/这张原理图"等。Low-power IoT and mixed-signal hardware design, schematic drafting and review, power budgeting, and PCB planning.
 ---
 
 # 低功耗 IoT 硬件设计
@@ -22,6 +22,28 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
    - **P2 风险**：余量不足或特定条件下出问题（低温、电池末期、批次差异）。
    - **P3 建议**：可调试性、可生产性、成本优化。
 6. **不确定就说不确定。** 看不清的网络、缺失的页、没给的 BOM 值，直接列为"需要补充的信息"，不要猜一个值再基于它下结论。
+
+## 强制确认流程（不可跳过）
+
+本 skill 不接受“一句话做完整块板”。**摆放器件之前必须确认 G0–G1，布线之前（含自动布线、自动修复、通过 EDA 工具写走线）必须确认 G0–G4，宣布完成之前必须确认 G5。** 细则见 `references/19-design-gate.md`，状态记在项目目录的 `design-brief.json`。
+
+| 闸门 | 必须由用户给出并确认 |
+|---|---|
+| G0 需求与工艺 | 功能与场景、供电与峰值电流、无线、环境、层数、板厚、板厂 |
+| G1 机械约束 | 板框尺寸或外壳 DXF、外壳材料与限高、固定孔、每个固定件（接口、按键、灯、天线、电池、传感器开窗）贴哪条边和位置、禁布区 |
+| G2 功能分区 | 功能块与区域、信号与电源流向、**用户看过的布局截图** |
+| G3 布局检查 | `layout_lint.py --brief` 无 P0，基于当前分区；保留的问题由用户同意 |
+| G4 布线规划 | 每层用途、布线优先级（哪些档位手工、哪些可工具辅助）、差分对、电源网络电流、验收分数 |
+| G5 交付验收 | route_lint 达到验收分数且无 P0、原生 DRC 为零、用户看过布线截图 |
+
+1. 用户说“帮我布线”“自动布完”“一键完成”而闸门没放行时，**不动手**：先 `python scripts/design_gate.py status design-brief.json`（没有就 `init`），说明为什么要先确认，然后按 G0 → G1 → … 一次问一级缺的信息。能从原理图、板文件、外壳图读出来的先读出来请用户核对。只读的分析和检查可以先做。
+2. 不替用户填“待填”。用户说“你定”时给 2–3 个候选和取舍，让用户选。
+3. 每一级用 `design_gate.py summary` 把内容和确认码发给用户，等用户回复包含确认码的原话后才 `confirm --quote`。**不得自己确认**，不得把早先的“好的”“继续”当确认。
+4. **不以“DRC 为零 / 全部连通”作为目标或停止条件**；完成 = G5 放行。
+5. 用户不在场、隔夜或定时运行时，只做到下一道闸门为止，把摘要、确认码、截图和检查报告留给用户。
+6. 布线按功能块推进，每块截图并附 `route_lint.py lint` 结果给用户看；只有 G4 标为“工具辅助”的档位可以用自动布线器。
+7. G5 放行之前不说“完成了”“布好了”。
+8. `route_fix.py`、`route_lint.py gate` 和 EDA 扩展的写回在闸门未放行时会拒绝执行（退出码 3）；不要绕过，也不要直接调用内部函数代替。
 
 ## 扩展模块：高性能混合信号与医疗手持
 
@@ -75,7 +97,8 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 | 只有一个想法或功能描述 | 阶段一 | 全流程 |
 | 有方案/框图，准备画原理图 | 阶段一快速过一遍，然后阶段二的设计指导 | 功耗预算 |
 | 给了原理图要求评审 | 阶段二 | 先用 3–5 个问题补齐关键需求（电池、续航目标、无线、环境），否则无法判断对错 |
-| 给了 PCB / layout 要求评审 | 阶段三 | 确认叠层、板厂能力、外壳材料 |
+| 给了 PCB / layout 要求评审 | 阶段三 | 确认叠层、板厂能力、外壳材料；评审可以先做，要动手改布局或布线时走确认流程 |
+| 要求“帮我布局 / 布线 / 一键完成” | 强制确认流程 | G0–G4 逐级确认后才动手，见上一节 |
 | 板子回来了有问题（睡眠电流大、射频距离短、偶发复位） | 阶段四的调试流程 | 回查阶段二、三相关条目 |
 
 用户给的材料可能是：文字描述、原理图 PDF/截图、KiCad 文件（`.kicad_sch` / `.kicad_pcb` 是文本 S 表达式，可直接读取网络与器件）、网表、BOM 表、Gerber、layout 截图。先把材料读完整，再开始评审；图片看不清的地方请用户补充局部截图。
@@ -171,7 +194,7 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 
 ## 布局规划（可选，阶段二与阶段三之间）
 
-主器件较多、板子空间紧、含射频或传感器放置约束时，用交互式布局规划器和用户一起定下摆放，再进入阶段三。细节见 `references/12-layout-planner.md`。
+开始摆放前 G0、G1 必须已确认（`design_gate.py require --stage place`）。主器件较多、板子空间紧、含射频或传感器放置约束时，用交互式布局规划器和用户一起定下摆放，再进入阶段三。细节见 `references/12-layout-planner.md`。摆好后把截图发给用户确认分区（G2），在 EDA 里用 `python scripts/layout_lint.py 板子 --brief design-brief.json --json layout-lint.json` 检查实板布局（G3），再和用户定布线规划（G4）。
 
 1. **写项目数据**：按该文件第 3 节，从原理图和器件手册整理板框、主器件（外形与引脚组）、网络、卫星器件（去耦、晶体、匹配、DCDC 外围、串阻、ESD、上下拉）和需要覆盖的规则参数。
 2. **生成页面**：运行 `python scripts/make_layout_project.py project.json` 得到单文件布局页。交付前在实际项目的 2D 和 3D 视图抽查片阻、片容的本体和双端焊盘，核对托盘只列主件。分别实际拾取和放下一个核心，确认周边件随行、自动避开障碍并落位，从导出文件核对周边位号的新坐标，再测试撤销。用户可单击拾取，再次单击落地，在右侧查看布线复杂度和规则问题，并从“导出 → 布局 JSON”发回摆位。
@@ -200,7 +223,7 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 
 **设计规则与板厂工艺**（布线前和下单前都做）：按 `references/15-design-rules-and-process.md`。布线前用 `python scripts/fab_rules.py show` 看目标板厂的价格档位（内置嘉立创；用户有自己的板厂工艺表、PDF 或截图时，先用 `import` 导入成工艺档案），用 `emit --tier standard --layers N` 生成板厂下限规则和网络类建议，填进 EDA 后再布线。下单前用 `check <.kicad_pro> <.kicad_pcb>` 对照，把价格档位、决定档位的参数、降档办法和超限项写进评审。规则按"板厂下限 / 设计默认 / 电气要求"三层来写。报价格时说明检索日期，并提醒以下单系统的实时报价为准；档案超过三个月或用户要下单时，重新查官方页面更新。
 
-**布线过程**（用户在 EDA 里布线、或让 Claude 通过 EDA 工具布线时）：按 `references/14-routing-practice.md`。先建网络类，关键网手工布好并锁定；再逐网布线，每完成一个网络 DRC 保持为零；每根连接按"同层绕行 → 推挤 → 中间点 → 换层"的阶梯逐级尝试；自动布线多跑几次，只取全部连通且零 DRC 的结果。该文件还给出开源 2 层板的线宽、间距、过孔和焊盘密度基准，以及绕线判据。
+**布线过程**（用户在 EDA 里布线、或让 Claude 通过 EDA 工具布线时）：先 `python scripts/design_gate.py require design-brief.json --stage route`，不通过不动手。按 `references/14-routing-practice.md`。先建网络类，关键网手工布好并锁定；再逐网布线，每完成一个网络 DRC 保持为零；每根连接按"同层绕行 → 推挤 → 中间点 → 换层"的阶梯逐级尝试；自动布线只用于 G4 标为“工具辅助”的档位，多跑几次，只取全部连通且零 DRC 的结果，再按 G4 的验收分数复核；全部连通且零 DRC 只是必要条件，不是完成标准。该文件还给出开源 2 层板的线宽、间距、过孔和焊盘密度基准，以及绕线判据。
 
 **走线几何与布线约束**（Claude 落线时必须遵守）：按 `references/16-routing-constraints.md`。只许 0/45/90/135° 线段，不许锐角、锐角 T 分支、Z 形抖动和斜着出焊盘；各网络类的线宽、线长、过孔预算、层使用见该文件第 4 节。布线前用 `route_lint.py constraints` 生成约束文件，确认推导出的网络类。**线段坐标必须按八方向构造，不能把两端焊盘直接连成一条线**；每批线段写入 EDA 前写成 `plan.json` 跑 `route_lint.py gate`，不通过先 `route_fix.py`。布完用 `route_lint.py lint` 评分，有 P0 或得分低于 75 不交付。
 
@@ -220,13 +243,15 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 
 ## 工具
 
+- `scripts/design_gate.py init | status | summary <brief> G0…G5 | confirm <brief> G… --quote "用户原话" | require <brief> --stage place|route|deliver`：强制确认流程。生成待填模板、查看每级缺什么、生成发给用户的摘要和确认码、记录用户确认、检查能否进入摆放 / 布线 / 交付。
+- `scripts/layout_lint.py <板子.kicad_pcb | copper-pack.json> --brief design-brief.json [--json layout-lint.json]`：实板布局检查（LAY-01…10 + 就近原则 RTP），对照设计确认文件查固定件位置、功能分区、禁布区、天线净空与干扰源间距、去耦和晶振负载电容距离；JSON 报告是 G3 的依据。
 - `scripts/power_budget.py <config.json>`：由电池、常开负载、周期性事件计算平均电流、续航、各项占比，并检查峰值电流在电池内阻上的压降。配置示例见 `assets/power-budget-example.json`。做功耗预算时用它，不要心算。
 - `scripts/make_layout_project.py <project.json> [-o out.html] [--check]`：校验布局规划器的项目数据，生成该项目专用的单文件页面。`assets/layout-planner.html` 内置示例，可直接打开试用；改动页面源码后用 `scripts/build_layout_planner.py` 重新构建。
 - `scripts/make_layout_project.py <布局.json> --verifier [--copper copper-pack.json]`：生成布局布线验证器页面（电流与回流、电磁、温度）；不给铜皮数据包时是布线前估计，给了是布线后验证。`assets/layout-verifier.html` 内置示例；改动源码后用 `scripts/build_layout_verifier.py` 重新构建。
 - `scripts/fab_rules.py show | template | import <工艺表> | read <设计文件…> | check <设计文件…> [--profile 档案.json] | emit --tier <档位> --layers N`：读取板厂工艺（内置 `assets/fab-profiles/jlcpcb.json`，也可导入用户的工艺表）、读取设计规则与实际最小线宽和过孔、对照价格档位、生成 KiCad 规则和网络类建议。只依赖标准库。
 - `scripts/extract_copper.py <board.kicad_pcb> | --gerber ... --outline ... --ipc356 ... [--project 布局.json] -o copper-pack.json`：从布好的 PCB 提取铜皮，生成验证器的铜皮数据包（需要 numpy、scipy、Pillow），同时附上布线质量检查结果。
 - `scripts/route_lint.py lint <板子.kicad_pcb | copper-pack.json> | gate <plan.json> | constraints <板子> --layers N`：布线几何检查与质量评分（VF-16…30）、写入 EDA 前的八方向闸门、生成布线约束文件和网络类推导。
-- `eext/lpiot-routing-check/`：嘉立创 EDA 专业版扩展（同一套规则的 TypeScript 版），用户在编辑器里点“布线检查”即可检查、看动画、预览并写回修复；`node bridge/bridge.mjs --mcp` 起本地 MCP 服务后，Claude 可以通过 `routing_check`、`routing_order`、`routing_locate`、`routing_fix_plan`、`routing_fix_apply`、`routing_gate` 直接操作用户正在编辑的板子（写回前编辑器会弹窗请用户确认）。
+- `eext/lpiot-routing-check/`：嘉立创 EDA 专业版扩展（同一套规则的 TypeScript 版），面板有“设计确认 / 布局 / 结论 / 指标 / 布线顺序 / 修复 / AI”几页：逐级填写并确认设计信息（确认码只能由用户在面板里输入）、对照确认内容检查布局（分区、固定件、天线净空、去耦距离，带动画）、检查布线、预览并写回修复。写回修复要求 G0–G4 已在面板确认。`node bridge/bridge.mjs --mcp` 起本地 MCP 服务后，Claude 可以用 `design_brief_get`、`design_brief_status`、`design_brief_update`、`layout_check`、`routing_check`、`routing_order`、`routing_locate`、`routing_fix_plan`、`routing_fix_apply`、`routing_gate`；MCP 没有确认工具，闸门未放行时 `routing_fix_apply` 和 `routing_gate` 会拒绝。
 - `scripts/route_lint.py order <板子>`：按布线优先级给出逐网布线顺序；就近、差分、优先级倒挂、隔离检查在 `scripts/route_principles.py`，随 `lint` 一起运行。
 - `scripts/route_fix.py <板子.kicad_pcb | plan.json> [-o 输出] [--diff diff.json]`：把任意角度、锐角、抖动、斜出焊盘、悬空线头和重叠线段自动修成八方向折线，保持连通关系和间距，修不了的标为 needs_manual。
 - `scripts/hw_calc.py`：常用小计算——I2C 上拉取值范围 (`i2c-pullup`)、脉冲负载所需储能电容 (`bulk-cap`)、分压器电流与输出阻抗 (`divider`)、晶体负载电容 (`xtal`)、续航 (`life`)。运行 `python scripts/hw_calc.py -h` 查看参数。
@@ -254,6 +279,7 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 | `references/16-routing-constraints.md` | 落线前、落线时和评审走线时：八方向几何、线宽 / 线长 / 过孔 / 间距 / 层约束、质量评分、检查器与修复器、写入闸门、给 AI 的布线规程 |
 | `references/17-routing-principles.md` | 定布线顺序和评审走线时：布线优先级（关键信号优先）、就近原则、差分线原则、隔离原则及对应检查器 |
 | `references/18-routing-philosophy.md` | 开始 Layout 前和每个功能块布线时：边读懂、边查证、边思考、边设计的工作方法，来自 ADI AN-1142 与 TI ZHCAAE6B 的布线指导思想 |
+| `references/19-design-gate.md` | **任何摆放、布线、自动修复、宣布完成之前**：六道闸门要拿到的信息、AI 必须遵守的规则、确认码、工具里的强制点、`design-brief.json` 字段、布局检查规则 LAY-01…10、误用案例复盘 |
 | `references/20-hv-pulser-tr-safety.md` | 扩展模块：电压 >50 V；高压脉冲、T/R 与接收保护、高压电源与档位、储能、联锁、PCB 间距 |
 | `references/21-ultrasound-afe-clock.md` | 扩展模块：ADC ≥10 MSPS；超声 AFE 噪声、TGC、抗混叠、IQ 解调、时钟抖动与多普勒同源时钟 |
 | `references/22-low-noise-power-thermal.md` | 扩展模块：持续功耗 >1 W 或有高速 ADC；持续功耗模型、1S 电源路径、纹波推导、开关同步、手持热设计 |

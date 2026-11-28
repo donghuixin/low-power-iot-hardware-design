@@ -65,14 +65,16 @@
 
 ## PCB 走线写入前的闸门
 
+**第 0 步：设计确认。** 往 PCB 写任何走线、挪任何器件之前，先 `python scripts/design_gate.py require design-brief.json --stage route`（挪器件用 `--stage place`）。不通过就停下，按 `19-design-gate.md` 和用户逐级确认；不要因为用户催促或任务设成自动运行而跳过。用扩展时，闸门状态以扩展“设计确认”页为准，未放行时 `routing_fix_apply`、`routing_gate` 会拒绝。
+
 用户装了布线检查助手扩展（`eext/lpiot-routing-check`）并运行了本地 MCP 桥时，直接用它的 `routing_gate` 做闸门、`routing_check` 回读评分、`routing_fix_plan` / `routing_fix_apply` 修复，不必自己导出文件；没装时按下面的步骤做。
 
 通过扩展 API 往 PCB 写走线（`eda.pcb_PrimitiveLine.create(net, layer, startX, startY, endX, endY, lineWidth, primitiveLock)`，坐标和线宽单位是 mil）时，几何必须先离线算好、过闸门，再整批写入。规则与评分见 `16-routing-constraints.md`。
 
 1. **从焊盘真实几何出发**：回读两端焊盘的中心、尺寸和角度，确定长轴；第一段沿长轴直出到焊盘外，再拐弯。
 2. **按八方向构造坐标**：每段的位移只能是 (±d, 0)、(0, ±d) 或 (±d, ±d)；优先两段肘形（一段 45° 加一段直线），拐弯越少越好。不要把两端焊盘中心直接连成一条线——那就是截图里任意角度斜线的来源。
-3. **写成 `plan.json` 过闸门**：`python scripts/route_lint.py gate plan.json`（`units: "mil"`，嘉立创 EDA 的 PCB 坐标 y 向上时 `ydown: false`，向下时为 `true`，以回读的焊盘坐标为准）。有任意角度、锐角或锐角分支时退出码为 1。
-4. **不通过就修**：`python scripts/route_fix.py plan.json -o plan-fixed.json`，再过一次闸门；修复器标为 needs_manual 的连接，换通道、换层（配回流地过孔）或回到布局，不要硬写。
+3. **写成 `plan.json` 过闸门**：`python scripts/route_lint.py gate plan.json --brief design-brief.json`（`units: "mil"`，嘉立创 EDA 的 PCB 坐标 y 向上时 `ydown: false`，向下时为 `true`，以回读的焊盘坐标为准）。有任意角度、锐角或锐角分支时退出码为 1。
+4. **不通过就修**：`python scripts/route_fix.py plan.json --brief design-brief.json -o plan-fixed.json`，再过一次闸门；修复器标为 needs_manual 的连接，换通道、换层（配回流地过孔）或回到布局，不要硬写。
 5. **写入后回读**：mm 与 mil 换算后按 0.01 mil 取整，写完回读线段，确认端点落在焊盘上、角度没被取整破坏，跑 DRC；整板布完导出 Gerber + IPC 网表，用 `extract_copper.py` 和 `route_lint.py lint` 评分。
 6. 2 层板底层只放短跳线（单根 ≤ 10 mm），晶振、射频线不打过孔；这些拓扑问题闸门不拦，但 `lint` 会报。
 

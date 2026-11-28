@@ -10,6 +10,23 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 
 > **觉得有用？请点右上角 ⭐ Star，或 Fork 一份自己的副本。** 规则、参考资料和布局规划器会持续更新，Star 方便你收到更新，Fork 方便你保存自己的定制并同步上游。欢迎通过 Issue 和 Pull Request 提交改进。
 
+## 使用前必读：这不是一键出板工具
+
+这个 skill 只服务于愿意把设计想清楚、说清楚、并逐步检查结果的人。**布局和布线之前有强制的确认流程**：
+
+| 闸门 | 你需要给出并确认 | 放行后 |
+|---|---|---|
+| G0 需求与工艺 | 功能与场景、供电与峰值电流、无线、环境、层数、板厚、板厂 | 原理图与选型 |
+| G1 机械约束 | 板框尺寸或外壳 DXF、限高、固定孔、每个接口 / 按键 / 灯 / 天线 / 电池贴哪条边、禁布区 | 摆放器件 |
+| G2 功能分区 | 每个功能块放哪、信号与电源流向、你看过并认可的布局截图 | 布局检查 |
+| G3 布局检查 | `layout_lint.py` 无 P0；你同意保留的问题 | 布线规划 |
+| G4 布线规划 | 每层用途、布线优先级（哪些手工、哪些可以工具辅助）、差分对、电源电流、验收分数 | 布线 |
+| G5 交付验收 | 布线得分达标且无 P0、DRC 为零、你看过布线截图 | 宣布完成 |
+
+每一级 AI 会把内容和一个确认码发给你，核对无误后回复“确认 G1-xxxxxx”才进入下一级；前面的内容一改，后面的确认自动失效。没放行时，`route_fix.py`、`route_lint.py gate` 和嘉立创 EDA 扩展的写回都会直接拒绝。你只说“帮我把板子布完”，AI 会先逐级提问，不会动手；隔夜自动运行也只会做到下一道闸门为止。
+
+为什么这么做：DRC 通过不代表板子能用。只给一句目标、让代理跑一晚上，得到的往往是 DRC 干净、但满是任意角度斜线、长绕线和乱换层的板子——布局错了，布线救不回来。细节和一次真实误用的复盘见 [`references/19-design-gate.md`](references/19-design-gate.md)。
+
 ![交互式布局规划器](docs/images/overview-2d.png)
 
 ## 它做什么
@@ -18,6 +35,7 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 |---|---|
 | 1. 需求明确 | 把功能描述变成量化指标；主动提出用户没想到的需求（峰值电流、电池末期、OTA、运输模式、认证、产测……）；把需求映射到硬件形态；无线选型按数据率、吞吐、距离、峰值电流、平均功耗比较；传感器放置约束（例如 IMU 是否需要靠近转动中心） |
 | 2. 原理图可靠性 | 逐状态检查每个网络：上拉下拉、开漏/推挽/三态、电平域匹配、断电域反灌；驱动电压与驱动电流；睡眠电流逐项清点与峰值电流压降；电源树、充电、保护、去耦与储能；绘制流程与可读性规范（同页直连、跨页与标准接口用标号/端口、网络命名、文字不重叠、设计意图注释） |
+| 2¼. 设计确认与布局检查 | [强制确认流程](references/19-design-gate.md)：需求、外壳与固定件、功能分区、布局检查、布线规划、交付验收六道闸门，由用户输入确认码逐级放行；`layout_lint.py` 对照确认内容检查实板布局（固定件位置、分区、禁布区、天线净空、干扰源间距、去耦与晶振负载电容距离） |
 | 2½. 交互式布局规划 | [2D/3D 布局规划器](#交互式布局规划器)：摆放主器件，卫星器件自动贴放，实时估计布线复杂度并按规则给出问题，导出结果交回评审 |
 | 2¾. 布局布线验证 | [验证器](#布局布线验证器)：电流与回流、EMI 受扰与平面谐振、温度与散热片对比；布线前按概率估计，布线后从 KiCad / Gerber 提取实际铜皮复核 |
 | 3. Layout | 叠层与阻抗、布局顺序、天线与射频、电源完整性、信号完整性、晶体、高阻节点、传感器应力与热隔离、EMC/ESD、热、DFM/DFA/DFT；[布线约束与质量评分](#布线约束与质量评分)：八方向几何、线宽线长过孔层约束、自动检查与修复、写入 EDA 前的闸门；布线实操：逐网顺序、升级阶梯、换层与过孔、绕线判据、自动布线器预期（取自 [CADET](https://github.com/LGAI-Research/CADET) 对 283 块开源 2 层板的统计与实测） |
@@ -185,12 +203,12 @@ DRC 只保证走线合法，不保证有序。任意角度的斜线、锐角、�
 - **约束表**：几何 RTG（只许 0/45/90/135°、禁止锐角、最小段长、沿焊盘长轴出线）、线宽 RTW、线长 RTL（绕行率、晶振 ≤ 5 mm、USB 长度差）、过孔 RTV（每网预算、换层回流过孔、禁止盘中孔）、间距 RTS、层 RTY（2 层板底层是地、4 层板地层不走线、地破碎度）。每条带默认值、严重度和出处。
 - **检查与评分**：`route_lint.py` 读 `.kicad_pcb` 或铜皮数据包，给出 11 项指标（VF-16…26）和总分，任一 P0 即不通过；结果同时显示在验证器阶段 R。
 - **自动修复**：`route_fix.py` 把有问题的走线在原锚点之间重建成八方向折线（肘形、三段式，不行再局部 A*），删掉悬空线头和重叠线段，保持连通关系和间距不变，修不了的标出来交给人。
-- **写入闸门**：Claude 通过嘉立创 EDA 或 KiCad 落线时，每批线段先写成 `plan.json` 过 `route_lint.py gate`，有任意角度或锐角就拒绝写入。
+- **写入闸门**：Claude 通过嘉立创 EDA 或 KiCad 落线时，每批线段先写成 `plan.json` 过 `route_lint.py gate`，有任意角度或锐角就拒绝写入；设计确认 G0–G4 没放行时直接拒绝。
 
 ```text
 $ python scripts/route_lint.py lint tests/fixtures/route-bad.kicad_pcb
 得分 61.0 / 100 · 不通过（有 P0）   任意角度 9、锐角 4、晶振线打过孔、底层长跳线 …
-$ python scripts/route_fix.py tests/fixtures/route-bad.kicad_pcb -o fixed.kicad_pcb
+$ python scripts/route_fix.py tests/fixtures/route-bad.kicad_pcb --brief design-brief.json -o fixed.kicad_pcb
 已写入 fixed.kicad_pcb：修复 9 段走线，删除 22 条、新增 18 条线段
 $ python scripts/route_lint.py lint fixed.kicad_pcb
 得分 93.3 / 100   任意角度 0、锐角 0；剩下晶振过孔和底层跳线是拓扑问题，要人决定
@@ -198,7 +216,7 @@ $ python scripts/route_lint.py lint fixed.kicad_pcb
 
 **布线指导思想**（[`references/18-routing-philosophy.md`](references/18-routing-philosophy.md)）：按功能块边读懂电路、边查证资料（联网或读文件前先征得同意）、边定约束、边布线、边检查；综合 ADI AN-1142《高速 ADC PCB 布局布线技巧》与 TI ZHCAAE6B《电机驱动器电路板布局的最佳实践》——电流走环路、单一完整地加分区、去耦电容与芯片同层不隔过孔、裸露焊盘过孔阵列、开尔文连接、优先 45° 拐弯、绝不出现随机角度。
 
-**嘉立创 EDA 扩展**（[`eext/lpiot-routing-check`](eext/lpiot-routing-check)）：把同一套检查搬进嘉立创 EDA 专业版——读当前 PCB 检查打分，用板子动画讲清楚问题（电流流动、回流路径、去耦回路、布线顺序回放、修复前后形变），一键修复几何问题（可撤销），接入你自己的大模型做解读，并提供本地 HTTP / MCP 桥给 Claude Code 等 AI 代理调用。安装包在 [`release/`](eext/lpiot-routing-check/release)。
+**嘉立创 EDA 扩展**（[`eext/lpiot-routing-check`](eext/lpiot-routing-check)）：把同一套检查搬进嘉立创 EDA 专业版——在“设计确认”页逐级填写并确认设计信息（确认码只能由人输入），在“布局”页对照确认内容检查分区、固定件、天线净空和去耦距离（分区色块、目标位置箭头、去耦回路动画），读当前 PCB 检查布线打分，用板子动画讲清楚问题（电流流动、回流路径、去耦回路、布线顺序回放、修复前后形变），G0–G4 确认后一键修复几何问题（可撤销），接入你自己的大模型做解读，并提供本地 HTTP / MCP 桥给 Claude Code 等 AI 代理调用。安装包在 [`release/`](eext/lpiot-routing-check/release)。
 
 **走线原则**（[`references/17-routing-principles.md`](references/17-routing-principles.md)，检查器 `scripts/route_principles.py`）：
 
@@ -232,6 +250,7 @@ references/
   16-routing-constraints.md      布线约束与质量评分：八方向几何、线宽线长过孔层约束、检查器与修复器、写入闸门、AI 布线规程
   17-routing-principles.md       走线原则：布线优先级、就近、差分、隔离及对应检查器
   18-routing-philosophy.md       布线指导思想与工作方法（ADI AN-1142、TI ZHCAAE6B）
+  19-design-gate.md              强制确认流程：六道闸门、AI 规则、确认码、工具强制点、布局检查规则、误用案例复盘
   20-hv-pulser-tr-safety.md      扩展：高压脉冲、T/R、高压电源与联锁、间距
   21-ultrasound-afe-clock.md     扩展：超声 AFE、采样与 IQ、时钟抖动
   22-low-noise-power-thermal.md  扩展：持续功耗模型、纹波与开关同步、手持热设计
@@ -240,6 +259,8 @@ references/
   25-mixed-signal-bringup.md     扩展：混合信号板分级上电与测试
   checklists.md                  各阶段逐项核对清单
 scripts/
+  design_gate.py                 强制确认流程：模板、各闸门状态、摘要与确认码、记录确认、阶段放行检查
+  layout_lint.py                 实板布局检查（对照设计确认文件）：LAY-01…10 与就近原则
   power_budget.py                功耗预算与峰值压降检查
   hw_calc.py                     I2C 上拉、储能电容、分压器、晶体负载电容、续航；抖动、纹波、高压储能、数据率
   make_layout_project.py         校验项目数据，生成布局规划页面或验证页面（--verifier / --copper）
@@ -251,7 +272,7 @@ scripts/
   route_fix.py                   把任意角度、锐角、抖动、斜出焊盘的走线修成八方向折线
   route_principles.py            走线原则检查（就近、差分、优先级倒挂、隔离）与推荐布线顺序
 eext/
-  lpiot-routing-check/           嘉立创 EDA 专业版扩展：布线检查面板、动画、修复写回、AI 接口、本地 MCP 桥
+  lpiot-routing-check/           嘉立创 EDA 专业版扩展：设计确认、布局检查、布线检查、动画、修复写回（需确认）、AI 接口、本地 MCP 桥
 assets/
   layout-planner.html            布局规划器（单文件，内置示例）
   layout-planner/                规划器源码与 Three.js（MIT）
@@ -295,15 +316,27 @@ git clone https://github.com/donghuixin/low-power-iot-hardware-design.git \
 
 ## 使用示例
 
-- "我想做一个戴在手腕上的动作记录器，CR2032 供电，蓝牙连手机，帮我梳理硬件方案。"
-- "这是我的 nRF52840 原理图，睡眠电流要做到 5 µA 以内，帮我审一下。"
-- "原理图画完了，帮我规划一下 PCB 上的器件怎么摆，天线放哪里。"
-- "板子回来后睡眠电流有 300 µA，预期是 4 µA，怎么查？"
-- "帮我看看这个 2.4 GHz 板载天线的 layout 有没有问题。"
+评审和咨询类的问题可以直接问：
+
+- "这是我的 nRF52840 原理图（附 PDF），CR2032 供电，睡眠电流要做到 5 µA 以内，帮我审一下。"
+- "板子回来后睡眠电流有 300 µA，预期是 4 µA，附原理图和实测条件，怎么查？"
+- "帮我看看这个 2.4 GHz 板载天线的 layout 有没有问题（附板文件和外壳材料）。"
+
+要 AI 参与摆放或布线时，第一条消息就把约束说清楚，例如：
+
+> 做一个腕戴动作记录器，CR2032 供电、BLE 连手机、-10–45 °C。外壳 38 × 30 mm 圆角矩形（DXF 附上），顶面限高 2.5 mm、底面贴电池。USB-C 只用来烧录，放下边中间；按键在右边离上角 8 mm；天线朝上边，上边 6 mm 内不放金属。分区想法：天线和 nRF52 在上半部、电源和充电在左下、IMU 在中间靠下。先按流程逐级确认，再开始摆放。
+
+不要这样用：“帮我把这块板布完。”“布局好了，自动布线吧。”——AI 会先按六道闸门逐级提问。
 
 ## 脚本
 
 ```bash
+python scripts/design_gate.py init -o design-brief.json
+python scripts/design_gate.py status design-brief.json
+python scripts/design_gate.py summary design-brief.json G1
+python scripts/design_gate.py confirm design-brief.json G1 --quote "确认 G1-4c09ae"
+python scripts/design_gate.py require design-brief.json --stage route
+python scripts/layout_lint.py board.kicad_pcb --brief design-brief.json --json layout-lint.json
 python scripts/power_budget.py assets/power-budget-example.json
 python scripts/hw_calc.py i2c-pullup --vdd 1.8 --cb-pf 40 --speed 400k
 python scripts/hw_calc.py bulk-cap --ipeak-ma 15 --pulse-ms 5 --dv 0.2
@@ -318,10 +351,10 @@ python scripts/fab_rules.py check board.kicad_pro board.kicad_pcb
 python scripts/extract_copper.py board.kicad_pcb --project 布局.json -o copper-pack.json
 python scripts/route_lint.py lint board.kicad_pcb -o 布线报告.md
 python scripts/route_lint.py order board.kicad_pcb
-python scripts/route_fix.py board.kicad_pcb -o board-fixed.kicad_pcb
+python scripts/route_fix.py board.kicad_pcb --brief design-brief.json -o board-fixed.kicad_pcb
 ```
 
-除 `extract_copper.py` 和 `route_fix.py`（需要 numpy、scipy、Pillow；`route_lint.py` 读 `.kicad_pcb` 时也会用到）外只依赖 Python 3 标准库（`fab_rules.py` 导入 xlsx 时需要 openpyxl）。规划器与验证器的单元测试：`node --test tests/*.test.js`（Node 18+，无第三方依赖）；铜皮提取、工艺规则与布线检查修复：`python -m unittest tests/test_extract_copper.py tests/test_fab_rules.py tests/test_routing.py`。
+除 `extract_copper.py` 和 `route_fix.py`（需要 numpy、scipy、Pillow；`route_lint.py` 读 `.kicad_pcb` 时也会用到）外只依赖 Python 3 标准库（`fab_rules.py` 导入 xlsx 时需要 openpyxl）。规划器与验证器的单元测试：`node --test tests/*.test.js`（Node 18+，无第三方依赖）；铜皮提取、工艺规则、布线检查修复、确认流程与布局检查：`python -m unittest tests/test_extract_copper.py tests/test_fab_rules.py tests/test_routing.py tests/test_design_gate.py`。
 
 ## 参与改进
 

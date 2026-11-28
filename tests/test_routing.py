@@ -14,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "tests"))
 import extract_copper as X  # noqa: E402
 import fab_rules as FR  # noqa: E402
 import route_fix as F  # noqa: E402
@@ -325,10 +326,12 @@ class PlanGate(unittest.TestCase):
     def test_gate_blocks_then_fix_passes(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "plan.json"; p.write_text(json.dumps(self.PLAN), encoding="utf-8")
-            self.assertEqual(R.main(["gate", str(p)]), 1)
+            import test_design_gate as TG
+            brief = TG.confirmed_brief(d)
+            self.assertEqual(R.main(["gate", str(p), "--brief", str(brief)]), 1)
             out = Path(d) / "plan-fixed.json"
             F.fix_plan(p, out)
-            self.assertEqual(R.main(["gate", str(out)]), 0)
+            self.assertEqual(R.main(["gate", str(out), "--brief", str(brief)]), 0)
             fixed = json.loads(out.read_text(encoding="utf-8"))
             self.assertTrue(all(s[6] == "SDA" and s[0] == "TOP" for s in fixed["segs"]))
             self.assertEqual(fixed["units"], "mil")

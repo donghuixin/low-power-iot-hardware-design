@@ -38,7 +38,10 @@ it('MCP 桥：初始化、列工具、调用 routing_check 转发到扩展', asy
 	const init = await ask(1, 'initialize', { protocolVersion: '2024-11-05' });
 	assert.equal(init.result.serverInfo.name, 'lpiot-routing-check');
 	const list = await ask(2, 'tools/list');
-	assert.ok(list.result.tools.some((t: any) => t.name === 'routing_check'));
+	const names = list.result.tools.map((t: any) => t.name);
+	for (const n of ['routing_check', 'design_brief_status', 'design_brief_update', 'layout_check'])
+		assert.ok(names.includes(n), n);
+	assert.ok(!names.some((n: string) => /confirm/i.test(n)), 'MCP 不能提供确认工具');
 	const res = await ask(3, 'tools/call', { name: 'routing_check', arguments: { limit: 5 } });
 	const out = JSON.parse(res.result.content[0].text);
 	assert.equal(out.score, analyze(board).score);

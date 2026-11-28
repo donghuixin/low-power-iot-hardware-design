@@ -2,8 +2,9 @@
  * 面板（iframe）：检查结论、板子动画（扫描入场、违规脉冲、电流 / 回流流动、去耦回路、布线顺序回放、修复前后形变）、AI 解读。
  * 在嘉立创 EDA 里通过 eda.sys_MessageBus 与扩展主线程通信；单独打开（没有 eda 对象）时进入演示模式，用内置示例板。
  */
-import type { Board, FixPlan, Net, OrderRow, Pad, Pt, Report, Seg, Violation } from '../core';
-import { analyze, dist, planFix, routingOrder, TIERS } from '../core';
+import type { Board, FixPlan, Gate, LayoutIssue, LayoutReport, Net, OrderRow, Pad, Pt, Report, Seg, Violation } from '../core';
+import { analyze, status as briefStatus, template as briefTemplate, confirm as confirmGate, dist, fields, GATES, summary as gateSummary, layoutCheck, planFix, requireStage, routingOrder, TIERS } from '../core';
+import demoBrief from './demo-brief.json';
 import demo from './demo.json';
 
 declare const eda: any;
@@ -36,21 +37,62 @@ if (HAS_EDA) {
 let demoKey: keyof typeof demo = 'principles-bad';
 let demoBoard: Board = clone((demo as any)[demoKey]);
 let demoPlan: FixPlan | null = null;
+const demoBriefs: Record<string, any> = { 'principles-bad': clone(demoBrief), 'route-bad': briefTemplate() };
+const DEMO_OUTLINE: Record<string, Pt[]> = { 'principles-bad': [[0, 0], [45, 0], [45, 36], [0, 36]], 'route-bad': [[0, 0], [40, 0], [40, 30], [0, 30]] };
+function demoView(): any {
+	const b = demoBriefs[demoKey];
+	return { brief: b, status: briefStatus(b), summaries: Object.fromEntries(GATES.map(g => [g, gateSummary(b, g)])) };
+}
 function clone<T>(x: T): T {
 	return JSON.parse(JSON.stringify(x));
 }
 async function mock(cmd: string, _args: any): Promise<any> {
 	const board = demoBoard;
+	board.outline = board.outline ?? DEMO_OUTLINE[demoKey];
 	const bb = bboxOf(board);
+	const args = _args ?? {};
 	switch (cmd) {
 		case 'check': {
 			const report = analyze(board);
-			return { board, bbox: bb, report, order: routingOrder(board.nets, report.classes), warnings: ['演示模式：内置示例板'] };
+			const b = demoBriefs[demoKey];
+			return { board, bbox: bb, report, order: routingOrder(board.nets, report.classes), warnings: ['演示模式：内置示例板'], gate: { route: requireStage(b, 'route'), deliver: requireStage(b, 'deliver') } };
+		}
+		case 'briefGet':
+			return demoView();
+		case 'briefUpdate': {
+			const cur = demoBriefs[demoKey];
+			if (args.brief)
+				demoBriefs[demoKey] = { ...briefTemplate(), ...args.brief, confirmations: args.reset ? {} : cur.confirmations };
+			for (const [path, v] of Object.entries(args.set ?? {})) {
+				const ks = path.split('.');
+				let o = demoBriefs[demoKey];
+				for (const k of ks.slice(0, -1)) o = (o[k] && typeof o[k] === 'object' && !Array.isArray(o[k])) ? o[k] : (o[k] = {});
+				o[ks[ks.length - 1]] = v;
+			}
+			return demoView();
+		}
+		case 'briefConfirm':
+			confirmGate(demoBriefs[demoKey], args.gate, args.typed, 'panel');
+			return demoView();
+		case 'layoutCheck': {
+			const b = demoBriefs[demoKey];
+			const layout = layoutCheck(board, b, { yUp: args.yUp !== false });
+			if (args.record)
+				b.G3_layout_check = { ...(b.G3_layout_check ?? {}), report: '扩展布局检查', result: { kind: layout.kind, p0: layout.p0, p1: layout.p1, p2: layout.p2, brief_hash: layout.brief_hash } };
+			return { board, bbox: bb, layout, brief: demoView() };
+		}
+		case 'routeRecord': {
+			const report = analyze(board);
+			demoBriefs[demoKey].G5_acceptance = { ...(demoBriefs[demoKey].G5_acceptance ?? {}), route_report: '扩展布线检查', route_result: { score: report.score, pass: report.pass, p0: report.violations.filter(v => v.sev === 'P0').length } };
+			return demoView();
 		}
 		case 'fixPlan':
 			demoPlan = planFix(board);
-			return demoPlan;
+			return { ...demoPlan, gate: requireStage(demoBriefs[demoKey], 'route') };
 		case 'fixApply': {
+			const miss = requireStage(demoBriefs[demoKey], 'route');
+			if (miss.length)
+				throw new Error(`拒绝写回修复：设计确认闸门未放行。\n${miss.map(m => `· ${m}`).join('\n')}`);
 			for (const ch of demoPlan?.changes ?? []) {
 				const n = board.nets.find(x => x.name === ch.net)!;
 				let k = 0;
@@ -92,8 +134,16 @@ function rpc(cmd: string, args: any = {}): Promise<any> {
 }
 
 // ------------------------------------------------------------------ 状态
-interface Data { board: Board; bbox: [number, number, number, number]; report: Report; order: OrderRow[]; warnings?: string[] }
+interface Data { board: Board; bbox: [number, number, number, number]; report: Report; order: OrderRow[]; warnings?: string[]; gate?: { route: string[]; deliver: string[] } }
+interface BriefView { brief: any; status: ReturnType<typeof briefStatus>; summaries: Record<string, string> }
 let D: Data | null = null;
+let BR: BriefView | null = null;
+let L: LayoutReport | null = null;
+let lmode = false;
+let selL: number | null = null;
+let layoutT0 = 0;
+let openGate: Gate | null = null;
+const BLOCKC = ['#39d0b0', '#ff8a3d', '#7fd4ff', '#b98cff', '#f5c542', '#ff5d8f', '#3ccf7a', '#e8683f'];
 let plan: FixPlan | null = null;
 let selV: number | null = null;
 let selNet: string | null = null;
@@ -376,7 +426,7 @@ function frame(now: number): void {
 					b = [fs.a[0] + (fs.b[0] - fs.a[0]) * k, fs.a[1] + (fs.b[1] - fs.a[1]) * k];
 				}
 				const c = orderMode ? TIERC[tierOfNet(n.name)] : col;
-				line(a, b, s[5], c, fixNets?.has(n.name) ? 0.1 : focus ? (l === 0 ? 0.9 : 0.6) : 0.18);
+				line(a, b, s[5], c, lmode ? 0.16 : fixNets?.has(n.name) ? 0.1 : focus ? (l === 0 ? 0.9 : 0.6) : 0.18);
 			}
 		}
 	}
@@ -386,7 +436,7 @@ function frame(now: number): void {
 		for (const p of n.pads) {
 			if (intro && p.x > scanX)
 				continue;
-			drawPad(p, focus ? 'rgba(217,180,74,.85)' : 'rgba(217,180,74,.25)');
+			drawPad(p, lmode ? 'rgba(217,180,74,.35)' : focus ? 'rgba(217,180,74,.85)' : 'rgba(217,180,74,.25)');
 		}
 		for (const v of n.vias) {
 			if (intro && v[0] > scanX)
@@ -414,7 +464,7 @@ function frame(now: number): void {
 		ctx.fillRect(sx - 1, 0, 2, H);
 	}
 	// 电流 / 信号流
-	if (selNet && mode !== 'order') {
+	if (selNet && mode !== 'order' && !lmode) {
 		drawFlow(selNet, now, '#7cf5dc');
 		const mate = pairOf(selNet);
 		if (mate)
@@ -422,13 +472,15 @@ function frame(now: number): void {
 		drawReturn(selNet, now);
 	}
 	// 去耦回路
-	if (selV !== null && mode !== 'order')
+	if (selV !== null && mode !== 'order' && !lmode)
 		drawLoop(D.report.violations[selV], now);
 	// 修复形变
 	if (mode === 'fix' && plan)
 		drawFix(now);
+	if (lmode && L)
+		drawLayout(now);
 	// 违规标记
-	if (mode !== 'order') {
+	if (mode !== 'order' && !lmode) {
 		D.report.violations.forEach((v, i) => {
 			if (!v.at || !sevOn.has(v.sev))
 				return;
@@ -472,6 +524,246 @@ function frame(now: number): void {
 			caption('回放完成：关键网络先布、先占最好的位置，一般信号最后让路');
 			setTimeout(() => caption(null), 2600);
 		}
+	}
+}
+
+// ------------------------------------------------------------------ 布局检查动画
+const clamp = (v: number, a: number, b: number): number => Math.max(a, Math.min(b, v));
+function rectPx(r: number[]): [number, number, number, number] {
+	const xa = X(r[0]);
+	const xb = X(r[2]);
+	const ya = Y(r[1]);
+	const yb = Y(r[3]);
+	return [Math.min(xa, xb), Math.min(ya, yb), Math.abs(xb - xa), Math.abs(yb - ya)];
+}
+function rc(r: number[]): Pt {
+	return [(r[0] + r[2]) / 2, (r[1] + r[3]) / 2];
+}
+function hatch(r: number[], color: string, now: number, alpha = 0.55): void {
+	const [x, y, w, h] = rectPx(r);
+	ctx.save();
+	ctx.beginPath();
+	ctx.rect(x, y, w, h);
+	ctx.clip();
+	ctx.fillStyle = color;
+	ctx.globalAlpha = 0.08;
+	ctx.fillRect(x, y, w, h);
+	ctx.globalAlpha = alpha;
+	ctx.strokeStyle = color;
+	ctx.lineWidth = 1.2;
+	const off = (now / 40) % 12;
+	ctx.beginPath();
+	for (let k = -h - 12; k < w + h; k += 12) {
+		ctx.moveTo(x + k + off, y + h);
+		ctx.lineTo(x + k + off + h, y);
+	}
+	ctx.stroke();
+	ctx.restore();
+	ctx.strokeStyle = color;
+	ctx.globalAlpha = 0.9;
+	ctx.setLineDash([5, 4]);
+	ctx.strokeRect(x, y, w, h);
+	ctx.setLineDash([]);
+	ctx.globalAlpha = 1;
+}
+function arrowPx(a: Pt, b: Pt, color: string, now: number): void {
+	const ax = X(a[0]);
+	const ay = Y(a[1]);
+	const bx = X(b[0]);
+	const by = Y(b[1]);
+	const L = Math.hypot(bx - ax, by - ay);
+	if (L < 4)
+		return;
+	const ux = (bx - ax) / L;
+	const uy = (by - ay) / L;
+	ctx.strokeStyle = color;
+	ctx.lineWidth = 2;
+	ctx.setLineDash([8, 6]);
+	ctx.lineDashOffset = -(now / 30) % 14;
+	ctx.beginPath();
+	ctx.moveTo(ax, ay);
+	ctx.lineTo(bx - ux * 8, by - uy * 8);
+	ctx.stroke();
+	ctx.setLineDash([]);
+	ctx.lineDashOffset = 0;
+	ctx.fillStyle = color;
+	ctx.beginPath();
+	ctx.moveTo(bx, by);
+	ctx.lineTo(bx - ux * 12 - uy * 6, by - uy * 12 + ux * 6);
+	ctx.lineTo(bx - ux * 12 + uy * 6, by - uy * 12 - ux * 6);
+	ctx.closePath();
+	ctx.fill();
+	// 沿箭头移动的光点
+	const ph = (now / 1200) % 1;
+	ctx.globalAlpha = 1 - ph;
+	ctx.beginPath();
+	ctx.arc(ax + (bx - ax) * ph, ay + (by - ay) * ph, 4, 0, Math.PI * 2);
+	ctx.fill();
+	ctx.globalAlpha = 1;
+}
+function drawLayout(now: number): void {
+	if (!L)
+		return;
+	const t = (now - layoutT0) / 1000;
+	const [bx, by, bw, bh] = rectPx(L.bbox);
+	ctx.strokeStyle = '#58708e';
+	ctx.lineWidth = 1.5;
+	ctx.strokeRect(bx, by, bw, bh);
+	// 功能分区依次扫入
+	L.blocks.forEach((b, i) => {
+		if (!b.zone)
+			return;
+		const k = clamp((t - i * 0.35) / 0.5, 0, 1);
+		if (k <= 0)
+			return;
+		const [x, y, w, h] = rectPx(b.zone);
+		const c = BLOCKC[b.color % BLOCKC.length];
+		ctx.fillStyle = c;
+		ctx.globalAlpha = 0.09 * k;
+		ctx.fillRect(x, y, w * k, h);
+		ctx.globalAlpha = 0.55 * k;
+		ctx.strokeStyle = c;
+		ctx.lineWidth = 1;
+		ctx.setLineDash([6, 4]);
+		ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+		ctx.setLineDash([]);
+		ctx.globalAlpha = k;
+		ctx.fillStyle = c;
+		ctx.font = '600 12px system-ui';
+		ctx.textAlign = 'left';
+		ctx.fillText(b.name, x + 6, y + 16);
+		ctx.globalAlpha = 1;
+	});
+	// 器件按功能块着色，从上方落入
+	const blockOf = new Map<string, number>();
+	L.blocks.forEach(b => b.refs.forEach(r => blockOf.set(r, b.color)));
+	const bad = new Set(L.issues.filter(v => v.sev === 'P0' || v.sev === 'P1').flatMap(v => v.refs));
+	const base = 0.25 + L.blocks.filter(b => b.zone).length * 0.35;
+	L.parts.forEach((p, i) => {
+		const ap = clamp((t - base - i * 0.012) / 0.35, 0, 1);
+		if (ap <= 0)
+			return;
+		const e = 1 - (1 - ap) ** 3;
+		const [x, y0, w, h] = rectPx(p.rect);
+		const y = y0 - (1 - e) * 24;
+		const c = blockOf.has(p.ref) ? BLOCKC[blockOf.get(p.ref)! % BLOCKC.length] : '#6b7a8e';
+		ctx.globalAlpha = 0.22 * e;
+		ctx.fillStyle = c;
+		ctx.fillRect(x, y, w, h);
+		ctx.globalAlpha = 0.95 * e;
+		ctx.strokeStyle = c;
+		ctx.lineWidth = 1.2;
+		ctx.strokeRect(x, y, w, h);
+		if (bad.has(p.ref) && ap >= 1) {
+			ctx.strokeStyle = '#ff3b5c';
+			ctx.globalAlpha = 0.45 + 0.45 * Math.sin(now / 180);
+			ctx.lineWidth = 2;
+			ctx.strokeRect(x - 2, y - 2, w + 4, h + 4);
+		}
+		if (w > 16 && h > 9) {
+			ctx.globalAlpha = e;
+			ctx.fillStyle = '#e6edf3';
+			ctx.font = `${Math.min(12, Math.max(9, h * 0.45))}px system-ui`;
+			ctx.textAlign = 'center';
+			ctx.fillText(p.ref, x + w / 2, y + h / 2 + 4);
+		}
+		ctx.globalAlpha = 1;
+	});
+	// 问题标记
+	const ready = t > base + 0.4;
+	L.issues.forEach((v, i) => {
+		if (!v.at || !sevOn.has(v.sev) || !ready)
+			return;
+		const ph = ((now / 1000 + i * 0.37) % 1.6) / 1.6;
+		const r0 = i === selL ? 9 : 5;
+		ctx.strokeStyle = SEVC[v.sev];
+		ctx.globalAlpha = (1 - ph) * 0.8;
+		ctx.lineWidth = 1.5;
+		ctx.beginPath();
+		ctx.arc(X(v.at[0]), Y(v.at[1]), r0 + ph * 14, 0, Math.PI * 2);
+		ctx.stroke();
+		ctx.globalAlpha = 1;
+		ctx.fillStyle = SEVC[v.sev];
+		ctx.beginPath();
+		ctx.arc(X(v.at[0]), Y(v.at[1]), r0 * 0.55 + 1.5, 0, Math.PI * 2);
+		ctx.fill();
+	});
+	if (selL !== null && L.issues[selL])
+		drawLayoutIssue(L.issues[selL], now);
+}
+function drawLayoutIssue(v: LayoutIssue, now: number): void {
+	const part = v.refs[0] ? L!.parts.find(p => p.ref === v.refs[0]) : undefined;
+	if (v.zone && v.kind !== 'block')
+		hatch(v.zone, SEVC[v.sev], now);
+	else if (v.zone)
+		hatch(v.zone, '#3ccf7a', now, 0.25);
+	if (v.kind === 'spacing' && v.refs.length >= 2) {
+		const b = L!.parts.find(p => p.ref === v.refs[1]);
+		if (part && b) {
+			const cb = rc(b.rect);
+			const ca = rc(part.rect);
+			const pa: Pt = [clamp(cb[0], part.rect[0], part.rect[2]), clamp(cb[1], part.rect[1], part.rect[3])];
+			const pb: Pt = [clamp(ca[0], b.rect[0], b.rect[2]), clamp(ca[1], b.rect[1], b.rect[3])];
+			// 两个器件向外辐射的“场”，在中间相撞
+			for (const [c, col] of [[ca, SEVC[v.sev]], [cb, '#7fd4ff']] as [Pt, string][]) {
+				for (let k = 0; k < 3; k++) {
+					const ph = ((now / 1400) + k / 3) % 1;
+					ctx.strokeStyle = col;
+					ctx.globalAlpha = (1 - ph) * 0.6;
+					ctx.lineWidth = 1.2;
+					ctx.beginPath();
+					ctx.arc(X(c[0]), Y(c[1]), 6 + ph * 60, 0, Math.PI * 2);
+					ctx.stroke();
+				}
+			}
+			ctx.globalAlpha = 1;
+			line(pa, pb, 0, SEVC[v.sev], 1, [4, 3]);
+			const m = v.msg.match(/相距 ([\d.]+) mm（至少 ([\d.]+) mm）/);
+			if (m) {
+				ctx.fillStyle = SEVC[v.sev];
+				ctx.font = '600 12px system-ui';
+				ctx.textAlign = 'center';
+				ctx.fillText(`${m[1]} mm / 需 ≥ ${m[2]} mm`, (X(pa[0]) + X(pb[0])) / 2, (Y(pa[1]) + Y(pb[1])) / 2 - 8);
+			}
+		}
+		return;
+	}
+	if (v.target && part) {
+		const c = rc(part.rect);
+		const dx = v.target[0] - c[0];
+		const dy = v.target[1] - c[1];
+		const ghost = [part.rect[0] + dx, part.rect[1] + dy, part.rect[2] + dx, part.rect[3] + dy];
+		const [gx, gy, gw, gh] = rectPx(ghost);
+		ctx.strokeStyle = '#3ccf7a';
+		ctx.lineWidth = 1.5;
+		ctx.setLineDash([4, 3]);
+		ctx.strokeRect(gx, gy, gw, gh);
+		ctx.setLineDash([]);
+		// 器件在原位和目标位之间来回滑动，示意怎么挪
+		const ph = (1 - Math.cos((now / 1600) * Math.PI * 2)) / 2;
+		const mv = [part.rect[0] + dx * ph, part.rect[1] + dy * ph, part.rect[2] + dx * ph, part.rect[3] + dy * ph];
+		const [mx, my, mw, mh] = rectPx(mv);
+		ctx.globalAlpha = 0.35;
+		ctx.fillStyle = '#3ccf7a';
+		ctx.fillRect(mx, my, mw, mh);
+		ctx.globalAlpha = 1;
+		arrowPx(c, v.target, '#3ccf7a', now);
+		return;
+	}
+	if (v.kind === 'proximity') {
+		const rv = D?.report.violations.find(x => x.rule === v.rule && x.msg === v.msg);
+		if (rv?.at)
+			drawLoop(rv, now);
+		else if (part && v.at)
+			arrowPx(rc(part.rect), v.at, SEVC[v.sev], now);
+		return;
+	}
+	if (v.kind === 'antenna' && part && !v.zone) {
+		const c = rc(part.rect);
+		const bb = L!.bbox;
+		const cand: Pt[] = [[bb[0], c[1]], [bb[2], c[1]], [c[0], bb[1]], [c[0], bb[3]]];
+		const tgt = cand.sort((a, b) => dist(a, c) - dist(b, c))[0];
+		arrowPx(c, tgt, '#3ccf7a', now);
 	}
 }
 
@@ -680,6 +972,22 @@ function pick(_px: number, _py: number, e: MouseEvent): void {
 		return;
 	const px = e.offsetX;
 	const py = e.offsetY;
+	if (lmode && L) {
+		let best = -1;
+		let bd0 = 14;
+		L.issues.forEach((v, i) => {
+			if (!v.at || !sevOn.has(v.sev))
+				return;
+			const d = Math.hypot(X(v.at[0]) - px, Y(v.at[1]) - py);
+			if (d < bd0) {
+				bd0 = d;
+				best = i;
+			}
+		});
+		if (best >= 0)
+			selectLayoutIssue(best);
+		return;
+	}
 	// 先找违规标记
 	let bestV = -1;
 	let bd = 12;
@@ -825,6 +1133,9 @@ function renderIssues(): void {
 		groups.get(k)!.push(i);
 	});
 	let html = '';
+	if (D.gate?.route?.length)
+		html += `<div class="warnbox">设计确认 G0–G4 未放行：只能查看和预览，不能写回修复。布线前请在“设计确认”页逐级确认。</div>`;
+	html += '<div class="act" style="margin:0 0 10px"><button id="recG5">记录为 G5 依据</button></div>';
 	if (r.confirm.length)
 		html += `<div class="note" style="margin:0 0 10px">网络类需要确认：${r.confirm.slice(0, 8).map(c => `${esc(c.net)}→${esc(c.class)}`).join('、')}${r.confirm.length > 8 ? ' 等' : ''}</div>`;
 	for (const [k, idx] of [...groups].sort((a, b) => a[0].localeCompare(b[0]))) {
@@ -846,6 +1157,16 @@ function renderIssues(): void {
 	pane.querySelectorAll<HTMLElement>('[data-ask]').forEach((b) => {
 		b.onclick = () => askAi(Number(b.dataset.ask));
 	});
+	const rec = document.getElementById('recG5');
+	if (rec) {
+		rec.onclick = async () => {
+			BR = await rpc('routeRecord');
+			renderBrief();
+			updateGateChip();
+			caption(`已记录布线得分 ${D?.report.score} 为 G5 依据；DRC 错误数和截图在“设计确认”页填写`);
+			setTimeout(() => caption(null), 2600);
+		};
+	}
 	pane.querySelectorAll<HTMLElement>('[data-net]').forEach((b) => {
 		b.onclick = () => selectNet(b.dataset.net!);
 	});
@@ -888,7 +1209,9 @@ function renderFix(): void {
 	}
 	const nAdd = plan.changes.reduce((s, c) => s + c.add.length, 0);
 	const nRm = plan.changes.reduce((s, c) => s + c.remove.length, 0);
-	let html = `<div class="group"><h4><span>可自动修复 ${plan.fixed.length} 处（${plan.changes.length} 个网络，删 ${nRm} 段 / 建 ${nAdd} 段）</span></h4>`;
+	const gateMiss: string[] = (plan as any).gate ?? [];
+	let html = gateMiss.length ? `<div class="warnbox">设计确认未放行，现在只能预览：${gateMiss.map(esc).join('；')}</div>` : '';
+	html += `<div class="group"><h4><span>可自动修复 ${plan.fixed.length} 处（${plan.changes.length} 个网络，删 ${nRm} 段 / 建 ${nAdd} 段）</span></h4>`;
 	html += plan.fixed.map(it => `<div class="item"><div class="row"><span class="sev P3">${esc(it.how === 'remove' ? '删除' : it.how === 'merge' ? '合并' : '重建')}</span><span class="rule">${esc(it.net)} · L${it.layer + 1}</span></div><div class="msg">${esc(issueText(it.issues))}</div></div>`).join('');
 	html += '</div>';
 	if (plan.manual.length) {
@@ -899,15 +1222,244 @@ function renderFix(): void {
 	html += '<div class="note">画布上红色虚线是原走线，绿色是修复后的走线；黄框是修不了的位置。应用后请在嘉立创 EDA 里重新铺铜并跑一次 DRC。</div>';
 	pane.innerHTML = html;
 }
+// ------------------------------------------------------------------ 设计确认与布局
+function getPath(d: any, path: string): any {
+	return path.split('.').reduce((o, k) => (o && typeof o === 'object' ? o[k] : undefined), d);
+}
+const STATE_TXT: Record<string, string> = { missing: '缺信息', blocked: '等前一级', pending: '待确认', confirmed: '已确认', stale: '已失效' };
+function updateGateChip(): void {
+	if (!BR)
+		return;
+	const chip = $('gateChip');
+	const n = BR.status.gates.filter(g => g.state === 'confirmed').length;
+	const open = !BR.status.stages.route.length;
+	chip.textContent = `设计确认 ${n}/6${open ? ' · 可布线' : ''}`;
+	chip.className = `gatechip ${open ? 'open' : 'closed'}`;
+	chip.title = open ? '设计确认 G0–G4 已放行，可以写回修复' : `写回修复前还需确认：\n${BR.status.stages.route.join('\n')}`;
+	($('btnApply') as HTMLButtonElement).title = open ? '' : '设计确认 G0–G4 未放行，不能写回';
+}
+function renderBrief(): void {
+	const pane = $('p-brief');
+	if (!BR) {
+		pane.innerHTML = '<div class="empty">读取设计确认…</div>';
+		return;
+	}
+	const st = BR.status;
+	const stg = (k: string, name: string): string => `<span class="${st.stages[k].length ? 'no' : 'ok'}">${st.stages[k].length ? '✗' : '✓'} ${name}</span>`;
+	let html = '<div class="note" style="margin:0 0 8px">布局布线前必须由设计者逐级给出并确认这些信息：需求、外壳与固定件、功能分区（看过布局截图）、布局检查、布线规划。每一级核对无误后手动输入确认码；改了前面的内容，后面的确认自动失效。AI 助手只能帮你填写，不能替你确认。</div>';
+	html += `<div class="stages">${stg('place', '可以摆放器件（G0–G1）')}${stg('route', '可以布线、写回修复（G0–G4）')}${stg('deliver', '可以宣布完成（G0–G5）')}</div>`;
+	for (const g of st.gates) {
+		const open = openGate === g.gate;
+		html += `<div class="gate${open ? ' open' : ''}" data-g="${g.gate}"><div class="gh"><span class="st ${g.state}">${STATE_TXT[g.state]}</span><b>${g.gate} ${esc(g.title)}</b><span class="rule">${open ? '收起' : '展开'}</span></div><div class="gb">`;
+		if (g.state === 'missing')
+			html += `<ul class="miss">${g.detail.map(m => `<li>${esc(m)}</li>`).join('')}</ul>`;
+		if (g.state === 'blocked')
+			html += `<div class="note">${esc(g.detail[0])}</div>`;
+		if (g.gate === 'G3')
+			html += '<div class="note">在“布局”页检查，没有 P0 时点“记录为 G3 依据”。</div>';
+		if (g.gate === 'G5')
+			html += '<div class="note">在“结论”页点“记录为 G5 依据”，再填 DRC 错误数和截图。</div>';
+		for (const f of fields(g.gate as Gate)) {
+			const v = getPath(BR.brief, f.path);
+			if (f.kind === 'list')
+				html += `<label>${esc(f.label)}</label><textarea rows="4" data-f="${esc(f.path)}" data-k="list" placeholder="${esc(f.hint ?? '')}">${esc(Array.isArray(v) || (v && typeof v === 'object') ? JSON.stringify(v, null, 1) : (v ?? ''))}</textarea>`;
+			else
+				html += `<label>${esc(f.label)}</label><input data-f="${esc(f.path)}" data-k="${f.kind}" value="${esc(v ?? '')}" />`;
+		}
+		html += `<div class="act"><button data-save="${g.gate}">保存这一级</button></div>`;
+		if (g.state === 'pending' || g.state === 'stale')
+			html += `<div class="note">请逐项核对下面的摘要。全部正确时，手动输入确认码 <span class="code">${esc(g.code)}</span>：</div><pre>${esc(BR.summaries[g.gate])}</pre><div class="act"><input data-typed="${g.gate}" placeholder="输入 ${esc(g.code)}" autocomplete="off" /><button class="primary" data-confirm="${g.gate}">确认</button></div>`;
+		if (g.state === 'confirmed') {
+			const c = BR.brief.confirmations?.[g.gate] ?? {};
+			html += `<div class="okbox">已确认 ${esc(c.code)} · ${esc(c.at ?? '')}</div>`;
+		}
+		html += '</div></div>';
+	}
+	html += `<details><summary>导入 / 导出 design-brief.json</summary><textarea id="briefJson" rows="8">${esc(JSON.stringify(BR.brief, null, 1))}</textarea><div class="act"><button id="briefImport">用上面的内容覆盖</button></div><div class="note">可以粘贴命令行 scripts/design_gate.py 生成的文件。导入后确认记录清空，每一级都要在这里重新确认。</div></details>`;
+	pane.innerHTML = html;
+	pane.querySelectorAll<HTMLElement>('.gh').forEach((el) => {
+		el.onclick = () => {
+			const g = el.parentElement!.dataset.g as Gate;
+			openGate = openGate === g ? null : g;
+			renderBrief();
+		};
+	});
+	pane.querySelectorAll<HTMLElement>('[data-save]').forEach((b) => {
+		b.onclick = async () => {
+			const box = b.closest('.gate')!;
+			const set: Record<string, any> = {};
+			for (const el of Array.from(box.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('[data-f]'))) {
+				const raw = el.value.trim();
+				const k = el.dataset.k;
+				if (k === 'number') {
+					set[el.dataset.f!] = raw !== '' && Number.isFinite(Number(raw)) ? Number(raw) : raw;
+				}
+				else if (k === 'list') {
+					if (raw === '' || raw === '无' || raw.startsWith('待填')) {
+						set[el.dataset.f!] = raw;
+						continue;
+					}
+					try {
+						set[el.dataset.f!] = JSON.parse(raw);
+					}
+					catch {
+						caption(`“${el.previousElementSibling?.textContent}”不是合法的 JSON 列表；确实没有就写 无`);
+						return;
+					}
+				}
+				else {
+					set[el.dataset.f!] = raw;
+				}
+			}
+			try {
+				BR = await rpc('briefUpdate', { set });
+				renderBrief();
+				updateGateChip();
+				caption('已保存；内容有变化的级别需要重新确认');
+				setTimeout(() => caption(null), 1800);
+			}
+			catch (e: any) {
+				caption(`保存失败：${e?.message ?? e}`);
+			}
+		};
+	});
+	pane.querySelectorAll<HTMLElement>('[data-confirm]').forEach((b) => {
+		b.onclick = async () => {
+			const g = b.dataset.confirm!;
+			const typed = (pane.querySelector(`[data-typed="${g}"]`) as HTMLInputElement).value;
+			try {
+				const r = await rpc('briefConfirm', { gate: g, typed });
+				BR = r.status ? r : BR;
+				if (!r.cancelled)
+					openGate = (GATES[GATES.indexOf(g as Gate) + 1] ?? null) as Gate | null;
+				renderBrief();
+				updateGateChip();
+			}
+			catch (e: any) {
+				caption(`不能确认：${e?.message ?? e}`);
+			}
+		};
+	});
+	const imp = document.getElementById('briefImport');
+	if (imp) {
+		imp.onclick = async () => {
+			try {
+				const obj = JSON.parse(($('briefJson') as HTMLTextAreaElement).value);
+				BR = await rpc('briefUpdate', { brief: obj, reset: true });
+				renderBrief();
+				updateGateChip();
+			}
+			catch (e: any) {
+				caption(`导入失败：${e?.message ?? e}`);
+			}
+		};
+	}
+}
+function renderLayout(): void {
+	const pane = $('p-layout');
+	if (!L)
+		return;
+	let html = '';
+	if (L.note)
+		html += `<div class="warnbox">${esc(L.note)}</div>`;
+	else if (L.brief_complete && Object.values(L.brief_complete).includes(false))
+		html += `<div class="warnbox">设计确认 G0–G2 还没填完（${Object.entries(L.brief_complete).filter(([, v]) => !v).map(([g]) => g).join('、')}）：固定件、分区检查不完整。</div>`;
+	html += `<div class="group"><h4><span>P0 ${L.p0} · P1 ${L.p1} · P2 ${L.p2} · P3 ${L.p3}</span><span>${L.pass ? '无 P0' : '有 P0，先改布局'}</span></h4>`;
+	html += `<div>${L.blocks.map(b => `<span class="blk"><i style="background:${BLOCKC[b.color % BLOCKC.length]}"></i>${esc(b.name)}</span>`).join('')}</div>`;
+	html += `<div class="act"><button id="lRecord"${L.p0 ? ' disabled title="有 P0 不能作为 G3 依据"' : ''}>记录为 G3 依据</button><button id="lReplay">重放动画</button></div></div>`;
+	const bySev = ['P0', 'P1', 'P2', 'P3'];
+	for (const sv of bySev) {
+		const idx = L.issues.map((v, i) => [v, i] as [LayoutIssue, number]).filter(([v]) => v.sev === sv && sevOn.has(v.sev));
+		if (!idx.length)
+			continue;
+		html += `<div class="group"><h4><span>${sv}</span><span>${idx.length}</span></h4>`;
+		for (const [v, i] of idx)
+			html += `<div class="item${i === selL ? ' sel' : ''}" data-l="${i}"><div class="row"><span class="sev ${v.sev}">${v.sev}</span><span class="rule">${esc(v.rule)}${v.refs.length ? ` · ${esc(v.refs.join('、'))}` : ''}</span></div><div class="msg">${esc(v.msg)}</div>${v.fix ? `<div class="note" style="margin-top:3px">${esc(v.fix)}</div>` : ''}</div>`;
+		html += '</div>';
+	}
+	if (!L.issues.length)
+		html += '<div class="empty">没有发现布局问题</div>';
+	pane.innerHTML = html;
+	pane.querySelectorAll<HTMLElement>('[data-l]').forEach((el) => {
+		el.onclick = () => selectLayoutIssue(Number(el.dataset.l));
+	});
+	$('lReplay').onclick = () => {
+		layoutT0 = performance.now();
+		selL = null;
+		fit();
+	};
+	$('lRecord').onclick = () => runLayout(true);
+}
+function selectLayoutIssue(i: number): void {
+	if (!L)
+		return;
+	selL = i;
+	const v = L.issues[i];
+	lmode = true;
+	if (v.at)
+		zoomTo(v.target ? [(v.at[0] + v.target[0]) / 2, (v.at[1] + v.target[1]) / 2] : v.at, Math.max(view.s, 16));
+	caption(`${v.rule}：${v.msg}${v.fix ? ` → ${v.fix}` : ''}`);
+	renderLayout();
+	document.querySelector(`[data-l="${i}"]`)?.scrollIntoView({ block: 'nearest' });
+}
+
 function tab(t: string): void {
 	document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', (b as HTMLElement).dataset.t === t));
 	document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === `p-${t}`));
+	if (t === 'layout')
+		lmode = !!L;
+	else if (['issues', 'metrics', 'order', 'fix'].includes(t))
+		lmode = false;
+	if (t === 'brief')
+		loadBrief();
 }
 document.querySelectorAll<HTMLElement>('#tabs button').forEach((b) => {
 	b.onclick = () => tab(b.dataset.t!);
 });
 
 // ------------------------------------------------------------------ 动作
+async function loadBrief(): Promise<void> {
+	try {
+		BR = await rpc('briefGet');
+		renderBrief();
+		updateGateChip();
+	}
+	catch {}
+}
+async function runLayout(record = false): Promise<void> {
+	const btn = $('btnLayout') as HTMLButtonElement;
+	btn.disabled = true;
+	btn.innerHTML = '<span class="spinner"></span>检查中';
+	try {
+		if (!D)
+			await check();
+		const r = await rpc('layoutCheck', { record, yUp: flipY });
+		L = r.layout;
+		BR = r.brief;
+		if (D) {
+			D.board = r.board;
+			D.bbox = r.bbox;
+		}
+		selL = null;
+		lmode = true;
+		layoutT0 = performance.now();
+		mode = 'idle';
+		fit();
+		tab('layout');
+		renderLayout();
+		renderBrief();
+		updateGateChip();
+		caption(record ? '已记录为 G3 依据，去“设计确认”页确认 G3' : `布局检查：P0 ${L!.p0} · P1 ${L!.p1} · P2 ${L!.p2}，点列表里的问题看动画`);
+		setTimeout(() => caption(null), 2600);
+	}
+	catch (e: any) {
+		caption(`布局检查失败：${e?.message ?? e}`);
+	}
+	finally {
+		btn.disabled = false;
+		btn.textContent = '布局检查';
+	}
+}
 async function check(): Promise<void> {
 	const btn = $('btnCheck') as HTMLButtonElement;
 	btn.disabled = true;
@@ -958,6 +1510,8 @@ async function fixPreview(): Promise<void> {
 		renderFix();
 		tab('fix');
 		($('btnApply') as HTMLButtonElement).disabled = !plan?.changes.length;
+		if ((plan as any)?.gate?.length)
+			caption('修复预览可以看，写回需要先完成设计确认 G0–G4');
 		caption(plan?.changes.length ? `可自动修复 ${plan.fixed.length} 处：红色虚线 → 绿色八方向走线` : '没有可以自动修复的几何问题');
 	}
 	catch (e: any) {
@@ -970,9 +1524,14 @@ async function fixPreview(): Promise<void> {
 }
 async function fixApply(): Promise<void> {
 	const btn = $('btnApply') as HTMLButtonElement;
+	if (BR && BR.status.stages.route.length) {
+		caption('设计确认 G0–G4 还没放行：先在“设计确认”页逐级确认，再写回修复');
+		tab('brief');
+		return;
+	}
 	btn.disabled = true;
 	try {
-		const r = await rpc('fixApply');
+		const r = await rpc('fixApply', { confirmed: false });
 		if (r?.cancelled) {
 			btn.disabled = false;
 			return;
@@ -1043,6 +1602,8 @@ $('aiSave').onclick = async () => {
 	setTimeout(() => caption(null), 1500);
 };
 $('btnCheck').onclick = check;
+$('btnLayout').onclick = () => runLayout(false);
+$('gateChip').onclick = () => tab('brief');
 $('btnOrder').onclick = () => {
 	if (D) {
 		playOrder();
@@ -1066,7 +1627,9 @@ if (!HAS_EDA) {
 		e.preventDefault();
 		demoKey = demoKey === 'principles-bad' ? 'route-bad' : 'principles-bad';
 		demoBoard = clone((demo as any)[demoKey]);
-		check();
+		L = null;
+		lmode = false;
+		check().then(loadBrief);
 	};
 }
 window.addEventListener('resize', () => {
@@ -1076,5 +1639,5 @@ window.addEventListener('resize', () => {
 resize();
 requestAnimationFrame(frame);
 loadAi();
-check();
-(window as any).__lpiot = { get data() { return D; }, get plan() { return plan; }, selectNet, selectViolation, playOrder, fixPreview, check, rpc, get mode() { return mode; } };
+check().then(loadBrief);
+(window as any).__lpiot = { get layout() { return L; }, get brief() { return BR; }, runLayout, selectLayoutIssue, tab, get data() { return D; }, get plan() { return plan; }, selectNet, selectViolation, playOrder, fixPreview, check, rpc, get mode() { return mode; } };

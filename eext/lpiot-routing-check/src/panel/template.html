@@ -74,6 +74,27 @@ aside { border-left: 1px solid var(--line); background: var(--panel); display: g
 .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -2px; margin-right: 6px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .demo { color: var(--p2); font-size: 12px; }
+.gatechip { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); cursor: pointer; white-space: nowrap; }
+.gatechip.open { color: var(--ok); border-color: var(--ok); }
+.gatechip.closed { color: var(--p1); border-color: var(--p1); }
+.stages { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; font-size: 12px; }
+.stages span.ok { color: var(--ok); } .stages span.no { color: var(--p1); }
+.gate { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; background: var(--panel2); overflow: hidden; }
+.gate > .gh { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; }
+.gate > .gh b { flex: 1; }
+.gate .st { font-size: 11px; padding: 0 7px; border-radius: 4px; color: #0b0f15; font-weight: 700; }
+.st.missing { background: var(--p1); } .st.blocked { background: var(--faint); color: var(--ink); } .st.pending { background: var(--p2); } .st.confirmed { background: var(--ok); } .st.stale { background: var(--p0); }
+.gate .gb { padding: 0 10px 10px; display: none; }
+.gate.open .gb { display: block; }
+.gate .miss { color: var(--p1); font-size: 12px; margin: 6px 0; padding-left: 16px; }
+.gate .miss li { margin: 2px 0; }
+.gate pre { white-space: pre-wrap; font-size: 11px; background: var(--bg); border-radius: 6px; padding: 8px; max-height: 220px; overflow: auto; }
+.gate textarea { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.code { font-family: ui-monospace, Menlo, monospace; color: var(--p2); font-weight: 700; }
+.warnbox { border: 1px solid var(--p1); color: var(--p1); background: rgba(255,138,61,.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; font-size: 12px; }
+.okbox { border: 1px solid var(--ok); color: var(--ok); background: rgba(60,207,122,.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; font-size: 12px; }
+.blk { display: inline-flex; align-items: center; gap: 5px; margin: 0 8px 4px 0; font-size: 12px; color: var(--dim); }
+.blk i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 </style>
 </head>
 <body>
@@ -84,6 +105,8 @@ aside { border-left: 1px solid var(--line); background: var(--panel); display: g
 		<span id="demoTag" class="demo"></span>
 		<div class="sp"></div>
 		<div class="tools">
+			<span id="gateChip" class="gatechip" title="设计确认闸门">设计确认</span>
+			<button id="btnLayout" title="对照设计确认内容检查器件摆放">布局检查</button>
 			<button id="btnCheck" class="primary">检查</button>
 			<button id="btnOrder" title="按优先级回放布线顺序">顺序回放</button>
 			<button id="btnFix" title="计算修复方案并预览">修复预览</button>
@@ -100,12 +123,16 @@ aside { border-left: 1px solid var(--line); background: var(--panel); display: g
 		</div>
 		<aside>
 			<div class="tabs" id="tabs">
+				<button data-t="brief">确认</button>
+				<button data-t="layout">布局</button>
 				<button data-t="issues" class="on">结论</button>
 				<button data-t="metrics">指标</button>
-				<button data-t="order">布线顺序</button>
+				<button data-t="order">顺序</button>
 				<button data-t="fix">修复</button>
 				<button data-t="ai">AI</button>
 			</div>
+			<div class="pane" id="p-brief"><div class="empty">读取设计确认…</div></div>
+			<div class="pane" id="p-layout"><div class="empty">点“布局检查”对照设计确认内容检查器件摆放：固定件位置、功能分区、禁布区、天线净空、干扰源间距、去耦和晶振负载电容距离。</div></div>
 			<div class="pane on" id="p-issues"><div class="empty">还没有检查结果</div></div>
 			<div class="pane" id="p-metrics"><div class="empty">还没有检查结果</div></div>
 			<div class="pane" id="p-order"><div class="empty">还没有检查结果</div></div>

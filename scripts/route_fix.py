@@ -808,7 +808,10 @@ def main(argv=None):
     ap.add_argument("--constraints")
     ap.add_argument("--clearance", type=float, default=0.15, help="与其他网络的最小间距 mm（默认 0.15，约束文件里网络类的 clearance 优先）")
     ap.add_argument("--no-chamfer", action="store_true", help="不把信号线的 90° 拐角斜切成 45°")
+    ap.add_argument("--brief", help="design-brief.json：G0–G4 必须已由用户确认，否则拒绝修改走线（见 references/19-design-gate.md）")
     a = ap.parse_args(argv)
+    import design_gate as DG
+    DG.require_or_exit(a.brief, "route")
     cons = json.loads(Path(a.constraints).read_text(encoding="utf-8")) if a.constraints else None
     src = Path(a.file)
     if src.suffix == ".kicad_pcb":

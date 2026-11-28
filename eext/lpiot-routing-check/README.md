@@ -1,6 +1,31 @@
 # 布线检查助手 / Routing Check Assistant
 
-嘉立创 EDA 专业版扩展。读当前 PCB，按一套成文的走线规则检查、打分、用板子动画讲清楚问题在哪，能预览并一键修复几何问题，还能接入你自己的大模型做解读。
+嘉立创 EDA 专业版扩展。布局布线之前先和你逐级确认设计信息；对照确认内容检查器件摆放；读当前 PCB，按一套成文的走线规则检查、打分、用板子动画讲清楚问题在哪；设计确认放行后能一键修复几何问题；还能接入你自己的大模型做解读。
+
+> **这不是一键出板工具。** DRC 通过不代表板子能用。没有说清外壳和接口位置、没有功能分区、没有布线优先级就让工具“自动布完”，得到的往往是满板任意角度和长绕线。所以写回修复前，必须先在“设计确认”页逐级确认，AI 代理也绕不过去。
+
+## 设计确认（强制）
+
+| 级别 | 要你给出并确认 |
+|---|---|
+| G0 需求与工艺 | 功能与场景、供电与峰值电流、无线、环境、层数、板厚、板厂 |
+| G1 机械约束 | 板框尺寸或外壳 DXF、外壳材料与限高、固定孔、每个接口 / 按键 / 灯 / 天线 / 电池贴哪条边和位置、禁布区 |
+| G2 功能分区 | 功能块与区域、信号与电源流向、你看过的布局截图 |
+| G3 布局检查 | “布局”页检查无 P0，点“记录为 G3 依据”；保留的问题 |
+| G4 布线规划 | 每层用途、布线优先级（哪些手工、哪些可工具辅助）、差分对、电源电流、验收分数 |
+| G5 交付验收 | 布线得分达标且无 P0（“结论”页记录）、DRC 为零、你看过的布线截图 |
+
+![设计确认](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-routing-check/docs/design-confirm.jpg)
+
+每一级填完后，面板显示摘要和确认码（如 `G1-4c09ae`），核对无误后手动输入确认码，再在编辑器弹窗里点确认。前面的内容一改，后面的确认自动失效。G0–G4 都确认后才能写回修复。设计确认按工程保存在本机，也可以导入 / 导出命令行 `design_gate.py` 使用的 `design-brief.json`（导入后需要重新确认）。
+
+## 布局检查
+
+点“布局检查”，对照设计确认内容检查当前摆放：器件超出板框、焊盘区域重叠、固定件没贴指定的边或位置不对、功能块器件跑出自己的区域、功能块交叠、天线不在板边或净空区里有器件、天线 / 电感 / 晶振 / 电池 / 连接器间距不够、器件进禁布区、去耦电容和晶振负载电容离得太远。动画：功能分区依次扫入、器件按功能块着色落入；选中问题会画出目标位置、器件滑向目标的示意和箭头，间距问题显示两侧辐射的“场”和距离。
+
+![布局检查动画](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-routing-check/docs/layout.gif)
+
+嘉立创 EDA 自带的 DRC 管连通性、间距、线宽、过孔、差分对和元件间距（装配干涉）；“这个器件该不该放在这里”这类检查由本扩展补上。
 
 ![总览](https://raw.githubusercontent.com/donghuixin/low-power-iot-hardware-design/main/eext/lpiot-routing-check/docs/overview.jpg)
 
@@ -37,16 +62,18 @@
 ## 使用
 
 1. 在扩展广场安装，或在 高级 → 扩展管理器 → 导入 选择 `.eext` 文件。
-2. 打开 PCB，菜单 **布线检查 → 打开布线检查面板**，点“检查”。
-3. 点右侧结论定位到画布和编辑器里的图元；点“看电流”看动画；“布线顺序”页可回放推荐顺序。
-4. “修复预览”计算修复方案；确认无误后“应用修复”。修改放在一个操作里，可以撤销。应用后请重新铺铜并跑一次 DRC。
+2. 打开 PCB，菜单 **布线检查 → 打开布线检查面板**。先到“设计确认”页填写并确认 G0、G1；摆好器件后截图确认 G2；点“布局检查”，没有 P0 就记录为 G3 依据并确认；填好 G4 布线规划并确认。
+3. 点“检查”看布线结论。
+4. 点右侧结论定位到画布和编辑器里的图元；点“看电流”看动画；“布线顺序”页可回放推荐顺序。
+5. “修复预览”随时可以看；G0–G4 确认后才能“应用修复”。修改放在一个操作里，可以撤销。应用后请重新铺铜并跑一次 DRC。
+6. 布完后在“结论”页记录为 G5 依据，填 DRC 错误数和截图，确认 G5。
 
 **快速检查**菜单只弹出得分和最严重的几条。
 
 ## AI
 
 - **AI 解读**：在面板“AI”页的设置里选择 Anthropic Claude 或 OpenAI 兼容接口（DeepSeek、通义、Kimi、本地 Ollama 等），填写地址、模型和你自己的 API Key。整板解读会把检查报告、网络类和布线顺序发给模型；单条违规的“问 AI”会附上附近 3 mm 内的网络。API Key 只保存在本机扩展配置里。
-- **本地 AI 代理**：从源码目录运行 `npm install && npm run bridge`（HTTP，`POST http://127.0.0.1:49732/rpc`）或 `node bridge/bridge.mjs --mcp`（MCP，给 Claude Code 等用），再在菜单点 **连接本地 AI 助手…**。代理可以调用检查、布线顺序、定位、修复预览、写入前闸门；写回修复时嘉立创 EDA 会弹窗请你确认。
+- **本地 AI 代理**：从源码目录运行 `npm install && npm run bridge`（HTTP，`POST http://127.0.0.1:49732/rpc`）或 `node bridge/bridge.mjs --mcp`（MCP，给 Claude Code 等用），再在菜单点 **连接本地 AI 助手…**。代理可以调用检查、布线顺序、定位、修复预览、布局检查、读取和填写设计确认；没有确认工具，G0–G4 未放行时写回和写入前闸门会被拒绝；放行后写回修复时嘉立创 EDA 仍会弹窗请你确认。
 
 Claude Code 的 MCP 配置示例：
 
@@ -77,4 +104,4 @@ npm run build     # 打包面板并生成 build/dist/*.eext
 
 ---
 
-**English**: An EasyEDA Pro extension that checks PCB routing against written rules (octilinear geometry, net-class constraints, proximity, differential pairs, routing priority, isolation), scores it, explains issues with board animations (current flow, return paths, decoupling loops, routing-order replay, fix morphing), previews and applies geometry fixes as one undoable command group, and connects to your own LLM or a local AI agent (HTTP / MCP bridge).
+**English**: An EasyEDA Pro extension with a mandatory design-confirmation gate (requirements, enclosure and fixed parts, functional partition, layout check, routing plan, acceptance — each confirmed by the user typing a code; agents cannot confirm), a layout checker against the confirmed brief, and a routing checker that checks PCB routing against written rules (octilinear geometry, net-class constraints, proximity, differential pairs, routing priority, isolation), scores it, explains issues with board animations (current flow, return paths, decoupling loops, routing-order replay, fix morphing), previews and applies geometry fixes as one undoable command group, and connects to your own LLM or a local AI agent (HTTP / MCP bridge).

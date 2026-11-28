@@ -1040,6 +1040,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("lint"); s.add_argument("file"); s.add_argument("--constraints"); s.add_argument("-o", "--output"); s.add_argument("--json")
     s = sub.add_parser("gate"); s.add_argument("file"); s.add_argument("--constraints")
+    s.add_argument("--brief", help="design-brief.json：G0–G4 必须已由用户确认，否则拒绝（见 references/19-design-gate.md）")
     s = sub.add_parser("order"); s.add_argument("file"); s.add_argument("--constraints"); s.add_argument("--json")
     s = sub.add_parser("constraints"); s.add_argument("file"); s.add_argument("--layers", type=int); s.add_argument("-o", "--output", default="constraints.json")
     s.add_argument("--dru")
@@ -1054,8 +1055,12 @@ def main(argv=None):
         if a.json:
             Path(a.json).write_text(json.dumps(rep, ensure_ascii=False, indent=1), encoding="utf-8")
         print(md)
+        print("提醒：布线得分只说明几何与拓扑规则；交付前还要用户看过布线截图并确认 G5"
+              "（python scripts/design_gate.py status design-brief.json）。", file=sys.stderr)
         return 0 if rep["pass"] else 1
     if a.cmd == "gate":
+        import design_gate as DG
+        DG.require_or_exit(a.brief, "route")
         pack, _ = load_any(a.file, cons)
         rep = analyze(pack, cons)
         block = [x for x in rep["violations"] if x["rule"] in ("RTG-01", "RTG-02", "RTG-03")]

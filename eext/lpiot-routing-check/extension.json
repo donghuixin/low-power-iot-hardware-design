@@ -2,8 +2,8 @@
 	"name": "lpiot-routing-check",
 	"uuid": "c0417a1a448044239e2d8f06ac1b5464",
 	"displayName": "布线检查助手 / Routing Check Assistant",
-	"description": "PCB 走线检查与评分：任意角度、锐角、抖动、出焊盘方向、过孔预算、绕行、就近原则、差分对、布线优先级；带板子动画、一键修复预览和 AI 解读接口。",
-	"version": "0.1.0",
+	"description": "布局布线前的强制设计确认（需求、外壳与固定件、功能分区、布局检查、布线规划逐级由用户确认），对照确认内容的布局检查，走线检查与评分（任意角度、锐角、出焊盘、过孔、就近、差分、优先级）；带板子动画、修复预览和 AI 接口。",
+	"version": "0.2.0",
 	"publisher": "donghuixin",
 	"engines": {
 		"eda": "^3.2.0"
@@ -21,7 +21,8 @@
 		"DRC",
 		"AI",
 		"差分",
-		"检查"
+		"检查",
+		"布局"
 	],
 	"images": {
 		"logo": "./images/logo.png",

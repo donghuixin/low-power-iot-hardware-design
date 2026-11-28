@@ -24,7 +24,7 @@
 ## 1. 何时用
 
 - 布线前：生成约束文件和 KiCad 规则（第 6、7 节），定网络类、层角色、过孔预算。
-- Claude 通过 EDA 工具落线时：**每一批线段写入前**跑 `route_lint.py gate`；写完回读跑 `lint`（第 8 节）。
+- Claude 通过 EDA 工具落线时：先确认设计闸门 G0–G4 已放行（`19-design-gate.md`，`gate` 和 `route_fix.py` 都要带 `--brief design-brief.json`，未放行退出码 3）；**每一批线段写入前**跑 `route_lint.py gate`；写完回读跑 `lint`（第 8 节）。
 - 用户发来截图或板文件说“走线很乱”：跑 `lint` 出报告，再跑 `route_fix.py` 自动修几何问题，修不了的逐条讲清原因。
 - 布线后评审：评分并入验证器阶段 R（`13-layout-verifier.md` 的 VF-16…27），写进 Layout 评审报告。
 
@@ -179,7 +179,7 @@ python scripts/route_lint.py lint copper-pack.json            # extract_copper.p
 ### 6.2 自动修复：`route_fix.py`
 
 ```bash
-python scripts/route_fix.py board.kicad_pcb [-o fixed.kicad_pcb] [--diff diff.json] [--constraints c.json] [--clearance 0.15] [--no-chamfer]
+python scripts/route_fix.py board.kicad_pcb --brief design-brief.json [-o fixed.kicad_pcb] [--diff diff.json] [--constraints c.json] [--clearance 0.15] [--no-chamfer]
 ```
 
 修复顺序：合并重叠的共线线段 → 删除悬空线头 → 逐段重建有问题的走线 → 信号线 90° 斜切 → 再查一遍（最多两轮）。
@@ -218,9 +218,9 @@ Claude 通过嘉立创 EDA 扩展 API 或 KiCad 写线段时，先把这一批�
 ```
 
 ```bash
-python scripts/route_lint.py gate plan.json          # 有任意角度、锐角、锐角分支 → 退出码 1，打印位置
-python scripts/route_fix.py plan.json -o plan-fixed.json
-python scripts/route_lint.py gate plan-fixed.json    # 通过后才调用 EDA 写入
+python scripts/route_lint.py gate plan.json --brief design-brief.json          # 有任意角度、锐角、锐角分支 → 退出码 1，打印位置
+python scripts/route_fix.py plan.json --brief design-brief.json -o plan-fixed.json
+python scripts/route_lint.py gate plan-fixed.json --brief design-brief.json    # 通过后才调用 EDA 写入
 ```
 
 `units` 为 `mm` 或 `mil`；`ydown` 表示坐标 y 向下；`pads` 只需要这批线段两端的焊盘（用来检查出线方向），`w`、`h` 是焊盘尺寸，`rot` 是焊盘角度。闸门打印的位置单位是 mm、y 向上。
