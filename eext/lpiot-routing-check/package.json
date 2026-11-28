@@ -13,7 +13,7 @@
 		"compile": "rimraf ./dist/ && ts-node ./config/esbuild.prod.ts",
 		"lint": "eslint",
 		"fix": "eslint --fix",
-		"build": "node build/panel.mjs && npm run compile && ts-node ./build/packaged.ts",
+		"build": "node build/panel.mjs && npm run compile && ts-node ./build/packaged.ts && node build/check-store.mjs",
 		"debug": "ts-node ./build/dev.ts",
 		"update:check": "ts-node ./build/update.ts check",
 		"update": "ts-node ./build/update.ts update && npm install",
@@ -21,7 +21,8 @@
 		"manifest:bump": "npm install && ts-node ./build/manifest.ts bump && npm install",
 		"panel": "node build/panel.mjs",
 		"test": "node build/test.mjs",
-		"bridge": "node bridge/bridge.mjs"
+		"bridge": "node bridge/bridge.mjs",
+		"check:store": "node build/check-store.mjs"
 	},
 	"devDependencies": {
 		"@antfu/eslint-config": "^5.4.1",

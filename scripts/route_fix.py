@@ -584,7 +584,7 @@ class Fixer:
         if not changed:
             return []
         trial = dict(n, segs=new_segs)
-        if self.chamfer and cls not in ("GND", "PWR_LOW", "PWR_MAIN", "SW", "RF50"):
+        if self.chamfer:
             trial["segs"] = self.chamfer_net(trial, clear)
         if components(trial) != before:
             self.manual.append({"net": n["name"], "reason": "修复后连通关系会改变，已回滚", "issues": ["connectivity"]})
@@ -595,7 +595,8 @@ class Fixer:
         return results
 
     def chamfer_net(self, n, clear):
-        """把信号线上自由节点处的 90° 拐角斜切成两个 45°，斜切段长 max(2w, 0.2)。"""
+        """把自由节点处的 90° 拐角斜切成两个 135° 拐角（所有网络类，含电源、地线和射频）。
+        斜切段长优先 max(2w, 0.2)，两侧线段不够长时依次退到 max(w, 0.15)、0.6w；仍放不下的留给人工。"""
         out = []
         for l in sorted({s[0] for s in n["segs"]}):
             segs = [s for s in n["segs"] if s[0] == l]
@@ -606,7 +607,7 @@ class Fixer:
                 if c["arc"] or len(c["pts"]) < 3:
                     continue
                 pts = list(c["pts"]); w = c["w"]
-                cut = max(2 * w, 0.2) / SQ2
+                cuts = [max(2 * w, 0.2) / SQ2, max(w, 0.15) / SQ2, 0.6 * w / SQ2]
                 k = 1
                 modified = False
                 while k < len(pts) - 1:
@@ -615,15 +616,21 @@ class Fixer:
                     if abs(RL.angle_between(u, v) - 90) < 0.5:
                         lu, lv = math.hypot(*u), math.hypot(*v)
                         minseg = max(self.kw * w, self.absmin)
-                        if lu >= cut + minseg and lv >= cut + minseg:
+                        need_u = need_v = minseg
+                        done = False
+                        for cut in cuts:
+                            if lu < cut + need_u or lv < cut + need_v:
+                                continue
                             p1 = (b[0] + u[0] / lu * cut, b[1] + u[1] / lu * cut)
                             p2 = (b[0] + v[0] / lv * cut, b[1] + v[1] / lv * cut)
                             in_pad = any(RL.pt_in_pad(q[0], q[1], pd, w / 2) for q in (p1, p2) for pd in n["pads"] if pd["l"] in (-1, l) and pd.get("w"))
                             if not in_pad and self.obs.margin((p1[0], p1[1], p2[0], p2[1]), w, n["name"], l, clear) >= 0:
                                 pts[k:k + 1] = [p1, p2]
-                                modified = True
+                                modified = done = True
                                 k += 2
-                                continue
+                                break
+                        if done:
+                            continue
                     k += 1
                 if modified:
                     done_src.update(g.edges[e]["src"] for e in c["edges"])
@@ -652,7 +659,37 @@ class Fixer:
             allres += got
             if not got:
                 break
+        if self.chamfer:
+            allres += self.chamfer_all(order, locked)
         return allres
+
+    def chamfer_all(self, order, locked):
+        """最后一遍：所有网络（含地线、电源、射频）上剩下的 90° 拐角全部斜切；切不了的列为人工处理。"""
+        res = []
+        for n in order:
+            if not n["segs"] or n["name"] in locked:
+                continue
+            cls = self.classes(n)
+            clear = self.clear_for(cls)
+            before = components(n)
+            segs = self.chamfer_net(n, clear)
+            if sorted(map(tuple, segs)) != sorted(map(tuple, n["segs"])):
+                if components(dict(n, segs=segs)) != before:
+                    continue
+                self.obs.remove_net(n["name"])
+                n["segs"] = segs
+                self.obs.add_net(n)
+                res.append({"net": n["name"], "layer": None, "issues": ["right"], "how": "chamfer"})
+            for l in sorted({s[0] for s in n["segs"]}):
+                g = RL.Graph([s for s in n["segs"] if s[0] == l], n["pads"], n["vias"], l)
+                for key, nd in g.nodes.items():
+                    if len(nd["e"]) != 2 or nd["pad"] is not None or nd["via"] or nd["arc"]:
+                        continue
+                    u, v = g.vec(nd["e"][0], key), g.vec(nd["e"][1], key)
+                    if abs(RL.angle_between(u, v) - 90) < 0.5:
+                        self.manual.append({"net": n["name"], "layer": l, "at": [round(nd["p"][0], 3), round(nd["p"][1], 3)], "issues": ["right"],
+                                            "reason": "直角拐角无法自动斜切（两侧线段太短或旁边没有空间），请拆线按 135° 拐角重布或挪开相邻走线"})
+        return res
 
 
 # ------------------------------------------------------------------ KiCad 读写
@@ -807,7 +844,7 @@ def main(argv=None):
     ap.add_argument("--diff")
     ap.add_argument("--constraints")
     ap.add_argument("--clearance", type=float, default=0.15, help="与其他网络的最小间距 mm（默认 0.15，约束文件里网络类的 clearance 优先）")
-    ap.add_argument("--no-chamfer", action="store_true", help="不把信号线的 90° 拐角斜切成 45°")
+    ap.add_argument("--no-chamfer", action="store_true", help="不斜切 90° 拐角（不建议：直角拐角是 P0，lint 和闸门都不会通过）")
     ap.add_argument("--brief", help="design-brief.json：G0–G4 必须已由用户确认，否则拒绝修改走线（见 references/19-design-gate.md）")
     a = ap.parse_args(argv)
     import design_gate as DG

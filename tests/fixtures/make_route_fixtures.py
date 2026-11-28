@@ -10,6 +10,7 @@
 
 用法：python make_route_fixtures.py [输出目录]
 """
+import math
 import sys
 import uuid
 from pathlib import Path
@@ -23,6 +24,7 @@ class PCB:
         self.items = []
         self.nets = nets or NETS
         self.size = size
+        self.chamfer = None          # 好板：所有 90° 拐角斜切成两个 135° 拐角（沿两条边各退 chamfer mm）
 
     def fp(self, ref, x, y, rot, pads, value=None):
         s = [f'  (footprint "test:{ref}" (layer "F.Cu") (at {x} {y}{" " + str(rot) if rot else ""})',
@@ -39,6 +41,8 @@ class PCB:
         self.items.append(f'  (segment (start {a[0]} {a[1]}) (end {b[0]} {b[1]}) (width {w}) (layer "{layer}") (net {self.nets.index(net)}) (uuid "{uuid.UUID(int=len(self.items))}"))')
 
     def path(self, pts, net, w=0.2, layer="F.Cu"):
+        if self.chamfer:
+            pts = chamfer(pts, self.chamfer)
         for a, b in zip(pts, pts[1:]):
             self.seg(a, b, net, w, layer)
 
@@ -59,6 +63,19 @@ class PCB:
         return "\n".join(out + self.items) + "\n)\n"
 
 
+def chamfer(pts, c):
+    """把折线上的 90° 拐角换成两个 135° 拐角。"""
+    out = [pts[0]]
+    for a, b, d in zip(pts, pts[1:], pts[2:]):
+        u = (a[0] - b[0], a[1] - b[1]); v = (d[0] - b[0], d[1] - b[1])
+        lu, lv = math.hypot(*u), math.hypot(*v)
+        if lu > 2 * c and lv > 2 * c and abs(u[0] * v[0] + u[1] * v[1]) < 1e-9 * lu * lv:
+            out += [(round(b[0] + u[0] / lu * c, 4), round(b[1] + u[1] / lu * c, 4)), (round(b[0] + v[0] / lv * c, 4), round(b[1] + v[1] / lv * c, 4))]
+        else:
+            out.append(b)
+    return out + [pts[-1]]
+
+
 def parts(p):
     # U1：一列 0.3 × 1.0 mm 的竖向焊盘（长轴沿 y），在 x = 10…14，y = 15
     pins = [("1", "SDA"), ("2", "SCL"), ("3", "LED"), ("4", "MISO"), ("5", "BTN"), ("6", "VDD")]
@@ -75,7 +92,7 @@ def parts(p):
 
 
 def good():
-    p = PCB(); parts(p)
+    p = PCB(); parts(p); p.chamfer = 0.5
     # SDA：U1.1 (9.5,15) 向上直出 → 45° → 水平到 R1.1 (24.2,6)
     p.path([(9.5, 15), (9.5, 11), (14.5, 6), (24.2, 6)], "SDA")
     p.path([(10.5, 15), (10.5, 12), (12.5, 10), (24.2, 10)], "SCL")
@@ -116,6 +133,7 @@ PNETS = ["", "GND", "VDD", "XIN", "XOUT", "LED", "USB_DP", "USB_DM", "BTN", "LVD
 def principles(ok):
     """走线原则测试板。ok=True 每条原则都满足；ok=False 每条原则各违反一次。"""
     p = PCB(PNETS, (45.0, 36.0))
+    p.chamfer = 0.5 if ok else None
     T, B = "F.Cu", "B.Cu"
     p.fp("U1", 0, 0, 0, [("1", 25, 12.5, 0.3, 1.0, "VDD"), ("2", 21, 15, 1.0, 0.3, "XIN"), ("3", 21, 16, 1.0, 0.3, "XOUT"),
                          ("4", 29, 14, 1.0, 0.3, "USB_DP"), ("5", 29, 15, 1.0, 0.3, "USB_DM"), ("6", 29, 17, 1.0, 0.3, "BTN"),

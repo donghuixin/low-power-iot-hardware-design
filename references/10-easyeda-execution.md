@@ -72,7 +72,7 @@
 通过扩展 API 往 PCB 写走线（`eda.pcb_PrimitiveLine.create(net, layer, startX, startY, endX, endY, lineWidth, primitiveLock)`，坐标和线宽单位是 mil）时，几何必须先离线算好、过闸门，再整批写入。规则与评分见 `16-routing-constraints.md`。
 
 1. **从焊盘真实几何出发**：回读两端焊盘的中心、尺寸和角度，确定长轴；第一段沿长轴直出到焊盘外，再拐弯。
-2. **按八方向构造坐标**：每段的位移只能是 (±d, 0)、(0, ±d) 或 (±d, ±d)；优先两段肘形（一段 45° 加一段直线），拐弯越少越好。不要把两端焊盘中心直接连成一条线——那就是截图里任意角度斜线的来源。
+2. **按八方向构造坐标**：每段的位移只能是 (±d, 0)、(0, ±d) 或 (±d, ±d)；优先两段肘形（一段 45° 加一段直线），**不构造 L 形直角**——需要转 90° 时用两个 135° 拐角，中间斜段 ≥ max(2w, 0.2 mm)；拐弯越少越好。不要把两端焊盘中心直接连成一条线——那就是截图里任意角度斜线的来源。
 3. **写成 `plan.json` 过闸门**：`python scripts/route_lint.py gate plan.json --brief design-brief.json`（`units: "mil"`，嘉立创 EDA 的 PCB 坐标 y 向上时 `ydown: false`，向下时为 `true`，以回读的焊盘坐标为准）。有任意角度、锐角或锐角分支时退出码为 1。
 4. **不通过就修**：`python scripts/route_fix.py plan.json --brief design-brief.json -o plan-fixed.json`，再过一次闸门；修复器标为 needs_manual 的连接，换通道、换层（配回流地过孔）或回到布局，不要硬写。
 5. **写入后回读**：mm 与 mil 换算后按 0.01 mil 取整，写完回读线段，确认端点落在焊盘上、角度没被取整破坏，跑 DRC；整板布完导出 Gerber + IPC 网表，用 `extract_copper.py` 和 `route_lint.py lint` 评分。

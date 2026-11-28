@@ -21,7 +21,12 @@ function apply(b: Board, plan: ReturnType<typeof planFix>): Board {
 	return nb;
 }
 
-it('坏板修复后没有任意角度和锐角，连通不变', () => {
+it('坏板修复后没有任意角度、锐角和直角，连通不变', () => {
+	for (const f of ['route-bad.json', 'principles-bad.json']) {
+		const b2 = load(f);
+		const rep2 = analyze(apply(b2, planFix(b2)));
+		assert.equal(rep2.violations.filter(v => v.rule === 'RTG-04').length, 0, f);
+	}
 	const b = load('route-bad.json');
 	const plan = planFix(b);
 	const after = apply(b, plan);
@@ -29,8 +34,8 @@ it('坏板修复后没有任意角度和锐角，连通不变', () => {
 	console.log('fixed', plan.fixed.length, 'manual', plan.manual.map(m => `${m.net}:${m.issues}`), 'score', analyze(b).score, '->', rep.score);
 	assert.ok(plan.fixed.length >= 5);
 	for (const n of b.nets) assert.equal(components(after.nets.find(x => x.name === n.name)!), components(n), n.name);
-	const left = rep.violations.filter(v => ['RTG-01', 'RTG-02', 'RTG-03'].includes(v.rule));
-	console.log(left.map(v => `${v.rule} ${v.net} ${v.msg}`));
+	const left = rep.violations.filter(v => ['RTG-01', 'RTG-02', 'RTG-03', 'RTG-04'].includes(v.rule));
+	assert.equal(left.length, 0, left.map(v => `${v.rule} ${v.net} ${v.msg}`).join('\n'));
 	assert.ok(rep.score > analyze(b).score + 15);
 });
 

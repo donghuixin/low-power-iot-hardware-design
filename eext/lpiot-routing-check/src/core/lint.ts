@@ -13,8 +13,8 @@ import { analyzePrinciples, pairNames } from './principles';
 export const SEV_ORDER: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
 
 export const WEIGHTS: Record<string, number> = { 'VF-16': 15, 'VF-17': 10, 'VF-18': 8, 'VF-19': 8, 'VF-20': 10, 'VF-21': 12, 'VF-22': 8, 'VF-23': 7, 'VF-24': 6, 'VF-25': 6, 'VF-26': 10, 'VF-28': 8, 'VF-29': 8, 'VF-30': 6 };
-export const NAMES: Record<string, string> = { 'VF-16': '任意角度', 'VF-17': '锐角', 'VF-18': '短段、抖动与出线', 'VF-19': '多余拐弯', 'VF-20': '过孔', 'VF-21': '地平面完整性', 'VF-22': '绕行率', 'VF-23': '成束整齐度', 'VF-24': '层方向与层使用', 'VF-25': '走线密度均匀性', 'VF-26': '网络类约束', 'VF-28': '差分对', 'VF-29': '就近', 'VF-30': '优先级与隔离' };
-const METRIC_OF: Record<string, string> = { 'RTG-01': 'VF-16', 'RTG-10': 'VF-16', 'RTG-02': 'VF-17', 'RTG-03': 'VF-17', 'RTG-05': 'VF-18', 'RTG-06': 'VF-18', 'RTG-07': 'VF-18', 'RTG-09': 'VF-18', 'RTG-12': 'VF-18', 'RTV-01': 'VF-20', 'RTV-05': 'VF-20', 'RTY-04': 'VF-21', 'RTY-05': 'VF-21', 'RTL-01': 'VF-22', 'RTL-02': 'VF-22', 'RTS-03': 'VF-23', 'RTY-02': 'VF-24', 'RTL-11': 'VF-24' };
+export const NAMES: Record<string, string> = { 'VF-16': '任意角度', 'VF-17': '锐角与直角', 'VF-18': '短段、抖动与出线', 'VF-19': '多余拐弯', 'VF-20': '过孔', 'VF-21': '地平面完整性', 'VF-22': '绕行率', 'VF-23': '成束整齐度', 'VF-24': '层方向与层使用', 'VF-25': '走线密度均匀性', 'VF-26': '网络类约束', 'VF-28': '差分对', 'VF-29': '就近', 'VF-30': '优先级与隔离' };
+const METRIC_OF: Record<string, string> = { 'RTG-01': 'VF-16', 'RTG-10': 'VF-16', 'RTG-02': 'VF-17', 'RTG-03': 'VF-17', 'RTG-04': 'VF-17', 'RTG-05': 'VF-18', 'RTG-06': 'VF-18', 'RTG-07': 'VF-18', 'RTG-09': 'VF-18', 'RTG-12': 'VF-18', 'RTV-01': 'VF-20', 'RTV-05': 'VF-20', 'RTY-04': 'VF-21', 'RTY-05': 'VF-21', 'RTL-01': 'VF-22', 'RTL-02': 'VF-22', 'RTS-03': 'VF-23', 'RTY-02': 'VF-24', 'RTL-11': 'VF-24' };
 
 export class Ctx {
 	cons: Constraints;
@@ -44,7 +44,7 @@ export class Ctx {
 	}
 }
 
-export interface Stats { angle: number; acute: number; short: number; jog: number; exit: number; wchange: number; stub: number; segs: number; bends: number; excess: number[] }
+export interface Stats { angle: number; acute: number; right: number; short: number; jog: number; exit: number; wchange: number; stub: number; segs: number; bends: number; excess: number[] }
 
 function f1(x: number, n = 1): string {
 	return x.toFixed(n);
@@ -107,6 +107,12 @@ export function checkGraph(ctx: Ctx, g: Graph, segs: Seg[], net: string, _cls: s
 			const rule = dirs.length === 2 ? 'RTG-02' : 'RTG-03';
 			ctx.add(rule, w <= 0.15 + 1e-9 ? 'P0' : 'P1', net, L, nd.p, `${rule === 'RTG-02' ? '锐角拐角' : '锐角 T 分支'}：夹角 ${m.toFixed(0)}°（线宽 ${w} mm）`, round(m, 1), undefined, idsOf(segs, g, nd.e));
 			stats.acute++;
+		}
+		else if (dirs.length === 2 && Math.abs(m - 90) <= TURN_TOL && geo.forbid_right_angle !== false) {
+			// RTG-04 直角拐角：不接受，一律斜切成两个 135° 拐角
+			const w = Math.min(...nd.e.map(k => g.edges[k].w));
+			ctx.add('RTG-04', 'P0', net, L, nd.p, `直角拐角（线宽 ${w} mm）：改成两个 135° 拐角，中间斜切段 ≥ ${Math.max(2 * w, 0.2).toFixed(2)} mm`, 90, undefined, idsOf(segs, g, nd.e));
+			stats.right++;
 		}
 	}
 	const kw = geo.min_seg.k_w;
@@ -353,7 +359,7 @@ export function analyze(board: Board, consIn?: Partial<Constraints> | null): Rep
 	const layers = board.layers ?? [];
 	const nL = layers.length;
 	const nets = board.nets;
-	const stats: Stats = { angle: 0, acute: 0, short: 0, jog: 0, exit: 0, wchange: 0, stub: 0, segs: 0, bends: 0, excess: [] };
+	const stats: Stats = { angle: 0, acute: 0, right: 0, short: 0, jog: 0, exit: 0, wchange: 0, stub: 0, segs: 0, bends: 0, excess: [] };
 	const classes: Record<string, string> = {};
 	const conf: Report['confirm'] = [];
 	for (const n of nets) {
@@ -543,7 +549,7 @@ export function analyze(board: Board, consIn?: Partial<Constraints> | null): Rep
 		m[id] = { name: NAMES[id], value, weight: w, deduct: round(w * frac, 1), level: frac === 0 ? '良好' : frac < 0.75 ? '警告' : '不合格', note };
 	};
 	const n16 = cnt(['RTG-01', 'RTG-10']);
-	const n17 = cnt(['RTG-02', 'RTG-03']);
+	const n17 = cnt(['RTG-02', 'RTG-03', 'RTG-04']);
 	put('VF-16', n16, n16 === 0 ? 0 : 0.4 + 0.12 * (n16 - 1));
 	put('VF-17', n17, n17 === 0 ? 0 : 0.4 + 0.2 * (n17 - 1));
 	const per100 = (100 * (stats.short + stats.jog + stats.exit + stats.wchange + stats.stub)) / Math.max(1, stats.segs);
@@ -612,13 +618,13 @@ export function analyze(board: Board, consIn?: Partial<Constraints> | null): Rep
 		classes,
 		confirm: conf,
 		nets: perNet,
-		stats: { angle: stats.angle, acute: stats.acute, short: stats.short, jog: stats.jog, exit: stats.exit, wchange: stats.wchange, stub: stats.stub, segs: stats.segs, bends: stats.bends, excess: stats.excess.length ? round(mean(stats.excess), 3) : 0 },
+		stats: { angle: stats.angle, acute: stats.acute, right: stats.right, short: stats.short, jog: stats.jog, exit: stats.exit, wchange: stats.wchange, stub: stats.stub, segs: stats.segs, bends: stats.bends, excess: stats.excess.length ? round(mean(stats.excess), 3) : 0 },
 	};
 }
 
 /** 写入前闸门：只看任意角度、锐角、锐角分支 */
 export function gate(board: Board, cons?: Partial<Constraints> | null): { pass: boolean; blocks: Violation[] } {
 	const rep = analyze(board, cons);
-	const blocks = rep.violations.filter(x => ['RTG-01', 'RTG-02', 'RTG-03'].includes(x.rule));
+	const blocks = rep.violations.filter(x => ['RTG-01', 'RTG-02', 'RTG-03', 'RTG-04'].includes(x.rule));
 	return { pass: !blocks.length, blocks };
 }

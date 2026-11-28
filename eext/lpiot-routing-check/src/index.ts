@@ -42,6 +42,19 @@ function publish(topic: string, msg: unknown): void {
 	catch {}
 }
 
+/** 吐司提示：优先用 sys_Message.showToastMessage（sys_ToastMessage.showMessage 已弃用） */
+function toast(msg: string, type: 'info' | 'success' | 'warn' | 'error' = 'info'): void {
+	try {
+		eda.sys_Message.showToastMessage(msg, type as any);
+	}
+	catch {
+		try {
+			eda.sys_ToastMessage.showMessage(msg);
+		}
+		catch {}
+	}
+}
+
 function aiConfig(): AiConfig {
 	const c = eda.sys_Storage.getExtensionUserConfig('ai') ?? {};
 	return { ...DEFAULT_AI, ...c };
@@ -61,7 +74,7 @@ async function refresh(): Promise<State> {
 // ------------------------------------------------------------------ 设计确认（按工程保存）
 async function projectKey(): Promise<string> {
 	try {
-		const info: any = await (eda as any).dmt_Project.getCurrentProjectInfo();
+		const info = await eda.dmt_Project.getCurrentProjectInfo();
 		if (info?.uuid)
 			return `brief:${info.uuid}`;
 	}
@@ -137,7 +150,7 @@ async function handle(cmd: string, args: any = {}, source: Source = 'agent'): Pr
 			if (!ok)
 				return { cancelled: true, ...(briefView(await loadBrief()) as object) };
 			await saveBrief(b);
-			eda.sys_ToastMessage.showMessage(`已确认 ${code}`);
+			toast(`已确认 ${code}`);
 			return briefView(b);
 		}
 		case 'layoutCheck': {
@@ -189,7 +202,7 @@ async function handle(cmd: string, args: any = {}, source: Source = 'agent'): Pr
 			if (!go)
 				return { cancelled: true };
 			const r = await applyChanges(plan.changes, nCopper());
-			eda.sys_ToastMessage.showMessage(`布线修复完成：删除 ${r.removed} 段、新建 ${r.added} 段。请重新铺铜并跑一次 DRC。`);
+			toast(`布线修复完成：删除 ${r.removed} 段、新建 ${r.added} 段。请重新铺铜并跑一次 DRC。`);
 			await refresh();
 			return { ...r, report: state.report };
 		}
@@ -310,7 +323,7 @@ export async function connectAgent(): Promise<void> {
 				}
 			}, () => {
 				eda.sys_WebSocket.send(WS_ID, JSON.stringify({ hello: extensionConfig.name, version: extensionConfig.version }));
-				eda.sys_ToastMessage.showMessage('已连接本地 AI 助手');
+				toast('已连接本地 AI 助手');
 			});
 		}
 		catch (e: any) {
@@ -322,7 +335,7 @@ export async function connectAgent(): Promise<void> {
 export function disconnectAgent(): void {
 	try {
 		eda.sys_WebSocket.close(WS_ID);
-		eda.sys_ToastMessage.showMessage('已断开本地 AI 助手');
+		toast('已断开本地 AI 助手');
 	}
 	catch {}
 }

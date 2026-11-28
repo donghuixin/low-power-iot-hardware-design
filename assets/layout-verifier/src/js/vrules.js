@@ -19,7 +19,7 @@
     'VF-15': { name: '绕线过长', sev: 'P3', max_ratio: 1.3, slack_mm: 2, check: 'RT-05' },
     // 布线几何与质量（scripts/route_lint.py 计算，结果在铜皮数据包 checks.routing；规则见 references/16-routing-constraints.md）
     'VF-16': { name: '任意角度走线', sev: 'P1', weight: 15, check: 'RTG-01' },
-    'VF-17': { name: '锐角', sev: 'P1', weight: 10, check: 'RTG-02' },
+    'VF-17': { name: '锐角与直角', sev: 'P1', weight: 10, check: 'RTG-02' },
     'VF-18': { name: '短段、抖动与出线', sev: 'P2', weight: 8, check: 'RTG-05' },
     'VF-19': { name: '多余拐弯', sev: 'P3', weight: 8, check: 'RTG-06' },
     'VF-20': { name: '过孔预算', sev: 'P2', weight: 10, check: 'RTV-01' },

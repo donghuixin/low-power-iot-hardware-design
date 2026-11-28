@@ -81,7 +81,7 @@ function fakeEda(boardName: 'route-bad' | 'principles-bad') {
 		sys_Storage: { getExtensionUserConfig: (k: string) => store.get(k), setExtensionUserConfig: async (k: string, v: any) => (store.set(k, JSON.parse(JSON.stringify(v))), true) },
 		dmt_Project: { getCurrentProjectInfo: async () => ({ uuid: 'proj-1' }) },
 		sys_Dialog: { showConfirmationMessage: (_c: string, _t: string, _a: string, _b: string, cb: (ok: boolean) => void) => cb(true), showInformationMessage: (c: string) => log.push(`info ${c.split('\n')[0]}`) },
-		sys_ToastMessage: { showMessage: (m: string) => log.push(`toast ${m}`) },
+		sys_Message: { showToastMessage: (m: string) => log.push(`toast ${m}`) },
 		sys_IFrame: { openIFrame: async () => true },
 	};
 	return { eda, lines, log, sub, pub, store };
@@ -111,7 +111,7 @@ it('扩展经消息总线读板、检查，结果与核心一致（单位换算�
 	const ext = loadExt(f.eda);
 	ext.activate();
 	const r = await rpc(f, 'check');
-	assert.equal(r.report.score, 67.3);
+	assert.equal(r.report.score, 59.1); // 与 Python 版 principles-bad 一致（含 RTG-04 直角）
 	assert.ok(r.report.violations.some((v: any) => v.rule === 'RTP-01' && /C1/.test(v.msg)));
 	const order = await rpc(f, 'order');
 	assert.equal(order[0].class, 'XTAL');
@@ -159,7 +159,7 @@ it('设计确认未放行时拒绝写回；面板逐级确认后才能写回，�
 	assert.ok(r.added > 0 && r.removed > 0);
 	assert.ok(f.log.includes('commit'));
 	assert.ok(r.report.score > before.report.score + 25, `${before.report.score} -> ${r.report.score}`);
-	assert.equal(r.report.violations.filter((x: any) => ['RTG-01', 'RTG-02', 'RTG-03'].includes(x.rule)).length, 0);
+	assert.equal(r.report.violations.filter((x: any) => ['RTG-01', 'RTG-02', 'RTG-03', 'RTG-04'].includes(x.rule)).length, 0);
 	// 改了 G1 之后写回又被拒绝
 	await rpc(f, 'briefUpdate', { set: { 'G1_mechanical.enclosure.max_height_top_mm': 9 } });
 	await rpc(f, 'fixPlan');
@@ -170,5 +170,5 @@ it('快速检查弹出得分', async () => {
 	const f = fakeEda('principles-bad');
 	const ext = loadExt(f.eda);
 	await ext.quickCheck();
-	assert.ok(f.log.some(l => l.startsWith('info 布线质量 67.3')));
+	assert.ok(f.log.some(l => l.startsWith('info 布线质量 59.1')));
 });

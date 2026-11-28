@@ -88,7 +88,7 @@ export function inferClass(name: string, pads: Pad[] = []): [string, number, str
 }
 
 export interface Constraints {
-	geometry: { angle_tol_um: number; min_seg: { k_w: number; abs_mm: number }; fanout_k_w: number; jog_k_w: number; jitter_window_k_w: number };
+	geometry: { angle_tol_um: number; min_seg: { k_w: number; abs_mm: number }; fanout_k_w: number; jog_k_w: number; jitter_window_k_w: number; forbid_right_angle?: boolean };
 	netclasses: Record<string, Partial<ClassRule>>;
 	nets: Record<string, { class?: string }>;
 	layers: { name?: string; role?: string; preferred_dir?: 'H' | 'V' | null }[];
@@ -102,7 +102,7 @@ export interface Constraints {
 
 export function mergeCons(c?: Partial<Constraints> | null): Constraints {
 	const base: Constraints = {
-		geometry: { angle_tol_um: 1, min_seg: { k_w: 1, abs_mm: 0.15 }, fanout_k_w: 0.5, jog_k_w: 2, jitter_window_k_w: 5 },
+		geometry: { angle_tol_um: 1, min_seg: { k_w: 1, abs_mm: 0.15 }, fanout_k_w: 0.5, jog_k_w: 2, jitter_window_k_w: 5, forbid_right_angle: true },
 		netclasses: {},
 		nets: {},
 		layers: [],

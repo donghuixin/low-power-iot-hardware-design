@@ -682,6 +682,96 @@ export function planFix(board: Board, opt: FixOptions = {}): FixPlan {
 		if (!any)
 			break;
 	}
+	// 最后一遍：所有网络（含地线、电源、射频）上剩下的直角拐角斜切成两个 135° 拐角；切不了的列为人工处理
+	const SQ2 = Math.SQRT2;
+	for (const n of order) {
+		if (!n.segs.length || locked.has(n.name) || (opt.nets && !opt.nets.includes(n.name)))
+			continue;
+		const clear = cons.netclasses?.[clsOf(n)]?.clearance ?? clear0;
+		const before = components(n);
+		let out: Seg[] = [];
+		const items: FixItem[] = [];
+		for (const l of [...new Set(n.segs.map(s => s[0]))].sort((x, y) => x - y)) {
+			const segs = n.segs.filter(s => s[0] === l);
+			const g = new Graph(segs, n.pads, n.vias, l);
+			const doneSrc = new Set<number>();
+			const modEdges = new Set<number>();
+			const add: Seg[] = [];
+			for (const c of g.chains) {
+				if (c.arc || c.pts.length < 3)
+					continue;
+				const pts: Pt[] = c.pts.map(q => [q[0], q[1]] as Pt);
+				const w = c.w;
+				const minseg = Math.max(kw * w, absmin);
+				const cuts = [Math.max(2 * w, 0.2) / SQ2, Math.max(w, 0.15) / SQ2, (0.6 * w) / SQ2];
+				let k = 1;
+				let mod = false;
+				while (k < pts.length - 1) {
+					const a = pts[k - 1];
+					const bb = pts[k];
+					const d = pts[k + 1];
+					const u: Pt = [a[0] - bb[0], a[1] - bb[1]];
+					const v: Pt = [d[0] - bb[0], d[1] - bb[1]];
+					let done = false;
+					if (Math.abs(angleBetween(u, v) - 90) < 0.5) {
+						const lu = hypot(u[0], u[1]);
+						const lv = hypot(v[0], v[1]);
+						for (const cut of cuts) {
+							if (lu < cut + minseg || lv < cut + minseg)
+								continue;
+							const p1: Pt = [bb[0] + (u[0] / lu) * cut, bb[1] + (u[1] / lu) * cut];
+							const p2: Pt = [bb[0] + (v[0] / lv) * cut, bb[1] + (v[1] / lv) * cut];
+							const inPad = n.pads.some(pd => (pd.l === -1 || pd.l === l) && !!pd.w && [p1, p2].some(q => ptInPad(q[0], q[1], pd, w / 2)));
+							if (!inPad && obs.margin([p1[0], p1[1], p2[0], p2[1]], w, n.name, l, clear) >= 0) {
+								pts.splice(k, 1, p1, p2);
+								k += 2;
+								mod = done = true;
+								break;
+							}
+						}
+					}
+					if (!done)
+						k++;
+				}
+				if (mod) {
+					for (const e of c.edges) {
+						doneSrc.add(g.edges[e].src);
+						modEdges.add(e);
+					}
+					for (let i = 0; i < pts.length - 1; i++) add.push([l, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], w, false]);
+					items.push({ net: n.name, layer: l, from: c.pts[0], to: c.pts[c.pts.length - 1], issues: ['right'], how: 'chamfer', before: c.pts, after: pts });
+				}
+			}
+			segs.forEach((s, i) => {
+				if (!doneSrc.has(i))
+					out.push(s);
+			});
+			g.edges.forEach((e, k) => {
+				if (doneSrc.has(e.src) && !modEdges.has(k))
+					out.push([l, e.a[0], e.a[1], e.b[0], e.b[1], e.w, e.arc]);
+			});
+			out = out.concat(add);
+		}
+		if (items.length) {
+			const trial: Net = { ...n, segs: out };
+			if (components(trial) === before) {
+				obs.removeNet(n.name);
+				n.segs = out;
+				obs.addNet(n);
+				plan.fixed.push(...items);
+				touched.add(n.name);
+			}
+		}
+		for (const l of [...new Set(n.segs.map(s => s[0]))]) {
+			const g = new Graph(n.segs.filter(s => s[0] === l), n.pads, n.vias, l);
+			for (const [key, nd] of g.nodes) {
+				if (nd.e.length !== 2 || nd.pad || nd.via || nd.arc)
+					continue;
+				if (Math.abs(angleBetween(g.vec(nd.e[0], key), g.vec(nd.e[1], key)) - 90) < 0.5)
+					plan.manual.push({ net: n.name, layer: l, at: nd.p, issues: ['right'], reason: '直角拐角无法自动斜切（两侧线段太短或旁边没有空间），请拆线按 135° 拐角重布或挪开相邻走线' });
+			}
+		}
+	}
 	for (const n of nets) {
 		if (!touched.has(n.name))
 			continue;

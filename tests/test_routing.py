@@ -388,3 +388,41 @@ class Integration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RightAngle(unittest.TestCase):
+    """直角拐角（RTG-04）一律不接受：检查报 P0、闸门拦截、修复器全部斜切。"""
+
+    @classmethod
+    def setUpClass(cls):
+        subprocess.run([sys.executable, str(FIX / "make_route_fixtures.py"), str(FIX)], check=True)
+
+    def test_good_boards_have_no_right_angle(self):
+        for f in ("route-good", "principles-good"):
+            self.assertNotIn("RTG-04", rules_of(lint(FIX / f"{f}.kicad_pcb")), f)
+
+    def test_bad_board_right_angle_is_p0(self):
+        rep = lint(FIX / "route-bad.kicad_pcb")
+        self.assertIn("RTG-04", rules_of(rep, "P0"))
+        self.assertFalse(rep["pass"])
+
+    def test_fixer_chamfers_every_class(self):
+        with tempfile.TemporaryDirectory() as d:
+            for f in ("route-bad", "principles-bad"):
+                out = Path(d) / f"{f}.kicad_pcb"
+                rep = F.fix_kicad(FIX / f"{f}.kicad_pcb", out)
+                self.assertNotIn("RTG-04", rules_of(lint(out)), f)
+                self.assertFalse([m for m in rep["needs_manual"] if "right" in m.get("issues", [])])
+
+    def test_gate_blocks_right_angle_plan(self):
+        import test_design_gate as TG
+        plan = {"units": "mm", "layers": ["TOP"], "pads": [{"ref": "R1", "pin": "1", "layer": "TOP", "x": 0, "y": 0, "w": 0.6, "h": 0.6, "net": "A"},
+                                                          {"ref": "R2", "pin": "1", "layer": "TOP", "x": 5, "y": 5, "w": 0.6, "h": 0.6, "net": "A"}],
+                "segs": [["TOP", 0, 0, 5, 0, 0.2, "A"], ["TOP", 5, 0, 5, 5, 0.2, "A"]], "vias": []}
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "plan.json"; p.write_text(json.dumps(plan), encoding="utf-8")
+            brief = TG.confirmed_brief(d)
+            self.assertEqual(R.main(["gate", str(p), "--brief", str(brief)]), 1)
+            out = Path(d) / "fixed.json"
+            F.fix_plan(p, out)
+            self.assertEqual(R.main(["gate", str(out), "--brief", str(brief)]), 0)

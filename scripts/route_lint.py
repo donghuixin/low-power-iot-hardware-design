@@ -415,7 +415,7 @@ class Ctx:
 
 def merge_cons(cons):
     c = {"geometry": {"angles_deg": [0, 45, 90, 135], "angle_tol_um": 1, "min_seg": {"k_w": 1.0, "abs_mm": 0.15},
-                      "fanout_k_w": 0.5, "jog_k_w": 2.0, "jitter_window_k_w": 5.0, "forbid_acute": True},
+                      "fanout_k_w": 0.5, "jog_k_w": 2.0, "jitter_window_k_w": 5.0, "forbid_acute": True, "forbid_right_angle": True},
          "netclasses": {}, "nets": {}, "layers": [], "bundles": [], "exempt_zones": [], "board": {}}
     if cons:
         for k, v in cons.items():
@@ -426,7 +426,7 @@ def merge_cons(cons):
     return c
 
 
-METRIC_OF = {"RTG-01": "VF-16", "RTG-10": "VF-16", "RTG-02": "VF-17", "RTG-03": "VF-17", "RTG-05": "VF-18", "RTG-06": "VF-18",
+METRIC_OF = {"RTG-01": "VF-16", "RTG-10": "VF-16", "RTG-02": "VF-17", "RTG-03": "VF-17", "RTG-04": "VF-17", "RTG-05": "VF-18", "RTG-06": "VF-18",
              "RTG-07": "VF-18", "RTG-09": "VF-18", "RTG-12": "VF-18", "RTV-01": "VF-20", "RTV-05": "VF-20", "RTY-04": "VF-21", "RTY-05": "VF-21",
              "RTL-01": "VF-22", "RTL-02": "VF-22", "RTS-03": "VF-23", "RTY-02": "VF-24", "RTL-11": "VF-24"}
 
@@ -470,6 +470,11 @@ def check_graph(ctx, g, net, cls, rules, stats):
             rule = "RTG-02" if len(dirs) == 2 else "RTG-03"
             ctx.add(rule, sev, net, L, nd["p"], f"{'锐角拐角' if rule == 'RTG-02' else '锐角 T 分支'}：夹角 {m:.0f}°（线宽 {w} mm）", round(m, 1))
             stats["acute"] += 1
+        elif len(dirs) == 2 and abs(m - 90) <= TURN_TOL and geo.get("forbid_right_angle", True):
+            # RTG-04 直角拐角：不接受，一律斜切成两个 45°（斜切段 ≥ max(2w, 0.2 mm)）
+            w = min(g.edges[k]["w"] for k in nd["e"])
+            ctx.add("RTG-04", "P0", net, L, nd["p"], f"直角拐角（线宽 {w} mm）：改成两个 135° 拐角，中间斜切段 ≥ {max(2 * w, 0.2):.2f} mm", 90.0)
+            stats["right"] += 1
     # 短段、抖动、出焊盘、线宽突变
     kw, absmin = geo["min_seg"]["k_w"], geo["min_seg"]["abs_mm"]
     for c in g.chains:
@@ -584,7 +589,7 @@ def pad_aligned_exit(g, e, dx, dy):
 # ------------------------------------------------------------------ 评分
 WEIGHTS = {"VF-16": 15, "VF-17": 10, "VF-18": 8, "VF-19": 8, "VF-20": 10, "VF-21": 12, "VF-22": 8, "VF-23": 7, "VF-24": 6, "VF-25": 6, "VF-26": 10,
            "VF-28": 8, "VF-29": 8, "VF-30": 6}
-NAMES = {"VF-16": "任意角度", "VF-17": "锐角", "VF-18": "短段、抖动与出线", "VF-19": "多余拐弯", "VF-20": "过孔", "VF-21": "地平面完整性",
+NAMES = {"VF-16": "任意角度", "VF-17": "锐角与直角", "VF-18": "短段、抖动与出线", "VF-19": "多余拐弯", "VF-20": "过孔", "VF-21": "地平面完整性",
          "VF-22": "绕行率", "VF-23": "成束整齐度", "VF-24": "层方向与层使用", "VF-25": "走线密度均匀性", "VF-26": "网络类约束",
          "VF-28": "差分对", "VF-29": "就近", "VF-30": "优先级与隔离"}
 
@@ -607,7 +612,7 @@ def analyze(pack, cons=None):
     layers = pack.get("layers") or []
     nL = len(layers)
     nets = [norm_net(n) for n in pack.get("nets", [])]
-    stats = {k: 0 for k in ("angle", "acute", "short", "jog", "exit", "wchange", "stub", "segs", "bends")}
+    stats = {k: 0 for k in ("angle", "acute", "right", "short", "jog", "exit", "wchange", "stub", "segs", "bends")}
     stats["excess"] = []
     classes, conf = {}, []
     for n in nets:
@@ -777,7 +782,7 @@ def analyze(pack, cons=None):
         frac = max(0.0, min(1.0, frac))
         m[id_] = {"name": NAMES[id_], "value": value, "weight": w, "deduct": round(w * frac, 1),
                   "level": "良好" if frac == 0 else ("警告" if frac < 0.75 else "不合格"), "note": note}
-    n16, n17 = cnt({"RTG-01", "RTG-10"}), cnt({"RTG-02", "RTG-03"})
+    n16, n17 = cnt({"RTG-01", "RTG-10"}), cnt({"RTG-02", "RTG-03", "RTG-04"})
     put("VF-16", n16, 0 if n16 == 0 else 0.4 + 0.12 * (n16 - 1))
     put("VF-17", n17, 0 if n17 == 0 else 0.4 + 0.2 * (n17 - 1))
     per100 = 100.0 * (stats["short"] + stats["jog"] + stats["exit"] + stats["wchange"] + stats["stub"]) / max(1, stats["segs"])
@@ -831,7 +836,7 @@ def analyze(pack, cons=None):
     grade = "不通过（有 P0）" if has_p0 else ("优秀" if score >= 90 else "合格" if score >= 75 else "需返工" if score >= 60 else "不合格")
     v.sort(key=lambda x: (SEV_ORDER[x["sev"]], x["rule"], str(x.get("net"))))
     return {"kind": "routing-report", "version": 1, "score": score, "grade": grade, "pass": not has_p0,
-            "gate": {"RTG-01": n16 - cnt({"RTG-10"}), "RTG-02/03": n17},
+            "gate": {"RTG-01": n16 - cnt({"RTG-10"}), "RTG-02/03/04": n17},
             "metrics": m, "violations": v, "pairs": pairs, "stats": {k: (round(statistics.mean(x), 3) if x else 0) if isinstance(x, list) else x for k, x in stats.items()}, "classes": classes, "confirm": conf, "nets": per_net}
 
 
@@ -988,7 +993,7 @@ def kicad_dru(cons):
     out = ["# 布线几何规则（由 route_lint.py 生成）。只覆盖 KiCad 能表达的部分；任意角度、抖动、出焊盘方向由 route_lint.py 检查。",
            "# 注意：track_angle 的角度定义与单位写法在 KiCad 9/10 之间有差异，第一次使用时请用 tests/fixtures/route-bad.kicad_pcb",
            "# 跑 kicad-cli pcb drc，确认报出锐角和短线段；没报就说明规则被忽略了。", "(version 1)", ""]
-    out.append('(rule "RTG-02 禁止锐角拐角"\n  (constraint track_angle (min 90deg))\n  (condition "A.Type == \'Track\'"))\n')
+    out.append('(rule "RTG-02/04 禁止锐角和直角拐角（只允许 135° 拐角）"\n  (constraint track_angle (min 135deg))\n  (condition "A.Type == \'Track\'"))\n')
     out.append(f'(rule "RTG-05 最小线段长度"\n  (constraint track_segment_length (min {ms}mm))\n  (condition "A.Type == \'Track\'"))\n')
     zero = [k for k, v in (cons.get("netclasses") or {}).items() if v.get("via_budget") == 0]
     if zero:
@@ -1063,10 +1068,10 @@ def main(argv=None):
         DG.require_or_exit(a.brief, "route")
         pack, _ = load_any(a.file, cons)
         rep = analyze(pack, cons)
-        block = [x for x in rep["violations"] if x["rule"] in ("RTG-01", "RTG-02", "RTG-03")]
+        block = [x for x in rep["violations"] if x["rule"] in ("RTG-01", "RTG-02", "RTG-03", "RTG-04")]
         for x in block:
             print(f"拦截 {x['rule']} {x.get('net')} L{(x.get('layer') or 0) + 1} {x.get('at')}: {x['msg']}")
-        print(f"闸门：{'不通过，' + str(len(block)) + ' 处任意角度或锐角，先用 route_fix.py 修复' if block else '通过'}")
+        print(f"闸门：{'不通过，' + str(len(block)) + ' 处任意角度、锐角或直角，先用 route_fix.py 修复' if block else '通过'}")
         return 1 if block else 0
     if a.cmd == "order":
         import route_principles as RP

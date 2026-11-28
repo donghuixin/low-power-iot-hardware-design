@@ -1199,7 +1199,7 @@ function renderOrder(): void {
 		el.onclick = () => selectNet(el.dataset.on!);
 	});
 }
-const ISSUE: Record<string, string> = { angle: '任意角度', exit: '斜出焊盘', acute: '锐角', tee: '锐角分支', short: '短线段', jog: '抖动', stub: '悬空线头', overlap: '重叠线段', connectivity: '会改变连通', degenerate: '退化' };
+const ISSUE: Record<string, string> = { right: '直角拐角', angle: '任意角度', exit: '斜出焊盘', acute: '锐角', tee: '锐角分支', short: '短线段', jog: '抖动', stub: '悬空线头', overlap: '重叠线段', connectivity: '会改变连通', degenerate: '退化' };
 const issueText = (xs: string[]) => xs.map(x => ISSUE[x] ?? x).join('、');
 function renderFix(): void {
 	const pane = $('p-fix');
@@ -1212,7 +1212,7 @@ function renderFix(): void {
 	const gateMiss: string[] = (plan as any).gate ?? [];
 	let html = gateMiss.length ? `<div class="warnbox">设计确认未放行，现在只能预览：${gateMiss.map(esc).join('；')}</div>` : '';
 	html += `<div class="group"><h4><span>可自动修复 ${plan.fixed.length} 处（${plan.changes.length} 个网络，删 ${nRm} 段 / 建 ${nAdd} 段）</span></h4>`;
-	html += plan.fixed.map(it => `<div class="item"><div class="row"><span class="sev P3">${esc(it.how === 'remove' ? '删除' : it.how === 'merge' ? '合并' : '重建')}</span><span class="rule">${esc(it.net)} · L${it.layer + 1}</span></div><div class="msg">${esc(issueText(it.issues))}</div></div>`).join('');
+	html += plan.fixed.map(it => `<div class="item"><div class="row"><span class="sev P3">${esc(it.how === 'remove' ? '删除' : it.how === 'merge' ? '合并' : it.how === 'chamfer' ? '斜切' : '重建')}</span><span class="rule">${esc(it.net)} · L${it.layer + 1}</span></div><div class="msg">${esc(issueText(it.issues))}</div></div>`).join('');
 	html += '</div>';
 	if (plan.manual.length) {
 		html += `<div class="group"><h4><span>需要人工处理 ${plan.manual.length} 处</span></h4>`;

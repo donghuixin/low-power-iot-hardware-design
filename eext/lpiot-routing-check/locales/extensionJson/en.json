@@ -4,5 +4,7 @@
 	"快速检查": "Quick Check",
 	"连接本地 AI 助手…": "Connect Local AI Agent…",
 	"断开本地 AI 助手": "Disconnect Local AI Agent",
-	"关于": "About"
+	"关于": "About",
+	"布局布线前的强制设计确认（需求、外壳与固定件、功能分区、布局检查、布线规划逐级由用户确认），对照确认内容的布局检查，走线检查与评分（拐角只用 135°、不接受直角，任意角度、锐角、出焊盘、过孔、就近、差分、优先级）；带板子动画、修复预览和 AI 接口。": "Mandatory design confirmation before placement and routing (requirements, enclosure and fixed parts, functional partition, layout check, routing plan — each confirmed by the user), layout check against the confirmed brief, and routing check and scoring (135° corners only, no right angles, arbitrary angles, acute angles, pad exits, vias, proximity, differential pairs, priority); with board animations, fix preview and an AI interface.",
+	"布局": "Layout"
 }
