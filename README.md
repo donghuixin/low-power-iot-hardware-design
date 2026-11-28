@@ -21,9 +21,12 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 | G2 功能分区 | 每个功能块放哪、信号与电源流向、你看过并认可的布局截图 | 布局检查 |
 | G3 布局检查 | `layout_lint.py` 无 P0；你同意保留的问题 | 布线规划 |
 | G4 布线规划 | 每层用途、布线优先级（哪些手工、哪些可以工具辅助）、差分对、电源电流、验收分数 | 布线 |
-| G5 交付验收 | 布线得分达标且无 P0、DRC 为零、你看过布线截图 | 宣布完成 |
+| G5 丝印、位号编号与泪滴 | 20 个出图前的决定逐项回答（丝印工艺与字高、离焊盘距离、位号怎么印、文字方向、极性和 1 脚标记、接口说明、板名版本、订单号位置、编号方式与反标、泪滴策略……）；`finish_lint.py` 无 P0、P1 已改或你同意保留；你看过丝印截图 | 导出 Gerber |
+| G6 交付验收 | 布线得分达标且无 P0、DRC 为零、你看过布线截图 | 宣布完成 |
 
 每一级 AI 会把内容和一个确认码发给你，核对无误后回复“确认 G1-xxxxxx”才进入下一级；前面的内容一改，后面的确认自动失效。没放行时，`route_fix.py`、`route_lint.py gate` 和嘉立创 EDA 扩展的写回都会直接拒绝。你只说“帮我把板子布完”，AI 会先逐级提问，不会动手；隔夜自动运行也只会做到下一道闸门为止。
+
+**能力边界：** 布线上只做两件事——检查已有布线（含几何修复），以及按你点名的网络逐批布线（每批不超过 8 个网络，且在已确认的优先级里）。“全局布线”“把整板布完”“剩下的都布了”需要在整板范围内搜索通道，这个 skill 做不了，也会直接拒绝；你可以点名下一批网络，或者自己用 EDA 的自动布线器布普通网络，再回来检查。
 
 为什么这么做：DRC 通过不代表板子能用。只给一句目标、让代理跑一晚上，得到的往往是 DRC 干净、但满是任意角度斜线、长绕线和乱换层的板子——布局错了，布线救不回来。细节和一次真实误用的复盘见 [`references/19-design-gate.md`](references/19-design-gate.md)。
 
@@ -35,7 +38,7 @@ A Claude and Codex skill for designing and reviewing low-power IoT hardware: req
 |---|---|
 | 1. 需求明确 | 把功能描述变成量化指标；主动提出用户没想到的需求（峰值电流、电池末期、OTA、运输模式、认证、产测……）；把需求映射到硬件形态；无线选型按数据率、吞吐、距离、峰值电流、平均功耗比较；传感器放置约束（例如 IMU 是否需要靠近转动中心） |
 | 2. 原理图可靠性 | 逐状态检查每个网络：上拉下拉、开漏/推挽/三态、电平域匹配、断电域反灌；驱动电压与驱动电流；睡眠电流逐项清点与峰值电流压降；电源树、充电、保护、去耦与储能；绘制流程与可读性规范（同页直连、跨页与标准接口用标号/端口、网络命名、文字不重叠、设计意图注释） |
-| 2¼. 设计确认与布局检查 | [强制确认流程](references/19-design-gate.md)：需求、外壳与固定件、功能分区、布局检查、布线规划、交付验收六道闸门，由用户输入确认码逐级放行；`layout_lint.py` 对照确认内容检查实板布局（固定件位置、分区、禁布区、天线净空、干扰源间距、去耦与晶振负载电容距离） |
+| 2¼. 设计确认与布局检查 | [强制确认流程](references/19-design-gate.md)：需求、外壳与固定件、功能分区、布局检查、布线规划、丝印位号与泪滴、交付验收七道闸门，由用户输入确认码逐级放行；`layout_lint.py` 对照确认内容检查实板布局（固定件位置、分区、禁布区、天线净空、干扰源间距、去耦与晶振负载电容距离） |
 | 2½. 交互式布局规划 | [2D/3D 布局规划器](#交互式布局规划器)：摆放主器件，卫星器件自动贴放，实时估计布线复杂度并按规则给出问题，导出结果交回评审 |
 | 2¾. 布局布线验证 | [验证器](#布局布线验证器)：电流与回流、EMI 受扰与平面谐振、温度与散热片对比；布线前按概率估计，布线后从 KiCad / Gerber 提取实际铜皮复核 |
 | 3. Layout | 叠层与阻抗、布局顺序、天线与射频、电源完整性、信号完整性、晶体、高阻节点、传感器应力与热隔离、EMC/ESD、热、DFM/DFA/DFT；[布线约束与质量评分](#布线约束与质量评分)：八方向几何、线宽线长过孔层约束、自动检查与修复、写入 EDA 前的闸门；布线实操：逐网顺序、升级阶梯、换层与过孔、绕线判据、自动布线器预期（取自 [CADET](https://github.com/LGAI-Research/CADET) 对 283 块开源 2 层板的统计与实测） |
@@ -261,8 +264,9 @@ references/
   16-routing-constraints.md      布线约束与质量评分：八方向几何、线宽线长过孔层约束、检查器与修复器、写入闸门、AI 布线规程
   17-routing-principles.md       走线原则：布线优先级、就近、差分、隔离及对应检查器
   18-routing-philosophy.md       布线指导思想与工作方法（ADI AN-1142、TI ZHCAAE6B）
-  19-design-gate.md              强制确认流程：六道闸门、布线优先级逐档确认、AI 规则、确认码、工具强制点、布局检查规则、误用案例复盘
+  19-design-gate.md              强制确认流程：七道闸门、能力边界、布线优先级逐档确认、AI 规则、确认码、工具强制点、布局检查规则、误用案例复盘
   26-eda-link.md                 本地 AI 与嘉立创 EDA 扩展联动：拓扑、接入方式、高效检查、安全、排错
+  27-silkscreen-annotation-teardrop.md  出图前：丝印、位号编号、泪滴的 20 个引导问题、嘉立创工艺下限、SLK / ANN / TDR 规则与改法
   20-hv-pulser-tr-safety.md      扩展：高压脉冲、T/R、高压电源与联锁、间距
   21-ultrasound-afe-clock.md     扩展：超声 AFE、采样与 IQ、时钟抖动
   22-low-noise-power-thermal.md  扩展：持续功耗模型、纹波与开关同步、手持热设计
@@ -273,6 +277,7 @@ references/
 scripts/
   design_gate.py                 强制确认流程：模板、各闸门状态、摘要与确认码、记录确认、阶段放行检查
   layout_lint.py                 实板布局检查（对照设计确认文件）：LAY-01…15 与就近原则
+  finish_lint.py                 出图前检查：丝印 SLK-01…13、位号编号 ANN-01…05、泪滴 TDR-00…02
   eda_bridge.py                  经本地桥与嘉立创 EDA 扩展联动：导出板子、同步设计确认、梳理优先级、交叉核对
   power_budget.py                功耗预算与峰值压降检查
   hw_calc.py                     I2C 上拉、储能电容、分压器、晶体负载电容、续航；抖动、纹波、高压储能、数据率
@@ -339,7 +344,7 @@ git clone https://github.com/donghuixin/low-power-iot-hardware-design.git \
 
 > 做一个腕戴动作记录器，CR2032 供电、BLE 连手机、-10–45 °C。外壳 38 × 30 mm 圆角矩形（DXF 附上），顶面限高 2.5 mm、底面贴电池。USB-C 只用来烧录，放下边中间；按键在右边离上角 8 mm；天线朝上边，上边 6 mm 内不放金属。分区想法：天线和 nRF52 在上半部、电源和充电在左下、IMU 在中间靠下。先按流程逐级确认，再开始摆放。
 
-不要这样用：“帮我把这块板布完。”“布局好了，自动布线吧。”——AI 会先按六道闸门逐级提问。
+不要这样用：“帮我把这块板布完。”“布局好了，自动布线吧。”“剩下的网络都布了。”——AI 会先说明它不做全局布线，再按七道闸门逐级提问；布线时请点名这一批网络。
 
 ## 脚本
 
@@ -352,6 +357,9 @@ python scripts/design_gate.py require design-brief.json --stage route
 python scripts/layout_lint.py board.kicad_pcb --brief design-brief.json --json layout-lint.json
 python scripts/design_gate.py priorities design-brief.json --board board.kicad_pcb --write
 python scripts/design_gate.py summary design-brief.json T1
+python scripts/design_gate.py scope design-brief.json --nets RF_OUT,RF_ANT
+python scripts/design_gate.py ask design-brief.json G5
+python scripts/finish_lint.py board.kicad_pcb --brief design-brief.json --bom bom.csv --json finish-lint.json -o 出图前检查.md
 python scripts/eda_bridge.py export -o board-pack.json
 python scripts/power_budget.py assets/power-budget-example.json
 python scripts/hw_calc.py i2c-pullup --vdd 1.8 --cb-pf 40 --speed 400k

@@ -26,16 +26,42 @@ class PCB:
         self.size = size
         self.chamfer = None          # 好板：所有 90° 拐角斜切成两个 135° 拐角（沿两条边各退 chamfer mm）
 
-    def fp(self, ref, x, y, rot, pads, value=None):
-        s = [f'  (footprint "test:{ref}" (layer "F.Cu") (at {x} {y}{" " + str(rot) if rot else ""})',
-             f'    (property "Reference" "{ref}" (at 0 0 0) (layer "F.SilkS"))']
+    def fp(self, ref, x, y, rot, pads, value=None, silk=None, lines=(), tht=()):
+        """silk：位号丝印 {at:(dx,dy,rot), h, t, hide, mirror, layer}（相对封装原点，KiCad 坐标）；不给时保持旧格式（位号在原点、无字体信息）。
+        lines：封装丝印线 [(x1,y1,x2,y2,w)]（相对封装原点）；tht：这些焊盘是通孔。"""
+        if silk is None:
+            refline = f'    (property "Reference" "{ref}" (at 0 0 0) (layer "F.SilkS"))'
+        else:
+            ax, ay, ar = silk.get("at", (0, 0, 0))
+            just = " (justify mirror)" if silk.get("mirror") else ""
+            hide = " hide" if silk.get("hide") else ""
+            refline = (f'    (property "Reference" "{ref}" (at {ax} {ay} {ar}) (layer "{silk.get("layer", "F.SilkS")}")'
+                       f' (effects (font (size {silk.get("h", 1.0)} {silk.get("h", 1.0)}) (thickness {silk.get("t", 0.15)})){just}{hide}))')
+        s = [f'  (footprint "test:{ref}" (layer "F.Cu") (at {x} {y}{" " + str(rot) if rot else ""})', refline]
         if value:
             s.append(f'    (property "Value" "{value}" (at 0 0 0) (layer "F.Fab"))')
         for name, px, py, w, h, net, *shape in pads:
             sh = shape[0] if shape else "rect"
-            s.append(f'    (pad "{name}" smd {sh} (at {px} {py}{" " + str(rot) if rot else ""}) (size {w} {h}) (layers "F.Cu") (net {self.nets.index(net)} "{net}"))')
+            if name in tht:
+                s.append(f'    (pad "{name}" thru_hole {sh} (at {px} {py}{" " + str(rot) if rot else ""}) (size {w} {h}) (drill {round(min(w, h) * 0.55, 2)}) (layers "*.Cu") (net {self.nets.index(net)} "{net}"))')
+            else:
+                s.append(f'    (pad "{name}" smd {sh} (at {px} {py}{" " + str(rot) if rot else ""}) (size {w} {h}) (layers "F.Cu") (net {self.nets.index(net)} "{net}"))')
+        for x1, y1, x2, y2, w in lines:
+            s.append(f'    (fp_line (start {x1} {y1}) (end {x2} {y2}) (stroke (width {w}) (type solid)) (layer "F.SilkS"))')
         s.append("  )")
         self.items.append("\n".join(s))
+
+    def silk_text(self, text, x, y, rot=0, h=1.0, t=0.15, layer="F.SilkS", mirror=False):
+        just = " (justify mirror)" if mirror else ""
+        self.items.append(f'  (gr_text "{text}" (at {x} {y} {rot}) (layer "{layer}") (effects (font (size {h} {h}) (thickness {t})){just}))')
+
+    def silk_line(self, a, b, w=0.15, layer="F.SilkS"):
+        self.items.append(f'  (gr_line (start {a[0]} {a[1]}) (end {b[0]} {b[1]}) (stroke (width {w}) (type solid)) (layer "{layer}"))')
+
+    def teardrop(self, net, pts, layer="F.Cu"):
+        """KiCad 8 的泪滴：带 (attr (teardrop (type padvia))) 的铺铜区。"""
+        xy = " ".join(f"(xy {px} {py})" for px, py in pts)
+        self.items.append(f'  (zone (net {self.nets.index(net)}) (net_name "{net}") (layer "{layer}") (attr (teardrop (type padvia))) (polygon (pts {xy})))')
 
     def seg(self, a, b, net, w=0.2, layer="F.Cu"):
         self.items.append(f'  (segment (start {a[0]} {a[1]}) (end {b[0]} {b[1]}) (width {w}) (layer "{layer}") (net {self.nets.index(net)}) (uuid "{uuid.UUID(int=len(self.items))}"))')

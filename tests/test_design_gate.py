@@ -3,6 +3,7 @@
 运行：python -m unittest tests/test_design_gate.py
 """
 import contextlib
+import copy
 import io
 import json
 import shutil
@@ -129,6 +130,35 @@ class Enforcement(unittest.TestCase):
         with self.assertRaises(SystemExit) as cm:
             quiet(R.main, ["gate", str(FIX / "route-good.kicad_pcb")])
         self.assertEqual(cm.exception.code, 3)
+
+
+class CapabilityBoundary(unittest.TestCase):
+    """只布用户点名的网络；“全部布线”“剩下的都布了”这类任务拒绝。"""
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.b = DG.load(confirmed_brief(self.d))
+
+    def tearDown(self):
+        shutil.rmtree(self.d)
+
+    def test_vague_requests_refused(self):
+        for nets in ([], [""], ["*"], ["全部"], ["剩下的"], ["all"], ["其余"]):
+            miss = DG.route_scope(self.b, nets)
+            self.assertTrue(miss, nets)
+            self.assertIn("做不了", miss[0])
+
+    def test_named_nets_in_confirmed_tiers(self):
+        self.assertEqual(DG.route_scope(self.b, ["XIN", "XOUT"]), [])
+        self.assertTrue(DG.route_scope(self.b, [f"N{i}" for i in range(9)]))       # 一次太多
+        self.assertTrue(DG.route_scope(self.b, ["XIN"], plan_nets=["XIN", "SW"]))   # 走线里夹带没点名的网络
+        b = copy.deepcopy(self.b)
+        b["G4_routing_plan"]["priorities"] = [t for t in b["G4_routing_plan"]["priorities"] if t["nets"] != ["*"]]
+        self.assertIn("不在已确认", DG.route_scope(b, ["LED"])[0])
+
+    def test_scope_cli(self):
+        p = Path(self.d) / "design-brief.json"
+        self.assertEqual(quiet(DG.main, ["scope", str(p), "--nets", "XIN,XOUT"]), 0)
+        self.assertEqual(quiet(DG.main, ["scope", str(p), "--nets", "全部"]), 3)
 
 
 class LayoutLint(unittest.TestCase):

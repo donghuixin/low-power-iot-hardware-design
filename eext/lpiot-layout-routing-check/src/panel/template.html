@@ -43,6 +43,13 @@ canvas { display: block; width: 100%; height: 100%; }
 aside { border-left: 1px solid var(--line); background: var(--panel); display: grid; grid-template-rows: 40px 1fr; min-height: 0; }
 .tabs { display: flex; border-bottom: 1px solid var(--line); }
 .tabs button { flex: 1; border: 0; border-radius: 0; background: transparent; color: var(--dim); border-bottom: 2px solid transparent; }
+.fq { border-top: 1px solid var(--line); padding: 7px 0; }
+.fq .q { font-weight: 600; }
+.fq .why { color: var(--dim); font-size: 11px; margin: 2px 0 4px; }
+.fq .opts button { margin: 2px 4px 2px 0; padding: 2px 8px; font-size: 11px; }
+.fq .opts button.on { border-color: var(--accent); color: var(--accent); }
+.fq input { width: 100%; box-sizing: border-box; font-size: 11px; }
+.fq .ans { color: #3ccf7a; font-size: 11px; }
 .tabs button.on { color: var(--ink); border-bottom-color: var(--accent); }
 .pane { overflow: auto; padding: 12px; display: none; }
 .pane.on { display: block; }
@@ -136,6 +143,7 @@ aside { border-left: 1px solid var(--line); background: var(--panel); display: g
 				<button data-t="metrics">指标</button>
 				<button data-t="order">顺序</button>
 				<button data-t="fix">修复</button>
+				<button data-t="finish">丝印</button>
 				<button data-t="ai">AI</button>
 			</div>
 			<div class="pane" id="p-brief"><div class="empty">读取设计确认…</div></div>
@@ -144,6 +152,7 @@ aside { border-left: 1px solid var(--line); background: var(--panel); display: g
 			<div class="pane" id="p-metrics"><div class="empty">还没有检查结果</div></div>
 			<div class="pane" id="p-order"><div class="empty">还没有检查结果</div></div>
 			<div class="pane" id="p-fix"><div class="empty">点“修复预览”计算修复方案。只修几何（任意角度、锐角、抖动、斜出焊盘、悬空线头、重叠线段），不改过孔和连接关系。</div></div>
+			<div class="pane" id="p-finish"><div class="empty">布线定稿后、导出 Gerber 之前：逐项回答丝印、位号编号、泪滴的问题，再检查。</div></div>
 			<div class="pane" id="p-ai">
 				<div class="form">
 					<label>补充说明（可选：产品用途、关心的指标、已知约束）</label>

@@ -199,13 +199,16 @@ def parse_kicad(path):
         at, size = first(v, "at"), first(v, "size")
         b.vias.append((num(at[1]), num(at[2]), num(size[1]), netof(v)))
     for z in find(root, "zone"):
+        za = first(z, "attr")
+        if za and first(za, "teardrop"):
+            continue                # 泪滴（KiCad 8 起是铺铜区）不算铺铜，由 finish_lint.py 单独检查
         name = (first(z, "net_name") or ["", ""])[1] if first(z, "net_name") else netof(z)
         for fpoly in find(z, "filled_polygon"):
             L = first(fpoly, "layer")
             pts = [(num(p[1]), num(p[2])) for p in find(first(fpoly, "pts"), "xy")]
             if L and L[1] in li and len(pts) >= 3:
                 b.zones.append((li[L[1]], name, pts))
-    if not any(True for _ in b.zones) and find(root, "zone"):
+    if not any(True for _ in b.zones) and any(not (first(z, "attr") and first(first(z, "attr"), "teardrop")) for z in find(root, "zone")):
         print("提示：铺铜没有填充数据（filled_polygon），请先在 KiCad 里按 B 填充所有铺铜再保存", file=sys.stderr)
     return b
 

@@ -50,7 +50,7 @@ it('本地桥：枢纽 + 转发端共用一条编辑器连接；HTTP 必须带�
 	const board = (demo as any)['demo-node'] as Board;
 	const ws = new WebSocket('ws://127.0.0.1:49841');
 	await new Promise(r => ws.on('open', r));
-	ws.send(JSON.stringify({ hello: 'lpiot-layout-routing-check', version: '0.3.0', protocol: 1 }));
+	ws.send(JSON.stringify({ hello: 'lpiot-layout-routing-check', version: '0.4.0', protocol: 1 }));
 	ws.on('message', (buf) => {
 		const m = JSON.parse(String(buf));
 		if (m.method === 'check') {

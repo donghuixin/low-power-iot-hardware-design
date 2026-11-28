@@ -20,7 +20,7 @@ function board(name: string) {
 it('确认码与 Python 版一致（canonical + SHA-256）', () => {
 	const b = briefSrc();
 	assert.equal(gateHash(b, 'G2'), expect['principles-good'].brief_hash);
-	assert.deepEqual(GATES.map(g => codeOf(b, g)), ['G0-8d0dd8', 'G1-6af5f2', 'G2-4869a0', 'G3-803d04', 'G4-37e6d4', 'G5-a7f732']);
+	assert.deepEqual(GATES.map(g => codeOf(b, g)), ['G0-8d0dd8', 'G1-6af5f2', 'G2-4869a0', 'G3-803d04', 'G4-37e6d4', 'G5-2d201d', 'G6-e50c7a']);
 });
 
 for (const name of ['principles-good', 'principles-bad', 'demo-node']) {

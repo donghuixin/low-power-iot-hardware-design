@@ -2,9 +2,10 @@
  * 面板（iframe）：检查结论、板子动画（扫描入场、违规脉冲、电流 / 回流流动、去耦回路、布线顺序回放、修复前后形变）、AI 解读。
  * 在嘉立创 EDA 里通过 eda.sys_MessageBus 与扩展主线程通信；单独打开（没有 eda 对象）时进入演示模式，用内置示例板。
  */
-import type { Board, FixPlan, Gate, LayoutIssue, LayoutReport, Net, OrderRow, Pad, Pt, Report, Seg, Violation } from '../core';
-import { analyze, status as briefStatus, template as briefTemplate, confirm as confirmGate, confirmTier, dist, draftPriorities, fields, GATES, summary as gateSummary, layoutCheck, planFix, requireStage, routingOrder, TIERS, tierStates } from '../core';
+import type { Board, FinishModel, FinishReport, FixPlan, Gate, LayoutIssue, LayoutReport, Net, OrderRow, Pad, Pt, Report, Seg, Violation } from '../core';
+import { analyze, status as briefStatus, template as briefTemplate, confirm as confirmGate, confirmTier, dist, draftPriorities, fields, FINISH_QUESTIONS, finishAnswered, finishCheck, GATES, summary as gateSummary, layoutCheck, planFix, requireStage, routingOrder, TIERS, tierStates } from '../core';
 import demoBrief from './demo-brief.json';
+import demoFinish from './demo-finish.json';
 import demo from './demo.json';
 
 declare const eda: any;
@@ -97,9 +98,18 @@ async function mock(cmd: string, _args: any): Promise<any> {
 				b.G3_layout_check = { ...(b.G3_layout_check ?? {}), report: '扩展布局检查', result: { kind: layout.kind, p0: layout.p0, p1: layout.p1, p2: layout.p2, brief_hash: layout.brief_hash } };
 			return { board, bbox: bb, layout, brief: demoView() };
 		}
+		case 'finishCheck': {
+			// 演示：用一块带丝印、位号和泪滴问题的示例板
+			const b = demoBriefs[demoKey];
+			const model = clone((demoFinish as any).model) as FinishModel;
+			const report = finishCheck(model, b, null);
+			if (args.record)
+				b.G5_finish = { ...(b.G5_finish ?? {}), report: '扩展出图前检查', result: report };
+			return { model, report, warnings: ['演示模式：内置丝印示例板（30 × 20 mm）'], brief: demoView() };
+		}
 		case 'routeRecord': {
 			const report = analyze(board);
-			demoBriefs[demoKey].G5_acceptance = { ...(demoBriefs[demoKey].G5_acceptance ?? {}), route_report: '扩展布线检查', route_result: { score: report.score, pass: report.pass, p0: report.violations.filter(v => v.sev === 'P0').length } };
+			demoBriefs[demoKey].G6_acceptance = { ...(demoBriefs[demoKey].G6_acceptance ?? {}), route_report: '扩展布线检查', route_result: { score: report.score, pass: report.pass, p0: report.violations.filter(v => v.sev === 'P0').length } };
 			return demoView();
 		}
 		case 'fixPlan':
@@ -160,6 +170,10 @@ let lmode = false;
 let selL: number | null = null;
 let layoutT0 = 0;
 let openGate: Gate | null = null;
+let F: { model: FinishModel; report: FinishReport; bbox: [number, number, number, number] } | null = null;
+let fmode = false;
+let selF: number | null = null;
+let finishT0 = 0;
 const BLOCKC = ['#39d0b0', '#ff8a3d', '#7fd4ff', '#b98cff', '#f5c542', '#ff5d8f', '#3ccf7a', '#e8683f'];
 let plan: FixPlan | null = null;
 let selV: number | null = null;
@@ -202,9 +216,9 @@ function resize(): void {
 	cv.height = Math.round(H * DPR);
 }
 function fit(): void {
-	if (!D)
+	if (!D && !(fmode && F))
 		return;
-	const [x0, y0, x1, y1] = D.bbox;
+	const [x0, y0, x1, y1] = fmode && F ? F.bbox : D!.bbox;
 	const s = Math.min((W - 60) / Math.max(1, x1 - x0), (H - 70) / Math.max(1, y1 - y0));
 	view.s = s;
 	view.ox = W / 2 - ((x0 + x1) / 2) * s;
@@ -383,6 +397,10 @@ function frame(now: number): void {
 	}
 	ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
 	ctx.clearRect(0, 0, W, H);
+	if (fmode && F) {
+		drawFinish(now);
+		return;
+	}
 	if (!D) {
 		ctx.fillStyle = '#5b6778';
 		ctx.font = '14px system-ui';
@@ -1168,7 +1186,7 @@ function renderIssues(): void {
 	let html = '';
 	if (D.gate?.route?.length)
 		html += `<div class="warnbox">设计确认 G0–G4 未放行：只能查看和预览，不能写回修复。布线前请在“设计确认”页逐级确认。</div>`;
-	html += '<div class="act" style="margin:0 0 10px"><button id="recG5">记录为 G5 依据</button></div>';
+	html += '<div class="act" style="margin:0 0 10px"><button id="recG5">记录为 G6 依据</button></div>';
 	if (r.confirm.length)
 		html += `<div class="note" style="margin:0 0 10px">网络类需要确认：${r.confirm.slice(0, 8).map(c => `${esc(c.net)}→${esc(c.class)}`).join('、')}${r.confirm.length > 8 ? ' 等' : ''}</div>`;
 	for (const [k, idx] of [...groups].sort((a, b) => a[0].localeCompare(b[0]))) {
@@ -1196,7 +1214,7 @@ function renderIssues(): void {
 			BR = await rpc('routeRecord');
 			renderBrief();
 			updateGateChip();
-			caption(`已记录布线得分 ${D?.report.score} 为 G5 依据；DRC 错误数和截图在“设计确认”页填写`);
+			caption(`已记录布线得分 ${D?.report.score} 为 G6 依据；DRC 错误数和截图在“设计确认”页填写`);
 			setTimeout(() => caption(null), 2600);
 		};
 	}
@@ -1266,7 +1284,7 @@ function updateGateChip(): void {
 	const chip = $('gateChip');
 	const n = BR.status.gates.filter(g => g.state === 'confirmed').length;
 	const open = !BR.status.stages.route.length;
-	chip.textContent = `设计确认 ${n}/6${open ? ' · 可布线' : ''}`;
+	chip.textContent = `设计确认 ${n}/${BR.status.gates.length}${open ? ' · 可布线' : ''}`;
 	chip.className = `gatechip ${open ? 'open' : 'closed'}`;
 	chip.title = open ? '设计确认 G0–G4 已放行，可以写回修复' : `写回修复前还需确认：\n${BR.status.stages.route.join('\n')}`;
 	($('btnApply') as HTMLButtonElement).title = open ? '' : '设计确认 G0–G4 未放行，不能写回';
@@ -1279,8 +1297,8 @@ function renderBrief(): void {
 	}
 	const st = BR.status;
 	const stg = (k: string, name: string): string => `<span class="${st.stages[k].length ? 'no' : 'ok'}">${st.stages[k].length ? '✗' : '✓'} ${name}</span>`;
-	let html = '<div class="note" style="margin:0 0 8px">布局布线前必须由设计者逐级给出并确认这些信息：需求、外壳与固定件、功能分区（看过布局截图）、布局检查、布线规划。每一级核对无误后手动输入确认码；改了前面的内容，后面的确认自动失效。AI 助手只能帮你填写，不能替你确认。</div>';
-	html += `<div class="stages">${stg('place', '可以摆放器件（G0–G1）')}${stg('route', '可以布线、写回修复（G0–G4）')}${stg('deliver', '可以宣布完成（G0–G5）')}</div>`;
+	let html = '<div class="note" style="margin:0 0 8px">布局布线前必须由设计者逐级给出并确认这些信息：需求、外壳与固定件、功能分区（看过布局截图）、布局检查、布线规划。每一级核对无误后手动输入确认码；改了前面的内容，后面的确认自动失效。AI 助手只能帮你填写，不能替你确认。能力边界：检查图、改图，以及按你点名的网络逐批布线；不做完全自由的全局自动布线。</div>';
+	html += `<div class="stages">${stg('place', '可以摆放器件（G0–G1）')}${stg('route', '可以布线、写回修复（G0–G4）')}${stg('finish', '可以导出 Gerber（G0–G5）')}${stg('deliver', '可以宣布完成（G0–G6）')}</div>`;
 	for (const g of st.gates) {
 		const open = openGate === g.gate;
 		html += `<div class="gate${open ? ' open' : ''}" data-g="${g.gate}"><div class="gh"><span class="st ${g.state}">${STATE_TXT[g.state]}</span><b>${g.gate} ${esc(g.title)}</b><span class="rule">${open ? '收起' : '展开'}</span></div><div class="gb">`;
@@ -1291,7 +1309,9 @@ function renderBrief(): void {
 		if (g.gate === 'G3')
 			html += '<div class="note">在“布局”页检查，没有 P0 时点“记录为 G3 依据”。</div>';
 		if (g.gate === 'G5')
-			html += '<div class="note">在“结论”页点“记录为 G5 依据”，再填 DRC 错误数和截图。</div>';
+			html += '<div class="note">在“丝印”页逐项回答问题，检查后点“检查并记录为 G5 依据”。</div>';
+		if (g.gate === 'G6')
+			html += '<div class="note">在“结论”页点“记录为 G6 依据”，再填 DRC 错误数和截图。</div>';
 		if (g.gate === 'G4')
 			html += tierHtml();
 		for (const f of fields(g.gate as Gate)) {
@@ -1541,6 +1561,12 @@ function selectLayoutIssue(i: number): void {
 function tab(t: string): void {
 	document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', (b as HTMLElement).dataset.t === t));
 	document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === `p-${t}`));
+	const wasF = fmode;
+	fmode = t === 'finish' && !!F;
+	if (wasF !== fmode)
+		fit();
+	if (t === 'finish' && !F)
+		renderFinish();
 	if (t === 'layout')
 		lmode = !!L;
 	else if (['issues', 'metrics', 'order', 'fix'].includes(t))
@@ -1554,11 +1580,209 @@ document.querySelectorAll<HTMLElement>('#tabs button').forEach((b) => {
 	b.onclick = () => tab(b.dataset.t!);
 });
 
+// ------------------------------------------------------------------ 出图前检查：丝印、位号编号、泪滴
+const FGROUP: [string, string][] = [['silk', '丝印'], ['annotation', '位号编号'], ['teardrops', '泪滴']];
+function finishBBox(m: FinishModel): [number, number, number, number] {
+	const xs: number[] = [];
+	const ys: number[] = [];
+	for (const [x, y] of m.outline ?? []) xs.push(x), ys.push(y);
+	for (const p of m.parts) xs.push(p.rect[0], p.rect[2]), ys.push(p.rect[1], p.rect[3]);
+	for (const t of m.texts) xs.push(t.bbox[0], t.bbox[2]), ys.push(t.bbox[1], t.bbox[3]);
+	return xs.length ? [Math.min(...xs) - 1, Math.min(...ys) - 1, Math.max(...xs) + 1, Math.max(...ys) + 1] : [0, 0, 10, 10];
+}
+function drawFinish(now: number): void {
+	const m = F!.model;
+	const t = (now - finishT0) / 1000;
+	if (m.outline?.length)
+		poly([...m.outline, m.outline[0]], 1.2 / view.s, '#2a3546');
+	for (const p of m.parts) {
+		const [a, b, c, d] = rectPx(p.rect);
+		ctx.fillStyle = p.side === 'bottom' ? 'rgba(63,143,232,.08)' : 'rgba(160,123,232,.10)';
+		ctx.fillRect(a, b, c, d);
+		for (const q of p.pads) {
+			const [x, y, w, h] = rectPx(q.rect);
+			ctx.fillStyle = q.side === 'both' ? 'rgba(217,180,74,.75)' : 'rgba(217,180,74,.5)';
+			ctx.fillRect(x, y, w, h);
+		}
+	}
+	for (const j of m.junctions) {
+		ctx.fillStyle = j.teardrop ? '#3ccf7a' : 'rgba(255,255,255,.25)';
+		ctx.beginPath();
+		ctx.arc(X(j.x), Y(j.y), 2.2, 0, Math.PI * 2);
+		ctx.fill();
+	}
+	for (const l of m.lines) line([l.x1, l.y1], [l.x2, l.y2], Math.max(l.w, 0.1), l.side === 'bottom' ? '#7fb2ff' : '#e9eef5', 0.85);
+	const reveal = Math.min(1, t / 0.8);
+	m.texts.forEach((tx, i) => {
+		if (i / Math.max(1, m.texts.length) > reveal)
+			return;
+		const [x, y, w, h] = rectPx(tx.bbox);
+		ctx.globalAlpha = tx.hidden ? 0.25 : 1;
+		ctx.strokeStyle = tx.side === 'bottom' ? 'rgba(127,178,255,.6)' : 'rgba(233,238,245,.35)';
+		ctx.lineWidth = 1;
+		ctx.setLineDash(tx.hidden ? [3, 3] : []);
+		ctx.strokeRect(x, y, w, h);
+		ctx.setLineDash([]);
+		ctx.save();
+		ctx.translate(X((tx.bbox[0] + tx.bbox[2]) / 2), Y((tx.bbox[1] + tx.bbox[3]) / 2));
+		const deg = tx.rot % 180;
+		ctx.rotate(-(deg * Math.PI) / 180 * (flipY ? 1 : -1));
+		if (tx.mirror)
+			ctx.scale(-1, 1);
+		ctx.fillStyle = tx.side === 'bottom' ? '#7fb2ff' : '#e9eef5';
+		ctx.font = `${Math.max(7, tx.h * view.s * 0.85)}px system-ui`;
+		ctx.textAlign = 'center';
+		ctx.textBaseline = 'middle';
+		if (tx.rot % 360 >= 180)
+			ctx.rotate(Math.PI);
+		ctx.fillText(tx.text, 0, 0);
+		ctx.restore();
+		ctx.globalAlpha = 1;
+	});
+	if (t < 0.8)
+		return;
+	const pulse = 0.5 + 0.5 * Math.sin(now / 180);
+	F!.report.issues.forEach((v, i) => {
+		if (!sevOn.has(v.sev) || (selF !== null && selF !== i))
+			return;
+		const col = SEVC[v.sev];
+		ctx.strokeStyle = col;
+		ctx.lineWidth = i === selF ? 2.5 : 1.5;
+		ctx.globalAlpha = i === selF ? 1 : 0.35 + 0.4 * pulse;
+		if (v.box) {
+			const [x, y, w, h] = rectPx(v.box);
+			ctx.strokeRect(x - 3, y - 3, w + 6, h + 6);
+		}
+		else if (v.at) {
+			ctx.beginPath();
+			ctx.arc(X(v.at[0]), Y(v.at[1]), 6 + 4 * pulse, 0, Math.PI * 2);
+			ctx.stroke();
+		}
+		ctx.globalAlpha = 1;
+	});
+}
+function fqAnswer(path: string): any {
+	return getPath(BR?.brief ?? {}, `G5_finish.${path}`);
+}
+function renderFinish(): void {
+	const pane = $('p-finish');
+	const b = BR?.brief ?? {};
+	let html = '<div class="note">本 skill 的能力边界是检查图、改图：这里检查丝印、位号编号和泪滴，问题由你在 EDA 里改；不做自动布线。</div>';
+	const todo = FINISH_QUESTIONS.filter(q => !finishAnswered(b, q)).length;
+	html += `<div class="group"><h4><span>出图前要你决定的 ${FINISH_QUESTIONS.length} 件事</span><span>${todo ? `还差 ${todo} 项` : '都已回答'}</span></h4>`;
+	for (const [g, zh] of FGROUP) {
+		html += `<div class="note" style="margin-top:6px"><b>${zh}</b></div>`;
+		for (const q of FINISH_QUESTIONS.filter(x => x.path.startsWith(`${g}.`))) {
+			const v = fqAnswer(q.path);
+			const ok = finishAnswered(b, q);
+			const show = typeof v === 'object' ? JSON.stringify(v) : String(v ?? '');
+			html += `<div class="fq" data-path="${q.path}"><div class="q">${ok ? '✓ ' : ''}${esc(q.q)}</div><div class="why">${esc(q.why)}</div>`;
+			if (ok)
+				html += `<div class="ans">${esc(show)}</div>`;
+			if (q.opts.length && !['silk.labels', 'silk.warnings', 'silk.board_marking'].includes(q.path))
+				html += `<div class="opts">${q.opts.map(o => `<button data-set="${esc(o)}" class="${v === o ? 'on' : ''}">${esc(o)}</button>`).join('')}</div>`;
+			else
+				html += `<div class="opts"><input data-in placeholder="${esc(q.rec)}" value="${ok ? esc(show) : ''}" /><button data-save>保存</button></div>`;
+			html += `<div class="note">推荐：${esc(q.rec)}</div></div>`;
+		}
+	}
+	html += '</div>';
+	html += `<div class="group"><div class="act"><button id="fRun" class="primary">检查</button><button id="fRecord"${F && (F.report.p0 || F.report.unresolved_p1) ? ' disabled title="有 P0 或未处理的 P1，不能作为 G5 依据"' : ''}>检查并记录为 G5 依据</button></div></div>`;
+	if (F) {
+		const R = F.report;
+		html += `<div class="group"><h4><span>P0 ${R.p0} · P1 ${R.p1}（未处理 ${R.unresolved_p1}）· P2 ${R.p2} · P3 ${R.p3}</span><span>${R.pass ? '通过' : '不通过'}</span></h4></div>`;
+		if (R.teardrop_source !== 'kicad' || R.silk_graphics_source !== 'full')
+			html += `<div class="warnbox">扩展读不到${R.teardrop_source !== 'kicad' ? '泪滴' : ''}${R.teardrop_source !== 'kicad' && R.silk_graphics_source !== 'full' ? '和' : ''}${R.silk_graphics_source !== 'full' ? '封装自带的丝印线（1 脚、极性标记）' : ''}：请在 EDA 里执行泪滴并重新铺铜，对照原理图逐个看极性标记，再回答上面对应的问题。</div>`;
+		for (const sv of ['P0', 'P1', 'P2', 'P3']) {
+			const idx = R.issues.map((v, i) => [v, i] as const).filter(([v]) => v.sev === sv);
+			if (!idx.length)
+				continue;
+			html += `<div class="group"><h4><span>${sv}</span><span>${idx.length}</span></h4>`;
+			for (const [v, i] of idx)
+				html += `<div class="item${i === selF ? ' sel' : ''}" data-f="${i}"><div class="row"><span class="sev ${v.sev}">${v.sev}</span><span class="rule">${esc(v.rule)}${v.refs.length ? ` · ${esc(v.refs.join('、'))}` : ''}</span></div><div class="msg">${esc(v.msg)}</div>${v.fix ? `<div class="note" style="margin-top:3px">${esc(v.fix)}</div>` : ''}</div>`;
+			html += '</div>';
+		}
+	}
+	pane.innerHTML = html;
+	pane.querySelectorAll<HTMLElement>('.fq').forEach((el) => {
+		const path = el.dataset.path!;
+		el.querySelectorAll<HTMLElement>('[data-set]').forEach((bt) => {
+			bt.onclick = () => setFinish(path, bt.dataset.set);
+		});
+		const inp = el.querySelector<HTMLInputElement>('[data-in]');
+		const save = el.querySelector<HTMLElement>('[data-save]');
+		if (inp && save) {
+			save.onclick = () => {
+				const raw = inp.value.trim();
+				let v: any = raw;
+				if (/^[[{]/.test(raw)) {
+					try {
+						v = JSON.parse(raw);
+					}
+					catch {
+						caption('格式不对：列表写成 [{"ref":"J1","text":"USB"}]，板名写成 {"name":"板名","version":"V1.0"}');
+						return;
+					}
+				}
+				else if (raw !== '' && Number.isFinite(Number(raw))) {
+					v = Number(raw);
+				}
+				setFinish(path, v);
+			};
+		}
+	});
+	pane.querySelectorAll<HTMLElement>('[data-f]').forEach((el) => {
+		el.onclick = () => selectFinishIssue(Number(el.dataset.f));
+	});
+	$('fRun').onclick = () => runFinish(false);
+	$('fRecord').onclick = () => runFinish(true);
+}
+async function setFinish(path: string, v: any): Promise<void> {
+	try {
+		BR = await rpc('briefUpdate', { set: { [`G5_finish.${path}`]: v } });
+		renderFinish();
+		updateGateChip();
+	}
+	catch (e: any) {
+		caption(`保存失败：${e?.message ?? e}`);
+	}
+}
+function selectFinishIssue(i: number): void {
+	if (!F)
+		return;
+	selF = selF === i ? null : i;
+	const v = F.report.issues[i];
+	if (selF !== null && (v.box || v.at))
+		zoomTo(v.box ? [(v.box[0] + v.box[2]) / 2, (v.box[1] + v.box[3]) / 2] : v.at!, Math.max(view.s, 24));
+	caption(`${v.rule}：${v.msg}${v.fix ? ` → ${v.fix}` : ''}`);
+	renderFinish();
+}
+async function runFinish(record: boolean): Promise<void> {
+	try {
+		const r = await rpc('finishCheck', { record });
+		F = { model: r.model, report: r.report, bbox: finishBBox(r.model) };
+		BR = r.brief;
+		selF = null;
+		finishT0 = performance.now();
+		tab('finish');
+		fmode = true;
+		fit();
+		renderFinish();
+		updateGateChip();
+		caption(record ? '已记录为 G5 依据，去“确认”页确认 G5' : `出图前检查：P0 ${F.report.p0} · P1 ${F.report.p1} · P2 ${F.report.p2}`);
+		setTimeout(() => caption(null), 2600);
+	}
+	catch (e: any) {
+		caption(`出图前检查失败：${e?.message ?? e}`);
+	}
+}
+
 // ------------------------------------------------------------------ 动作
 async function loadBrief(): Promise<void> {
 	try {
 		BR = await rpc('briefGet');
 		renderBrief();
+		renderFinish();
 		updateGateChip();
 	}
 	catch {}
@@ -1777,4 +2001,4 @@ resize();
 requestAnimationFrame(frame);
 loadAi();
 check().then(loadBrief);
-(window as any).__lpiot = { get layout() { return L; }, get brief() { return BR; }, runLayout, selectLayoutIssue, tab, get data() { return D; }, get plan() { return plan; }, selectNet, selectViolation, playOrder, fixPreview, check, rpc, get mode() { return mode; } };
+(window as any).__lpiot = { runFinish, selectFinishIssue, setFinish, get finish() { return F; }, get layout() { return L; }, get brief() { return BR; }, runLayout, selectLayoutIssue, tab, get data() { return D; }, get plan() { return plan; }, selectNet, selectViolation, playOrder, fixPreview, check, rpc, get mode() { return mode; } };

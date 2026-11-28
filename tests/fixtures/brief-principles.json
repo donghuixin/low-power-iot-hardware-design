@@ -1,47 +1,222 @@
 {
   "kind": "lpiot-design-brief",
-  "version": 1,
-  "project": {"name": "测试板 principles", "owner": "测试"},
-  "roles": {"U1": "mcu", "U3": "dcdc", "U2": "ic"},
+  "version": 2,
+  "project": {
+    "name": "测试板 principles",
+    "owner": "测试"
+  },
+  "roles": {
+    "U1": "mcu",
+    "U3": "dcdc",
+    "U2": "ic"
+  },
   "G0_requirements": {
     "function": "测试用 BLE 传感器节点：MCU 读取一个 SPI 传感器，经 USB 供电和调试，室内桌面使用",
-    "power": {"source": "USB 5 V，板上 DCDC 转 3.3 V", "peak_ma": 50, "sleep_ua": 20},
+    "power": {
+      "source": "USB 5 V，板上 DCDC 转 3.3 V",
+      "peak_ma": 50,
+      "sleep_ua": 20
+    },
     "wireless": "无",
     "environment": "室内 0–40 °C，桌面放置",
-    "fab": {"layers": 2, "thickness_mm": 1.6, "fab": "JLC", "tier": "standard"}
+    "fab": {
+      "layers": 2,
+      "thickness_mm": 1.6,
+      "fab": "JLC",
+      "tier": "standard"
+    }
   },
   "G1_mechanical": {
-    "outline": {"shape": "rect", "w_mm": 45, "h_mm": 36, "file": ""},
-    "enclosure": {"material": "塑料", "max_height_top_mm": 5, "max_height_bottom_mm": 1},
+    "outline": {
+      "shape": "rect",
+      "w_mm": 45,
+      "h_mm": 36,
+      "file": ""
+    },
+    "enclosure": {
+      "material": "塑料",
+      "max_height_top_mm": 5,
+      "max_height_bottom_mm": 1
+    },
     "holes": "无",
     "fixed": [
-      {"ref": "J1", "what": "USB 接口", "edge": "right", "along_mm": 20.5, "tol_mm": 3, "side": "top", "reason": "外壳右侧 USB 开孔"}
+      {
+        "ref": "J1",
+        "what": "USB 接口",
+        "edge": "right",
+        "along_mm": 20.5,
+        "tol_mm": 3,
+        "side": "top",
+        "reason": "外壳右侧 USB 开孔"
+      }
     ],
     "keepouts": "无"
   },
   "G2_partition": {
     "blocks": [
-      {"name": "主控", "parts": ["U1", "Y1", "C4", "C5", "C1", "R5", "TP1", "TP2"], "region": "center", "why": "居中，四周都能出线"},
-      {"name": "USB 接口", "parts": ["J1", "D1", "J3"], "region": "right-third", "why": "外壳开孔在右侧"},
-      {"name": "电源", "parts": ["L1", "U3", "J2"], "region": "bottom", "why": "开关电源放在下方，远离晶振"},
-      {"name": "传感器", "parts": ["U2"], "region": "top", "why": "远离开关电源"}
+      {
+        "name": "主控",
+        "parts": [
+          "U1",
+          "Y1",
+          "C4",
+          "C5",
+          "C1",
+          "R5",
+          "TP1",
+          "TP2"
+        ],
+        "region": "center",
+        "why": "居中，四周都能出线"
+      },
+      {
+        "name": "USB 接口",
+        "parts": [
+          "J1",
+          "D1",
+          "J3"
+        ],
+        "region": "right-third",
+        "why": "外壳开孔在右侧"
+      },
+      {
+        "name": "电源",
+        "parts": [
+          "L1",
+          "U3",
+          "J2"
+        ],
+        "region": "bottom",
+        "why": "开关电源放在下方，远离晶振"
+      },
+      {
+        "name": "传感器",
+        "parts": [
+          "U2"
+        ],
+        "region": "top",
+        "why": "远离开关电源"
+      }
     ],
     "signal_flow": "USB(右) 进电 → DCDC(下) → 3.3 V 给主控(中) → SPI 到传感器(上)；晶振在主控左侧",
-    "layout_review": {"screenshot": "layout-v1.png", "notes": "用户已看过"}
+    "layout_review": {
+      "screenshot": "layout-v1.png",
+      "notes": "用户已看过"
+    }
   },
-  "G3_layout_check": {"report": "layout-lint.json", "accepted_exceptions": "无"},
+  "G3_layout_check": {
+    "report": "layout-lint.json",
+    "accepted_exceptions": "无"
+  },
   "G4_routing_plan": {
-    "stackup": [{"layer": "F.Cu", "use": "器件与信号"}, {"layer": "B.Cu", "use": "完整地平面，只允许短跳线"}],
-    "priorities": [
-      {"tier": 1, "class": "XTAL", "nets": ["XIN", "XOUT"], "method": "手工", "rules": "≤ 5 mm，不打孔，两侧包地"},
-      {"tier": 2, "class": "SW", "nets": ["SW"], "method": "手工", "rules": "热回路最小"},
-      {"tier": 3, "class": "USB90", "nets": ["USB_DP", "USB_DM"], "method": "手工", "rules": "90 Ω 差分，等长 0.5 mm"},
-      {"tier": 4, "class": "SIG", "nets": ["*"], "method": "工具辅助", "rules": "八方向，route_lint gate"}
+    "stackup": [
+      {
+        "layer": "F.Cu",
+        "use": "器件与信号"
+      },
+      {
+        "layer": "B.Cu",
+        "use": "完整地平面，只允许短跳线"
+      }
     ],
-    "diff_pairs": [{"p": "USB_DP", "n": "USB_DM", "impedance_ohm": 90, "skew_mm": 0.5}],
-    "power_nets": [{"net": "VDD", "current_ma": 50, "width_mm": 0.3}],
-    "acceptance": {"route_lint_min_score": 80, "drc_zero": true, "human_review": true}
+    "priorities": [
+      {
+        "tier": 1,
+        "class": "XTAL",
+        "nets": [
+          "XIN",
+          "XOUT"
+        ],
+        "method": "手工",
+        "rules": "≤ 5 mm，不打孔，两侧包地"
+      },
+      {
+        "tier": 2,
+        "class": "SW",
+        "nets": [
+          "SW"
+        ],
+        "method": "手工",
+        "rules": "热回路最小"
+      },
+      {
+        "tier": 3,
+        "class": "USB90",
+        "nets": [
+          "USB_DP",
+          "USB_DM"
+        ],
+        "method": "手工",
+        "rules": "90 Ω 差分，等长 0.5 mm"
+      },
+      {
+        "tier": 4,
+        "class": "SIG",
+        "nets": [
+          "*"
+        ],
+        "method": "工具辅助",
+        "rules": "八方向，route_lint gate"
+      }
+    ],
+    "diff_pairs": [
+      {
+        "p": "USB_DP",
+        "n": "USB_DM",
+        "impedance_ohm": 90,
+        "skew_mm": 0.5
+      }
+    ],
+    "power_nets": [
+      {
+        "net": "VDD",
+        "current_ma": 50,
+        "width_mm": 0.3
+      }
+    ],
+    "acceptance": {
+      "route_lint_min_score": 80,
+      "drc_zero": true,
+      "human_review": true
+    }
   },
-  "G5_acceptance": {"route_report": "待填", "drc_errors": "待填", "screenshots": "待填"},
+  "G5_finish": {
+    "silk": {
+      "review": {
+        "screenshot": "待填：用户看过的丝印截图（只开丝印层和焊盘，或 3D 预览）",
+        "polarity_checked": "待填：是否已对照原理图逐个核对极性器件和 1 脚标记？（已核对）"
+      },
+      "process": "待填：丝印用什么工艺？（标准丝印 / 高精度丝印 / 镂空字）",
+      "text_height_mm": "待填：位号和文字的字高（mm）？",
+      "line_width_mm": "待填：文字线宽（mm）？",
+      "pad_clearance_mm": "待填：丝印离焊盘至少多远（mm）？",
+      "designators": "待填：位号怎么印？（全部显示 / 只印关键器件 / 不印（用装配图））",
+      "orientation": "待填：文字方向怎么统一？（0° 和 90° / 全部 0°）",
+      "polarity": "待填：极性和 1 脚怎么标？",
+      "labels": "待填：哪些接口、按键、指示灯、测试点要印说明？",
+      "board_marking": "待填：板名、版本号（可加日期、作者）？",
+      "warnings": "待填：要不要警示标注（电池极性、高压、禁止热插拔、ESD 敏感）？",
+      "compliance": "待填：要不要认证或回收标志（CE、FCC ID、WEEE、UL 94V-0 等）？",
+      "jlc_order_no": "待填：嘉立创订单号印在哪里？（板厂默认位置 / 指定位置 / 不加）",
+      "bottom_silk": "待填：底面要不要丝印？（需要 / 不需要）"
+    },
+    "annotation": {
+      "scheme": "待填：位号编号用什么方式？（按位置重新编号 / 按原理图顺序 / 保持现状）",
+      "back_annotated": "待填：位号改动是否已经反标回原理图，BOM 和坐标文件重新导出？（是 / 没有改动）",
+      "bom": ""
+    },
+    "teardrops": {
+      "policy": "待填：泪滴怎么加？（全部焊盘与过孔 / 仅过孔和插件孔 / 不加）",
+      "exclude_rf_diff": "待填：射频和差分线上要不要去掉泪滴？（去掉 / 保留）",
+      "done": "待填：泪滴执行了吗？（执行后要重新铺铜）（已执行并重新铺铜 / 不加泪滴）"
+    },
+    "report": "待填：finish_lint.py --json 的报告路径",
+    "accepted_exceptions": "待填：用户同意保留的 P1 问题 [{rule, refs, why}]，没有就写 无"
+  },
+  "G6_acceptance": {
+    "route_report": "待填",
+    "drc_errors": "待填",
+    "screenshots": "待填"
+  },
   "confirmations": {}
 }

@@ -1,7 +1,7 @@
 {
 	"name": "lpiot-eda-bridge",
 	"type": "module",
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"description": "布局布线检查助手的本地桥：让本机 AI 客户端（MCP）和脚本（HTTP）连到嘉立创 EDA 里的扩展",
 	"license": "Apache-2.0",
 	"bin": { "lpiot-bridge": "./bridge.mjs" },

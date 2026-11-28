@@ -4,7 +4,7 @@
  */
 
 export const KIND = 'lpiot-design-brief';
-export const GATES = ['G0', 'G1', 'G2', 'G3', 'G4', 'G5'] as const;
+export const GATES = ['G0', 'G1', 'G2', 'G3', 'G4', 'G5', 'G6'] as const;
 export type Gate = typeof GATES[number];
 export const SECTION: Record<Gate, string> = {
 	G0: 'G0_requirements',
@@ -12,7 +12,8 @@ export const SECTION: Record<Gate, string> = {
 	G2: 'G2_partition',
 	G3: 'G3_layout_check',
 	G4: 'G4_routing_plan',
-	G5: 'G5_acceptance',
+	G5: 'G5_finish',
+	G6: 'G6_acceptance',
 };
 export const TITLE: Record<Gate, string> = {
 	G0: '需求与工艺',
@@ -20,14 +21,16 @@ export const TITLE: Record<Gate, string> = {
 	G2: '功能分区与布局评审',
 	G3: '布局检查',
 	G4: '布线规划',
-	G5: '交付验收',
+	G5: '丝印、位号编号与泪滴',
+	G6: '交付验收',
 };
-export const STAGES: Record<'place' | 'route' | 'deliver', Gate[]> = {
+export const STAGES: Record<'place' | 'route' | 'finish' | 'deliver', Gate[]> = {
 	place: ['G0', 'G1'],
 	route: ['G0', 'G1', 'G2', 'G3', 'G4'],
+	finish: ['G0', 'G1', 'G2', 'G3', 'G4', 'G5'],
 	deliver: [...GATES],
 };
-export const STAGE_NAME = { place: '开始摆放器件', route: '开始布线（含自动修复、写回 EDA）', deliver: '宣布完成 / 交付打样' };
+export const STAGE_NAME = { place: '开始摆放器件', route: '开始布线（含自动修复、写回 EDA）', finish: '导出 Gerber / 坐标文件', deliver: '宣布完成 / 交付打样' };
 export type GateState = 'missing' | 'blocked' | 'pending' | 'confirmed' | 'stale';
 export const STATE_ZH: Record<GateState, string> = { missing: '缺信息', blocked: '等前一级', pending: '待用户确认', confirmed: '已确认', stale: '已失效' };
 
@@ -36,7 +39,7 @@ const PLACEHOLDER = /^(?:待填|待定|tbd|todo|\?+|？+|x{2,}|n\/?a|未知|不�
 export function template(): any {
 	return {
 		kind: KIND,
-		version: 1,
+		version: 2,
 		project: { name: '待填', owner: '待填' },
 		roles: {},
 		G0_requirements: {
@@ -69,13 +72,362 @@ export function template(): any {
 			power_nets: '待填：电源网络 [{net, current_ma, width_mm}]',
 			acceptance: { route_lint_min_score: 80, drc_zero: true, human_review: true },
 		},
-		G5_acceptance: {
+		G5_finish: finishTemplate(),
+		G6_acceptance: {
 			route_report: '待填：route_lint.py lint --json 的报告路径',
 			drc_errors: '待填：EDA 原生 DRC 的错误数',
 			screenshots: '待填：用户看过的布线截图 [文件名…]',
 		},
 		confirmations: {},
 	};
+}
+
+// ------------------------------------------------------------------ G5：丝印、位号编号、泪滴的引导问题（与 design_gate.py FINISH_QUESTIONS 一致）
+export interface FinishQuestion { path: string; q: string; opts: string[]; rec: string; why: string }
+export const FINISH_QUESTIONS: FinishQuestion[] = [
+	{
+		path: 'silk.process',
+		q: '丝印用什么工艺？',
+		opts: [
+			'标准丝印',
+			'高精度丝印',
+			'镂空字',
+		],
+		rec: '标准丝印',
+		why: '决定最小线宽和字高：嘉立创标准丝印线宽 ≥ 0.153 mm、字高 ≥ 1.0 mm；高精度可到 0.1 mm / 0.8 mm（看板厂是否支持、是否加价）；镂空字要 0.2 mm / 1.5 mm',
+	},
+	{
+		path: 'silk.text_height_mm',
+		q: '位号和文字的字高（mm）？',
+		opts: [],
+		rec: '1.0',
+		why: '小于工艺下限会糊成一团；板子很挤可以只印关键器件，而不是把字缩到印不出来',
+	},
+	{
+		path: 'silk.line_width_mm',
+		q: '文字线宽（mm）？',
+		opts: [],
+		rec: '0.153',
+		why: '字高与线宽约 6:1 最清楚；线太细会断笔',
+	},
+	{
+		path: 'silk.pad_clearance_mm',
+		q: '丝印离焊盘至少多远（mm）？',
+		opts: [],
+		rec: '0.2',
+		why: '板厂会把压到焊盘的丝印自动裁掉（字会残缺），至少 0.15 mm，建议 0.2–0.25 mm',
+	},
+	{
+		path: 'silk.designators',
+		q: '位号怎么印？',
+		opts: [
+			'全部显示',
+			'只印关键器件',
+			'不印（用装配图）',
+		],
+		rec: '全部显示',
+		why: '全部显示方便调试和维修；板子太小可以只印芯片、接口、晶振、按键、二极管、电池等，阻容靠装配图',
+	},
+	{
+		path: 'silk.orientation',
+		q: '文字方向怎么统一？',
+		opts: [
+			'0° 和 90°',
+			'全部 0°',
+		],
+		rec: '0° 和 90°',
+		why: '全板只用两种读向（从下往上、从左往右），装配和维修时不用转板；倒着或斜着的字最容易看错',
+	},
+	{
+		path: 'silk.polarity',
+		q: '极性和 1 脚怎么标？',
+		opts: [],
+		rec: '芯片 1 脚圆点，二极管和 LED 阴极横杠，电解或钽电容 + 号，接口 1 脚三角',
+		why: '贴片和手焊最常见的错误就是贴反；标记要在贴片后还看得到（不要只画在器件下面）',
+	},
+	{
+		path: 'silk.labels',
+		q: '哪些接口、按键、指示灯、测试点要印说明？',
+		opts: [],
+		rec: '[{ref: J1, text: USB}, {ref: SW1, text: RST}, …]，没有写 无',
+		why: '用户和测试人员只看丝印认接口；写成 [{ref, text}] 列表，检查时会在器件旁边找这段文字',
+	},
+	{
+		path: 'silk.board_marking',
+		q: '板名、版本号（可加日期、作者）？',
+		opts: [],
+		rec: '{name: 板名, version: V1.0}',
+		why: '改版后最怕分不清哪块板是哪一版；版本号每次改板都要改',
+	},
+	{
+		path: 'silk.warnings',
+		q: '要不要警示标注（电池极性、高压、禁止热插拔、ESD 敏感）？',
+		opts: [],
+		rec: '无',
+		why: '有电池座、外部电源输入或高压时建议加；写成文字列表，没有写 无',
+	},
+	{
+		path: 'silk.compliance',
+		q: '要不要认证或回收标志（CE、FCC ID、WEEE、UL 94V-0 等）？',
+		opts: [],
+		rec: '无',
+		why: '量产或出口才需要；位置和尺寸按认证要求，没有写 无',
+	},
+	{
+		path: 'silk.jlc_order_no',
+		q: '嘉立创订单号印在哪里？',
+		opts: [
+			'板厂默认位置',
+			'指定位置',
+			'不加',
+		],
+		rec: '指定位置',
+		why: '默认会落在空白处，可能在外壳开窗或导光柱下；指定位置就放一行 JLCJLCJLCJLC 占位；不加可能要加价，以下单页为准',
+	},
+	{
+		path: 'silk.bottom_silk',
+		q: '底面要不要丝印？',
+		opts: [
+			'需要',
+			'不需要',
+		],
+		rec: '需要',
+		why: '底面有器件、测试点或要写板名时需要；底面文字要镜像',
+	},
+	{
+		path: 'annotation.scheme',
+		q: '位号编号用什么方式？',
+		opts: [
+			'按位置重新编号',
+			'按原理图顺序',
+			'保持现状',
+		],
+		rec: '按位置重新编号',
+		why: '按位置（从上到下、从左到右）编号，维修时按位号找器件最快；重新编号后必须反标回原理图，BOM 和坐标文件才对得上',
+	},
+	{
+		path: 'annotation.back_annotated',
+		q: '位号改动是否已经反标回原理图，BOM 和坐标文件重新导出？',
+		opts: [
+			'是',
+			'没有改动',
+		],
+		rec: '是',
+		why: 'PCB 和原理图位号不一致时，贴片厂会按错的 BOM 贴料',
+	},
+	{
+		path: 'teardrops.policy',
+		q: '泪滴怎么加？',
+		opts: [
+			'全部焊盘与过孔',
+			'仅过孔和插件孔',
+			'不加',
+		],
+		rec: '全部焊盘与过孔',
+		why: '泪滴加固线和焊盘、过孔的连接，钻孔偏位或热应力时线不容易断；细线（≤ 0.2 mm）进大焊盘尤其要加',
+	},
+	{
+		path: 'teardrops.exclude_rf_diff',
+		q: '射频和差分线上要不要去掉泪滴？',
+		opts: [
+			'去掉',
+			'保留',
+		],
+		rec: '去掉',
+		why: '泪滴会让线宽在焊盘前突变，影响 50 Ω 射频和差分阻抗；一般不加',
+	},
+	{
+		path: 'teardrops.done',
+		q: '泪滴执行了吗？（执行后要重新铺铜）',
+		opts: [
+			'已执行并重新铺铜',
+			'不加泪滴',
+		],
+		rec: '已执行并重新铺铜',
+		why: '泪滴要在布线定稿后执行，之后改线要重新执行；嘉立创扩展读不到泪滴，靠这一项和截图确认',
+	},
+	{
+		path: 'silk.review.screenshot',
+		q: '用户看过的丝印截图（只开丝印层和焊盘，或 3D 预览）',
+		opts: [],
+		rec: 'silk-top.png',
+		why: '工具查不出“看起来乱”“指认不清”这种问题，必须用户自己看一遍',
+	},
+	{
+		path: 'silk.review.polarity_checked',
+		q: '是否已对照原理图逐个核对极性器件和 1 脚标记？',
+		opts: [
+			'已核对',
+		],
+		rec: '已核对',
+		why: '封装库里的 1 脚标记可能是错的，或者被位号挡住；工具只能找到“有没有标记”，标得对不对要人看',
+	},
+];
+export const FINISH_FREEFORM = new Set(['silk.labels', 'silk.warnings', 'silk.board_marking', 'silk.text_height_mm', 'silk.line_width_mm', 'silk.pad_clearance_mm']);
+export const SILK_PROCESS: Record<string, [number, number]> = { 标准丝印: [0.153, 1.0], 高精度丝印: [0.1, 0.8], 镂空字: [0.2, 1.5] };
+
+export function finishTemplate(): any {
+	const t: any = { silk: { review: {} }, annotation: {}, teardrops: {} };
+	for (const fq of FINISH_QUESTIONS)
+		setPath(t, fq.path, `待填：${fq.q}${fq.opts.length ? `（${fq.opts.join(' / ')}）` : ''}`);
+	t.annotation.bom = '';
+	t.report = '待填：finish_lint.py --json 的报告路径';
+	t.accepted_exceptions = '待填：用户同意保留的 P1 问题 [{rule, refs, why}]，没有就写 无';
+	return t;
+}
+
+const FINISH_VOLATILE = [['report'], ['result'], ['accepted_exceptions'], ['silk', 'review'], ['teardrops', 'done'], ['annotation', 'back_annotated']];
+
+/** G5 里影响检查结果的决定的哈希（去掉报告、截图、保留问题、执行记录），写进检查报告判断是否过期。 */
+export function finishRulesHash(b: any): string {
+	const d = JSON.parse(JSON.stringify(get(b, 'G5_finish') ?? {}));
+	for (const path of FINISH_VOLATILE) {
+		let cur = d;
+		for (const k of path.slice(0, -1))
+			cur = cur && typeof cur === 'object' && !Array.isArray(cur) ? cur[k] : undefined;
+		if (cur && typeof cur === 'object' && !Array.isArray(cur))
+			delete cur[path[path.length - 1]];
+	}
+	return sha256(canonical(d));
+}
+
+/** 旧版（G5 是交付验收）→ 新版：G5 丝印 / 位号 / 泪滴，G6 交付验收；旧的 G5 确认作废。 */
+export function migrate(b: any): any {
+	if (b && typeof b === 'object' && 'G5_acceptance' in b && !('G6_acceptance' in b)) {
+		b.G6_acceptance = b.G5_acceptance;
+		delete b.G5_acceptance;
+		const conf = b.confirmations ?? {};
+		if (conf.G5) {
+			conf.G6_legacy = conf.G5;
+			delete conf.G5;
+		}
+		if (!b.G5_finish)
+			b.G5_finish = finishTemplate();
+		b.version = Math.max(2, Number(b.version) || 1);
+	}
+	return b;
+}
+
+/** 报告里的 P1 减去用户同意保留的（按当前 accepted_exceptions 重新算）。 */
+export function finishUnresolved(rep: any, b: any): any[] {
+	const acc = get(b, 'G5_finish.accepted_exceptions');
+	const keys = new Set<string>();
+	for (const a of Array.isArray(acc) ? acc : []) {
+		if (a && typeof a === 'object' && !isBlank(a.why) && a.rule) {
+			const r = a.refs;
+			keys.add(`${a.rule}|${Array.isArray(r) ? (r[0] ?? '') : typeof r === 'string' ? r : ''}`);
+		}
+	}
+	return (rep?.issues ?? []).filter((v: any) => v.sev === 'P1' && !keys.has(`${v.rule}|${(v.refs ?? [])[0] ?? ''}`) && !keys.has(`${v.rule}|`));
+}
+
+function finishAnswerMissing(b: any, qs: FinishQuestion[] = FINISH_QUESTIONS): string[] {
+	const out: string[] = [];
+	for (const fq of qs) {
+		const v = get(b, `G5_finish.${fq.path}`);
+		if (typeof v === 'number' || typeof v === 'boolean')
+			continue;
+		if (Array.isArray(v) ? v.length : (v && typeof v === 'object' && Object.keys(v).length))
+			continue;
+		if (isBlank(v) || (Array.isArray(v) && !v.length) || (v && typeof v === 'object' && !Object.keys(v).length)) {
+			out.push(`${fq.q}（G5_finish.${fq.path}）${fq.opts.length ? `：选 ${fq.opts.join(' / ')}` : ''}，推荐 ${fq.rec}`);
+			continue;
+		}
+		if (fq.opts.length && !FINISH_FREEFORM.has(fq.path) && typeof v === 'string' && !fq.opts.includes(v.trim()))
+			out.push(`${fq.q}（G5_finish.${fq.path}）：只能选 ${fq.opts.join(' / ')}，现在是“${v}”`);
+	}
+	return out;
+}
+
+/** 某个问题是否已回答（面板用）。 */
+export function finishAnswered(b: any, fq: FinishQuestion): boolean {
+	return !finishAnswerMissing(b, [fq]).length;
+}
+
+function finishValueMissing(b: any): string[] {
+	const out: string[] = [];
+	const f = get(b, 'G5_finish') ?? {};
+	const s = f.silk ?? {};
+	const proc = SILK_PROCESS[s.process];
+	if (proc) {
+		const present = (v: any) => v !== undefined && v !== null && !isBlank(v);
+		const h = num(s.text_height_mm);
+		const w = num(s.line_width_mm);
+		const c = num(s.pad_clearance_mm);
+		if (present(s.text_height_mm) && (h === null || h < proc[1]))
+			out.push(`字高（G5_finish.silk.text_height_mm）：${s.process} 至少 ${proc[1]} mm`);
+		if (present(s.line_width_mm) && (w === null || w < proc[0] - 0.005))
+			out.push(`线宽（G5_finish.silk.line_width_mm）：${s.process} 至少 ${proc[0]} mm`);
+		if (present(s.pad_clearance_mm) && (c === null || c < 0.15))
+			out.push('丝印离焊盘（G5_finish.silk.pad_clearance_mm）：至少 0.15 mm');
+	}
+	const bm = s.board_marking;
+	if (bm && typeof bm === 'object' && !Array.isArray(bm)) {
+		for (const [k, zh] of [['name', '板名'], ['version', '版本号']]) {
+			if (isBlank(bm[k]) || !String(bm[k]).trim())
+				out.push(`${zh}（G5_finish.silk.board_marking.${k}）`);
+		}
+	}
+	else if (bm !== undefined && bm !== null && !isBlank(bm)) {
+		out.push('板名与版本（G5_finish.silk.board_marking）：写成 {name, version}');
+	}
+	const lb = s.labels;
+	if (Array.isArray(lb)) {
+		lb.forEach((it: any, i: number) => {
+			if (!it || typeof it !== 'object' || isBlank(it.ref) || isBlank(it.text))
+				out.push(`说明丝印第 ${i + 1} 项（G5_finish.silk.labels）：写成 {ref, text}`);
+		});
+	}
+	else if (lb !== undefined && lb !== null && !isBlank(lb) && !isNoneWord(lb)) {
+		out.push('说明丝印（G5_finish.silk.labels）：写成 [{ref, text}] 列表，没有写 无');
+	}
+	const wn = s.warnings;
+	if (wn !== undefined && wn !== null && !isBlank(wn) && !isNoneWord(wn) && !Array.isArray(wn))
+		out.push('警示标注（G5_finish.silk.warnings）：写成文字列表，没有写 无');
+	const td = f.teardrops ?? {};
+	if (td.policy === '不加' && td.done === '已执行并重新铺铜')
+		out.push('泪滴策略是“不加”，执行记录却是“已执行”：两项要一致');
+	if (['全部焊盘与过孔', '仅过孔和插件孔'].includes(td.policy) && td.done === '不加泪滴')
+		out.push('泪滴策略要求加泪滴，执行记录却是“不加泪滴”：执行泪滴并重新铺铜后再填');
+	return out;
+}
+
+// ------------------------------------------------------------------ 能力边界：只布用户点名的网络（与 design_gate.py route_scope 一致）
+export const MAX_SCOPE_NETS = 8;
+const WILDCARD = /^\s*(\*|all|any|rest|others?|全部|所有|全板|剩下的?|其余|其他|其它|剩余|everything)\s*$/i;
+export const BOUNDARY = `本 skill 的能力边界是检查图、改图，不是完全自由的自动布线。布线上只做两件事：检查已有布线（含几何修复），以及按用户点名的网络逐批布线（每批不超过 ${MAX_SCOPE_NETS} 个网络，且都在已确认的布线优先级里）。“全局布线”“把剩下的全布了”这类需要大范围搜索的任务做不了，也不执行：请用户点名这一批要布的网络，或者用 EDA 自带的自动布线器自己布，再回来做检查。`;
+
+export function routeScope(b: any, nets: string[] | undefined | null, planNets?: string[]): string[] {
+	const names = (nets ?? []).filter(n => typeof n === 'string' && n.trim()).map(n => n.trim());
+	if (!names.length)
+		return [`没有点名要布的网络。${BOUNDARY}`];
+	const wild = names.filter(n => WILDCARD.test(n));
+	if (wild.length)
+		return [`“${wild.join('、')}”不是网络名。${BOUNDARY}`];
+	const out: string[] = [];
+	if (names.length > MAX_SCOPE_NETS)
+		out.push(`一次点名了 ${names.length} 个网络，超过 ${MAX_SCOPE_NETS} 个：这已经是大范围布线，拆成几批，每批由用户点名。`);
+	const explicit = new Set<string>();
+	let star = false;
+	const sts = new Map(tierStates(b).map(s => [String(s.tier), s.state]));
+	tierList(b).forEach((t, i) => {
+		if (sts.get(String(t.tier ?? i + 1)) !== 'confirmed')
+			return;
+		for (const n of t.nets ?? []) {
+			if (n === '*')
+				star = true;
+			else explicit.add(n);
+		}
+	});
+	const unknown = names.filter(n => !explicit.has(n) && !star);
+	if (unknown.length)
+		out.push(`${unknown.slice(0, 6).join('、')} 不在已确认的布线优先级里：先把它们排进 G4 的某一档并请用户确认。`);
+	if (planNets) {
+		const extra = [...new Set(planNets)].filter(n => !names.includes(n)).sort();
+		if (extra.length)
+			out.push(`走线里还有没点名的网络：${extra.slice(0, 6).join('、')}${extra.length > 6 ? ' 等' : ''}。只能写用户点名的网络。`);
+	}
+	return out;
 }
 
 // ------------------------------------------------------------------ 取值与校验
@@ -269,12 +621,38 @@ export function makeRequire(reports: Record<string, any> = {}): Record<Gate, Req
 			} },
 		],
 		G5: [
+			{ check: b => finishAnswerMissing(b) },
+			{ check: finishValueMissing },
 			{ check: (b) => {
-				const [rep, err] = reportCheck(b, 'G5_acceptance.route_report', 'G5_acceptance.route_result', reports);
+				const [rep, err] = reportCheck(b, 'G5_finish.report', 'G5_finish.result', reports);
+				if (err.length)
+					return err.map(e => `出图前检查报告（G5_finish.report）：${e}`);
+				if (!rep)
+					return ['出图前检查报告（G5_finish.report）：在“丝印”页检查后点“记录为 G5 依据”，或运行 finish_lint.py --brief … --json'];
+				if (rep.kind !== 'lpiot-finish-lint')
+					return ['出图前检查报告不是 finish_lint.py / 扩展生成的'];
+				const out: string[] = [];
+				if (rep.rules_hash !== finishRulesHash(b))
+					out.push('出图前检查报告是按旧的 G5 决定生成的（或生成时没带 --brief）：重新检查');
+				if ((rep.p0 ?? 1) > 0)
+					out.push(`出图前检查还有 ${rep.p0} 个 P0（位号未编号或重复）：在原理图里重新编号，更新到 PCB 再检查`);
+				const un = finishUnresolved(rep, b);
+				if (un.length)
+					out.push(`还有 ${un.length} 个 P1 没改也没有用户同意保留：${un.slice(0, 4).map((v: any) => `${v.rule} ${(v.refs ?? []).join('、')}`).join('；')}${un.length > 4 ? ' 等' : ''}（改掉，或把用户同意保留的写进 accepted_exceptions，附原因）`);
+				const td = get(b, 'G5_finish.teardrops') ?? {};
+				if (rep.teardrop_source !== 'kicad' && td.policy !== undefined && td.policy !== '不加' && td.done !== '已执行并重新铺铜')
+					out.push('读不到泪滴：在 EDA 里执行泪滴并重新铺铜，再把 G5_finish.teardrops.done 填成“已执行并重新铺铜”');
+				return out;
+			} },
+			reqList('G5_finish.accepted_exceptions', '保留的问题', 1, [], true, '[{"rule":"SLK-13","refs":[],"why":"外壳全包"}] 或 无'),
+		],
+		G6: [
+			{ check: (b) => {
+				const [rep, err] = reportCheck(b, 'G6_acceptance.route_report', 'G6_acceptance.route_result', reports);
 				if (err.length)
 					return err;
 				if (!rep)
-					return ['布线检查结果：在“结论”页检查后点“记录为 G5 依据”'];
+					return ['布线检查结果：在“结论”页检查后点“记录为 G6 依据”'];
 				const need = num(get(b, 'G4_routing_plan.acceptance.route_lint_min_score')) ?? 80;
 				const out: string[] = [];
 				if ((rep.p0 ?? 0) > 0 || rep.pass === false)
@@ -283,15 +661,15 @@ export function makeRequire(reports: Record<string, any> = {}): Record<Gate, Req
 					out.push(`布线得分 ${rep.score} 低于验收线 ${need}`);
 				return out;
 			} },
-			{ field: { path: 'G5_acceptance.drc_errors', label: 'EDA 原生 DRC 错误数', kind: 'number' }, check: (b) => {
-				const v = num(get(b, 'G5_acceptance.drc_errors'));
+			{ field: { path: 'G6_acceptance.drc_errors', label: 'EDA 原生 DRC 错误数', kind: 'number' }, check: (b) => {
+				const v = num(get(b, 'G6_acceptance.drc_errors'));
 				if (v === null)
-					return ['DRC 错误数（G5_acceptance.drc_errors）：在 EDA 里跑一次 DRC 填数字'];
+					return ['DRC 错误数（G6_acceptance.drc_errors）：在 EDA 里跑一次 DRC 填数字'];
 				if (v > 0 && get(b, 'G4_routing_plan.acceptance.drc_zero') !== false)
 					return [`DRC 还有 ${Math.trunc(v)} 个错误`];
 				return [];
 			} },
-			reqList('G5_acceptance.screenshots', '用户看过的布线截图', 1, [], false, '["route-top.png"]'),
+			reqList('G6_acceptance.screenshots', '用户看过的布线截图', 1, [], false, '["route-top.png"]'),
 		],
 	};
 }

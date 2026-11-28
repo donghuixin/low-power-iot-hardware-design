@@ -17,6 +17,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from make_route_fixtures import PCB  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+import design_gate as DG  # noqa: E402
+
 NETS = ["", "GND", "VDD", "VBUS", "SW", "DEC1", "XIN", "XOUT", "USB_DP", "USB_DM", "RF_OUT", "RF_ANT",
         "SDA", "SCL", "INT1", "BTN", "LED", "TEST"]
 T, B = "F.Cu", "B.Cu"
@@ -108,7 +111,7 @@ def board():
 
 
 BRIEF = {
-    "kind": "lpiot-design-brief", "version": 1,
+    "kind": "lpiot-design-brief", "version": 2,
     "project": {"name": "BLE 运动传感器节点（演示）", "owner": "演示"},
     "roles": {"U1": "soc_rf", "U2": "dcdc", "L2": "rf_match", "U3": "imu"},
     "G0_requirements": {
@@ -148,7 +151,8 @@ BRIEF = {
         "power_nets": [{"net": "VBUS", "current_ma": 500, "width_mm": 0.5}, {"net": "VDD", "current_ma": 50, "width_mm": 0.3}],
         "acceptance": {"route_lint_min_score": 85, "drc_zero": True, "human_review": True},
     },
-    "G5_acceptance": {"route_report": "待填", "drc_errors": "待填", "screenshots": "待填"},
+    "G5_finish": DG.finish_template(),
+    "G6_acceptance": {"route_report": "待填", "drc_errors": "待填", "screenshots": "待填"},
     "confirmations": {},
 }
 

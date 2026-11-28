@@ -328,10 +328,11 @@ class PlanGate(unittest.TestCase):
             p = Path(d) / "plan.json"; p.write_text(json.dumps(self.PLAN), encoding="utf-8")
             import test_design_gate as TG
             brief = TG.confirmed_brief(d)
-            self.assertEqual(R.main(["gate", str(p), "--brief", str(brief)]), 1)
+            self.assertEqual(R.main(["gate", str(p), "--brief", str(brief)]), 3)          # 没点名网络：超出能力边界
+            self.assertEqual(R.main(["gate", str(p), "--brief", str(brief), "--nets", "SDA"]), 1)
             out = Path(d) / "plan-fixed.json"
             F.fix_plan(p, out)
-            self.assertEqual(R.main(["gate", str(out), "--brief", str(brief)]), 0)
+            self.assertEqual(R.main(["gate", str(out), "--brief", str(brief), "--nets", "SDA"]), 0)
             fixed = json.loads(out.read_text(encoding="utf-8"))
             self.assertTrue(all(s[6] == "SDA" and s[0] == "TOP" for s in fixed["segs"]))
             self.assertEqual(fixed["units"], "mil")
@@ -422,7 +423,7 @@ class RightAngle(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "plan.json"; p.write_text(json.dumps(plan), encoding="utf-8")
             brief = TG.confirmed_brief(d)
-            self.assertEqual(R.main(["gate", str(p), "--brief", str(brief)]), 1)
+            self.assertEqual(R.main(["gate", str(p), "--brief", str(brief), "--nets", "A"]), 1)
             out = Path(d) / "fixed.json"
             F.fix_plan(p, out)
-            self.assertEqual(R.main(["gate", str(out), "--brief", str(brief)]), 0)
+            self.assertEqual(R.main(["gate", str(out), "--brief", str(brief), "--nets", "A"]), 0)

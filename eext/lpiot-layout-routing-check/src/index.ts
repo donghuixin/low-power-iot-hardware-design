@@ -18,8 +18,8 @@ import type { AiConfig } from './ai';
 import type { Board, FixPlan, Gate, LayoutReport, Report } from './core';
 import extensionConfig from '../extension.json' with { type: 'json' };
 import { boardPrompt, callModel, DEFAULT_AI, priorityPrompt, violationPrompt } from './ai';
-import { analyze, status as briefStatus, template as briefTemplate, confirm as confirmGate, confirmTier, draftPriorities, gate, GATES, summary as gateSummary, layoutCheck, partsOf, planFix, requireStage, routingOrder, tierStates } from './core';
-import { applyChanges, locate, readBoard } from './eda';
+import { analyze, BOUNDARY, status as briefStatus, template as briefTemplate, buildFinishModel, confirm as confirmGate, confirmTier, draftPriorities, finishCheck, gate, GATES, summary as gateSummary, layoutCheck, migrate, partsOf, planFix, requireStage, routeScope, routingOrder, tierStates } from './core';
+import { applyChanges, locate, readBoard, readSilk } from './eda';
 
 const REQ = 'lpiot-req';
 const RES = 'lpiot-res';
@@ -85,7 +85,7 @@ async function projectKey(): Promise<string> {
 
 async function loadBrief(): Promise<any> {
 	const b = eda.sys_Storage.getExtensionUserConfig(await projectKey());
-	return b && typeof b === 'object' && b.kind === 'lpiot-design-brief' ? b : briefTemplate();
+	return b && typeof b === 'object' && b.kind === 'lpiot-design-brief' ? migrate(b) : briefTemplate();
 }
 
 async function saveBrief(b: any): Promise<void> {
@@ -115,7 +115,7 @@ async function handle(cmd: string, args: any = {}, source: Source = 'agent'): Pr
 		case 'check': {
 			await refresh();
 			const b = await loadBrief();
-			return { board: state.board, bbox: state.bbox, report: state.report, order: routingOrder(state.board!.nets, state.report!.classes), warnings: state.warnings, at: state.at, gate: { route: requireStage(b, 'route'), deliver: requireStage(b, 'deliver') } };
+			return { board: state.board, bbox: state.bbox, report: state.report, order: routingOrder(state.board!.nets, state.report!.classes), warnings: state.warnings, at: state.at, gate: { route: requireStage(b, 'route'), finish: requireStage(b, 'finish'), deliver: requireStage(b, 'deliver') } };
 		}
 		case 'briefGet':
 		case 'briefStatus':
@@ -209,12 +209,26 @@ async function handle(cmd: string, args: any = {}, source: Source = 'agent'): Pr
 			}
 			return { board: state.board, bbox: state.bbox, layout: state.layout, brief: briefView(b) };
 		}
+		case 'finishCheck': {
+			// 出图前检查：丝印、位号编号、泪滴（读不到泪滴和封装丝印线，转人工确认）；record=true 记为 G5 依据
+			await refresh();
+			const b = await loadBrief();
+			const silk = await readSilk();
+			const parts = partsOf(state.board!, b.roles ?? {}).map(p => ({ ref: p.ref, value: p.value, side: p.side, rect: p.rect }));
+			const model = buildFinishModel(state.board!, parts, silk.texts, [], state.report!.classes, { refCounts: silk.refCounts });
+			const report = finishCheck(model, b, Array.isArray(args.bom) ? args.bom : null);
+			if (args.record) {
+				b.G5_finish = { ...(b.G5_finish ?? {}), report: '扩展出图前检查', result: { ...report, at: new Date().toISOString() } };
+				await saveBrief(b);
+			}
+			return { board: state.board, bbox: state.bbox, model, report, warnings: [...(state.warnings ?? []), ...silk.warnings], brief: briefView(b) };
+		}
 		case 'routeRecord': {
 			if (!state.report)
 				await refresh();
 			const b = await loadBrief();
 			const p0 = state.report!.violations.filter(v => v.sev === 'P0').length;
-			b.G5_acceptance = { ...(b.G5_acceptance ?? {}), route_report: '扩展布线检查', route_result: { score: state.report!.score, pass: state.report!.pass, p0, at: new Date().toISOString() } };
+			b.G6_acceptance = { ...(b.G6_acceptance ?? {}), route_report: '扩展布线检查', route_result: { score: state.report!.score, pass: state.report!.pass, p0, at: new Date().toISOString() } };
 			await saveBrief(b);
 			return briefView(b);
 		}
@@ -254,6 +268,10 @@ async function handle(cmd: string, args: any = {}, source: Source = 'agent'): Pr
 		case 'gate': {
 			// 外部代理写线前的闸门：先查设计确认，再检查 args.board（mm 坐标）里的任意角度、锐角、锐角分支
 			await requireRoute('放行走线');
+			const planNets = [...new Set(((args.board?.nets ?? []) as any[]).filter(n => n?.segs?.length).map(n => String(n.name)))];
+			const scope = routeScope(await loadBrief(), Array.isArray(args.nets) ? args.nets : [], planNets);
+			if (scope.length)
+				throw new Error(`拒绝放行走线（超出能力边界）：\n${scope.map(m => `· ${m}`).join('\n')}`);
 			return gate(args.board);
 		}
 		case 'aiGet': {
@@ -272,7 +290,7 @@ async function handle(cmd: string, args: any = {}, source: Source = 'agent'): Pr
 			if (!state.report)
 				await refresh();
 			const miss = requireStage(await loadBrief(), 'route');
-			const gateNote = miss.length ? `设计确认闸门未放行（${miss.join('；')}）。请先指出还缺哪些设计信息、该问用户什么，只评审已有走线，不要给出直接动手布线的步骤。` : '';
+			const gateNote = `${miss.length ? `设计确认闸门未放行（${miss.join('；')}）。请先指出还缺哪些设计信息、该问用户什么，只评审已有走线，不要给出直接动手布线的步骤。` : ''}\n能力边界：${BOUNDARY}`;
 			const prompt = boardPrompt(state.report!, routingOrder(state.board!.nets, state.report!.classes), state.board!, [gateNote, args.note].filter(Boolean).join('\n'));
 			return { text: await callModel(aiConfig(), prompt), prompt };
 		}

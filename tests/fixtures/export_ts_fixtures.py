@@ -72,6 +72,28 @@ def main(out):
              "tiers": [[t["tier"], t["nets"], t["method"]] for t in brief["G4_routing_plan"]["priorities"]]}
     (d / "tier-expect.json.txt").write_text(json.dumps(tiers, ensure_ascii=False, indent=1), encoding="utf-8")
     print("tier-expect.json.txt")
+    # 出图前检查：中间模型 + Python 的检查结果；扩展的 finishCheck 要得出同样的问题
+    import copy
+    import finish_lint as FL
+    fb = json.loads((FIX / "finish-brief.json").read_text(encoding="utf-8"))
+    allpads = copy.deepcopy(fb)
+    allpads["G5_finish"]["teardrops"]["policy"] = "全部焊盘与过孔"
+    keyonly = copy.deepcopy(fb)
+    keyonly["G5_finish"]["silk"].update(designators="只印关键器件", orientation="全部 0°", jlc_order_no="板厂默认位置", process="高精度丝印")
+    keyonly["G5_finish"]["annotation"]["scheme"] = "保持现状"
+    cases = {}
+    for board in ("finish-good", "finish-bad"):
+        m = FL.extract_kicad(FIX / f"{board}.kicad_pcb")
+        for tag, br, bom in (("std", fb, None), ("allpads", allpads, None), ("keyonly", keyonly, ["U1", "R1", "C9"]), ("nobrief", None, None)):
+            rep = FL.run(m, br, bom)
+            cases[f"{board}/{tag}"] = {"board": board, "brief": tag, "bom": bom, "rules_hash": rep.get("rules_hash"),
+                                       "issues": [[v["rule"], v["sev"], v["refs"]] for v in rep["issues"]], "msgs": [v["msg"] for v in rep["issues"]]}
+        (d / f"finish-model-{board}.json.txt").write_text(json.dumps(m, ensure_ascii=False), encoding="utf-8")
+    fin = {"briefs": {"std": fb, "allpads": allpads, "keyonly": keyonly, "nobrief": None}, "cases": cases,
+           "questions": [[q[0], q[1], q[2], q[3]] for q in DG.FINISH_QUESTIONS],
+           "codes": [DG.code_of(json.loads((FIX / "brief-principles.json").read_text(encoding="utf-8")), g) for g in DG.GATES]}
+    (d / "finish-expect.json.txt").write_text(json.dumps(fin, ensure_ascii=False, indent=1), encoding="utf-8")
+    print("finish-expect.json.txt")
 
 
 if __name__ == "__main__":

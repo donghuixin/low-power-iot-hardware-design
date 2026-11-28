@@ -25,7 +25,7 @@ import readline from 'node:readline';
 import { WebSocketServer } from 'ws';
 
 export const PROTOCOL = 1;
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const WS_PORT = Number(process.env.LPIOT_WS_PORT ?? 49731);
 const HTTP_PORT = Number(process.env.LPIOT_HTTP_PORT ?? 49732);
 const HOME = process.env.LPIOT_HOME ?? path.join(os.homedir(), '.lpiot');
@@ -206,7 +206,8 @@ function briefSummary(v) {
 	};
 }
 
-const BRIEF_RULE = '布局布线前的强制确认流程（references/19-design-gate.md）：G0 需求与工艺、G1 板框外壳与固定件、G2 功能分区（用户看过布局截图）、G3 布局检查、G4 布线规划（布线优先级逐档确认）、G5 交付验收。G0–G4 未放行时 routing_fix_apply 和 routing_gate 会拒绝。';
+const BOUNDARY = '能力边界：本工具是检查图、改图，不是完全自由的自动布线。布线上只做检查已有布线（含几何修复），以及按用户点名的网络逐批布线（每批 ≤ 8 个网络、在已确认的优先级里）。用户要求“全局布线 / 把板子布完 / 剩下的都布了”时，先说明做不了并拒绝，请用户点名这一批网络，或自己用 EDA 的自动布线器布普通网络后再回来检查。';
+const BRIEF_RULE = `布局布线前的强制确认流程（references/19-design-gate.md）：G0 需求与工艺、G1 板框外壳与固定件、G2 功能分区（用户看过布局截图）、G3 布局检查、G4 布线规划（布线优先级逐档确认）、G5 丝印位号与泪滴（20 个决定逐项问用户）、G6 交付验收。G0–G4 未放行时 routing_fix_apply 和 routing_gate 会拒绝。${BOUNDARY}`;
 
 export const TOOLS = [
 	{ name: 'bridge_status', description: '本地桥和扩展的连接状态（枢纽 / 转发端、扩展版本与协议）', inputSchema: { type: 'object', properties: {} }, run: async () => (hub ? postHub({ tool: 'bridge_status' }, 10000) : status()) },
@@ -250,7 +251,12 @@ export const TOOLS = [
 		const r = await call('fixApply', { confirmed: false }, 600000);
 		return r?.cancelled ? { cancelled: true } : { removed: r.removed, added: r.added, score: r.report?.score };
 	} },
-	{ name: 'routing_gate', description: '写入走线前的闸门：先要求设计确认 G0–G4 已放行，再检查一批线段是否只有 0/45/90/135° 方向、拐角只有 135°（无直角、无锐角）。board = {layers: [...], nets: [{name, segs: [[层序号, x1, y1, x2, y2, 线宽, false]], vias: [], pads: [{ref, pin, l, x, y, w, h, rot, shape}]}]}，单位 mm', inputSchema: { type: 'object', properties: { board: { type: 'object' } }, required: ['board'] }, run: a => call('gate', { board: a.board }) },
+	{ name: 'finish_check', description: '出图前检查（G5）：丝印离焊盘、线宽字高、超出板框、重叠、位号缺失 / 指认不清 / 被器件盖住、阅读方向、底面镜像、板名版本与接口说明、订单号位置（SLK），位号未编号 / 重复 / 前缀与值不符 / 编号顺序 / BOM 不一致（ANN），泪滴（TDR，扩展读不到泪滴，转为人工确认）。G5 的决定没回答时先用 design_brief_status 把引导问题逐项转告用户，用户说“按推荐”才能填推荐值。record=true 记为 G5 依据；bom 是 BOM 里的位号列表。', inputSchema: { type: 'object', properties: { record: { type: 'boolean' }, bom: { type: 'array', items: { type: 'string' } }, limit: { type: 'number' } } }, run: async (a) => {
+		const r = await call('finishCheck', { record: !!a?.record, bom: a?.bom });
+		const rep = r.report;
+		return { p0: rep.p0, p1: rep.p1, unresolved_p1: rep.unresolved_p1, p2: rep.p2, p3: rep.p3, pass: rep.pass, teardrop_source: rep.teardrop_source, silk_graphics_source: rep.silk_graphics_source, issues: rep.issues.slice(0, a?.limit ?? 60), warnings: r.warnings, gate: r.brief?.status?.stages?.finish };
+	} },
+	{ name: 'routing_gate', description: `写入走线前的闸门：先要求设计确认 G0–G4 已放行，并且 nets 点名了这一批要布的网络（≤ 8 个、在已确认的优先级里、走线里不能夹带别的网络），再检查一批线段是否只有 0/45/90/135° 方向、拐角只有 135°（无直角、无锐角）。board = {layers: [...], nets: [{name, segs: [[层序号, x1, y1, x2, y2, 线宽, false]], vias: [], pads: [{ref, pin, l, x, y, w, h, rot, shape}]}]}，单位 mm。${BOUNDARY}`, inputSchema: { type: 'object', properties: { board: { type: 'object' }, nets: { type: 'array', items: { type: 'string' }, description: '用户点名的这一批网络' } }, required: ['board', 'nets'] }, run: a => call('gate', { board: a.board, nets: a.nets }) },
 ];
 
 // ------------------------------------------------------------------ 启动

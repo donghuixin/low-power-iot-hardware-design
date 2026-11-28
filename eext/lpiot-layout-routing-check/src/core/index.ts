@@ -1,4 +1,5 @@
 export * from './brief';
+export * from './finish';
 export * from './fix';
 export * from './geom';
 export * from './layout';

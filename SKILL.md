@@ -23,9 +23,23 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
    - **P3 建议**：可调试性、可生产性、成本优化。
 6. **不确定就说不确定。** 看不清的网络、缺失的页、没给的 BOM 值，直接列为"需要补充的信息"，不要猜一个值再基于它下结论。
 
+## 能力边界：布线只做检查和点名网络
+
+本 skill 在布线上只做两件事：
+
+1. **检查已有布线**（`route_lint.py`、扩展的布线检查），以及对已有走线的几何修复（`route_fix.py`：斜切直角、改正任意角度和抖动）。
+2. **按用户点名的网络逐批布线**：每批不超过 8 个网络，网络必须在已确认的 G4 布线优先级里。写入前用 `design_gate.py scope <brief> --nets A,B` 和 `route_lint.py gate plan.json --brief … --nets A,B` 检查，不通过不写。
+
+**“全局布线”“帮我把整板布完”“剩下的都布了”“自动布线”这类任务要在整板范围内搜索通道、协商拥塞，本 skill 做不了，也拒绝直接执行。** 遇到这类请求：
+
+- 第一句话就说清楚边界：能做检查和点名网络布线，不做全局布线；不要先动手布一部分再说。
+- 不自己挑网络去布，也不把“剩下的”“其余”“全部”当成网络列表。工具会拒绝 `*`、`全部`、`剩下的`这类写法，也会拒绝一次超过 8 个网络或走线里夹带没点名的网络。
+- 给用户两条路：(a) 点名这一批要布的网络（通常是当前这一档，例如“第 1 档：RF_OUT、RF_ANT”），确认后按批布；(b) 用户自己用 EDA 自带的自动布线器布普通网络，布完回来做检查和修复。
+- 只读的分析照常做：可以先跑检查、梳理优先级、指出哪些网络该先布，帮用户把下一批网络点名出来。
+
 ## 强制确认流程（不可跳过）
 
-本 skill 不接受“一句话做完整块板”。**摆放器件之前必须确认 G0–G1，布线之前（含自动布线、自动修复、通过 EDA 工具写走线）必须确认 G0–G4，宣布完成之前必须确认 G5。** 细则见 `references/19-design-gate.md`，状态记在项目目录的 `design-brief.json`。
+本 skill 不接受“一句话做完整块板”。**摆放器件之前必须确认 G0–G1，布线之前（含自动修复、通过 EDA 工具写走线）必须确认 G0–G4，导出 Gerber 之前必须确认 G5（丝印、位号编号、泪滴），宣布完成之前必须确认 G6。** 细则见 `references/19-design-gate.md`，状态记在项目目录的 `design-brief.json`。
 
 | 闸门 | 必须由用户给出并确认 |
 |---|---|
@@ -34,16 +48,18 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 | G2 功能分区 | 功能块与区域、信号与电源流向、**用户看过的布局截图** |
 | G3 布局检查 | `layout_lint.py --brief` 无 P0，基于当前分区；保留的问题由用户同意 |
 | G4 布线规划 | 每层用途、**布线优先级逐档确认**（按板子功能梳理：每档网络、理由、手工还是工具辅助）、差分对、电源网络电流、验收分数 |
-| G5 交付验收 | route_lint 达到验收分数且无 P0、原生 DRC 为零、用户看过布线截图 |
+| G5 丝印、位号编号与泪滴 | **逐项问过用户的 20 个决定**（丝印工艺与字高线宽、离焊盘距离、位号策略、文字方向、极性和 1 脚标记、接口按键说明、板名版本、警示与认证标志、订单号位置、底面丝印、编号方式与反标、泪滴策略与执行）、`finish_lint.py --brief` 无 P0 且 P1 都改了或由用户同意保留、用户看过丝印截图并核对过极性 |
+| G6 交付验收 | route_lint 达到验收分数且无 P0、原生 DRC 为零、用户看过布线截图 |
 
-1. 用户说“帮我布线”“自动布完”“一键完成”而闸门没放行时，**不动手**：先 `python scripts/design_gate.py status design-brief.json`（没有就 `init`），说明为什么要先确认，然后按 G0 → G1 → … 一次问一级缺的信息。能从原理图、板文件、外壳图读出来的先读出来请用户核对。只读的分析和检查可以先做。
+1. 用户说“帮我布线”“自动布完”“一键完成”时，先按上面的能力边界说明做不了全局布线；闸门没放行时**不动手**：先 `python scripts/design_gate.py status design-brief.json`（没有就 `init`），说明为什么要先确认，然后按 G0 → G1 → … 一次问一级缺的信息。能从原理图、板文件、外壳图读出来的先读出来请用户核对。只读的分析和检查可以先做。
 2. 不替用户填“待填”。用户说“你定”时给 2–3 个候选和取舍，让用户选。
 3. 每一级用 `design_gate.py summary` 把内容和确认码发给用户；G4 的布线优先级先用 `design_gate.py priorities --board 板子 --write` 梳理草稿，结合你对板子功能的理解修正（例如芯片内部稳压去耦脚归电源档），再从第 1 档起逐档 `summary T<档位>` 发给用户、逐档 `confirm-tier`，不能跳档，等用户回复包含确认码的原话后才 `confirm --quote`。**不得自己确认**，不得把早先的“好的”“继续”当确认。
-4. **不以“DRC 为零 / 全部连通”作为目标或停止条件**；完成 = G5 放行。
+4. **不以“DRC 为零 / 全部连通”作为目标或停止条件**；完成 = G6 放行。
 5. 用户不在场、隔夜或定时运行时，只做到下一道闸门为止，把摘要、确认码、截图和检查报告留给用户。
-6. 布线按功能块推进，每块截图并附 `route_lint.py lint` 结果给用户看；只有 G4 标为“工具辅助”的档位可以用自动布线器。
-7. G5 放行之前不说“完成了”“布好了”。
-8. `route_fix.py`、`route_lint.py gate` 和 EDA 扩展的写回在闸门未放行时会拒绝执行（退出码 3）；不要绕过，也不要直接调用内部函数代替。
+6. 布线按用户点名的网络逐批推进，每批截图并附 `route_lint.py lint` 结果给用户看；G4 标为“工具辅助”的档位由用户自己用 EDA 的自动布线器布，Claude 只做之后的检查和修复。
+7. 布线定稿后进入 G5：`python scripts/design_gate.py ask design-brief.json G5` 列出 20 个问题（每项带选项、推荐值和为什么要问），**原样发给用户，可以分两三次问，用户说“按推荐”才能填推荐值**；再跑 `finish_lint.py 板子 --brief design-brief.json --json finish-lint.json`，逐条处理（见 `references/27-silkscreen-annotation-teardrop.md`）。
+8. G6 放行之前不说“完成了”“布好了”。
+9. `route_fix.py`、`route_lint.py gate` 和 EDA 扩展的写回在闸门未放行或超出能力边界时会拒绝执行（退出码 3）；不要绕过，也不要直接调用内部函数代替。
 
 ## 扩展模块：高性能混合信号与医疗手持
 
@@ -243,7 +259,8 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 
 ## 工具
 
-- `scripts/design_gate.py init | status | summary <brief> G0…G5|T1…T9 | confirm <brief> G… --quote "用户原话" | priorities <brief> --board 板子 [--write] | confirm-tier <brief> <档位> --quote "用户原话" | require <brief> --stage place|route|deliver`：强制确认流程。生成待填模板、查看每级缺什么、生成发给用户的摘要和确认码、记录用户确认、按板子功能梳理布线优先级并逐档确认、检查能否进入摆放 / 布线 / 交付。
+- `scripts/design_gate.py init | status | ask <brief> G… | summary <brief> G0…G6|T1…T9 | confirm <brief> G… --quote "用户原话" | priorities <brief> --board 板子 [--write] | confirm-tier <brief> <档位> --quote "用户原话" | scope <brief> --nets A,B | require <brief> --stage place|route|finish|deliver`：强制确认流程。生成待填模板、查看每级缺什么、列出要问用户的问题（G5 带选项、推荐值和理由）、生成发给用户的摘要和确认码、记录用户确认、按板子功能梳理布线优先级并逐档确认、检查这一批网络是否在能力边界内、检查能否进入摆放 / 布线 / 出图 / 交付。
+- `scripts/finish_lint.py 板子.kicad_pcb --brief design-brief.json [--bom bom.csv] --json finish-lint.json [-o 报告.md]`：出图前检查。丝印 SLK-01…13（离焊盘距离、线宽字高、超出板框、重叠、位号缺失 / 指认不清 / 被器件盖住、阅读方向、底面镜像、1 脚与极性标记、板名版本与接口说明、订单号位置）、位号编号 ANN-01…05（未编号、重复、前缀与值不符、编号顺序与跳号、与 BOM 不一致）、泪滴 TDR-00…02（按策略缺泪滴、射频和差分线上加了泪滴、读不到泪滴时转人工确认）。
 - `scripts/layout_lint.py <板子.kicad_pcb | copper-pack.json> --brief design-brief.json [--json layout-lint.json]`：实板布局检查（LAY-01…15 + 就近原则 RTP），对照设计确认文件查固定件位置、功能分区、禁布区、天线净空与干扰源间距、IMU 应力与热、磁力计、电感与敏感传感器、电源流向、去耦和晶振负载电容距离（器件角色按位号和型号推断，`roles` 可覆盖）；JSON 报告是 G3 的依据。
 - `scripts/eda_bridge.py status | check | layout | export -o 板子.json | brief-pull | brief-push | priorities [--write] [--ai] | crosscheck`：经本地桥和嘉立创 EDA 扩展联动：导出编辑器里的板子给本地脚本、同步设计确认、让扩展梳理优先级、扩展与 Python 规则交叉核对（拓扑见 `references/26-eda-link.md`）。
 - `scripts/power_budget.py <config.json>`：由电池、常开负载、周期性事件计算平均电流、续航、各项占比，并检查峰值电流在电池内阻上的压降。配置示例见 `assets/power-budget-example.json`。做功耗预算时用它，不要心算。
@@ -280,7 +297,8 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 | `references/16-routing-constraints.md` | 落线前、落线时和评审走线时：八方向几何、线宽 / 线长 / 过孔 / 间距 / 层约束、质量评分、检查器与修复器、写入闸门、给 AI 的布线规程 |
 | `references/17-routing-principles.md` | 定布线顺序和评审走线时：布线优先级（关键信号优先）、就近原则、差分线原则、隔离原则及对应检查器 |
 | `references/18-routing-philosophy.md` | 开始 Layout 前和每个功能块布线时：边读懂、边查证、边思考、边设计的工作方法，来自 ADI AN-1142 与 TI ZHCAAE6B 的布线指导思想 |
-| `references/19-design-gate.md` | **任何摆放、布线、自动修复、宣布完成之前**：六道闸门要拿到的信息、AI 必须遵守的规则、确认码、工具里的强制点、`design-brief.json` 字段、布局检查规则 LAY-01…10、误用案例复盘 |
+| `references/19-design-gate.md` | **任何摆放、布线、自动修复、出图、宣布完成之前**：七道闸门要拿到的信息、能力边界、AI 必须遵守的规则、确认码、工具里的强制点、`design-brief.json` 字段、布局检查规则 LAY-01…15、误用案例复盘 |
+| `references/27-silkscreen-annotation-teardrop.md` | **布线定稿后、导出 Gerber 之前**：G5 的 20 个引导问题怎么问、嘉立创丝印工艺下限、SLK / ANN / TDR 规则与改法、嘉立创 EDA 和 KiCad 里的操作、扩展读不到的项目怎么人工确认 |
 | `references/26-eda-link.md` | 本地 AI 客户端、Python 脚本与嘉立创 EDA 扩展联动：拓扑（扩展 ⇄ 本地桥枢纽 ⇄ MCP / HTTP）、三种接入方式、高效检查的做法、安全与人工确认、版本一致性、排错 |
 | `references/20-hv-pulser-tr-safety.md` | 扩展模块：电压 >50 V；高压脉冲、T/R 与接收保护、高压电源与档位、储能、联锁、PCB 间距 |
 | `references/21-ultrasound-afe-clock.md` | 扩展模块：ADC ≥10 MSPS；超声 AFE 噪声、TGC、抗混叠、IQ 解调、时钟抖动与多普勒同源时钟 |

@@ -44,7 +44,7 @@ function fakeEda(boardName: 'route-bad' | 'principles-bad' | 'demo-node') {
 	const parts = (b.parts ?? []).reduce((m: any, p: any) => ((m[p.ref] = p.value), m), {});
 	const comps = [...byRef].map(([ref, ps]) => {
 		const pins = ps.map(padObj);
-		return { getState_Designator: () => ref, getState_OtherProperty: () => (parts[ref] ? { Value: parts[ref] } : {}), getState_Name: () => '', getAllPins: async () => pins };
+		return { getState_PrimitiveId: () => `comp-${ref}`, getState_Designator: () => ref, getState_OtherProperty: () => (parts[ref] ? { Value: parts[ref] } : {}), getState_Name: () => '', getAllPins: async () => pins };
 	});
 	const subs = new Map<string, ((m: any) => void)[]>();
 	const pub = (t: string, m: any) => (subs.get(t) ?? []).forEach(f => setTimeout(() => f(m), 0));
@@ -71,6 +71,9 @@ function fakeEda(boardName: 'route-bad' | 'principles-bad' | 'demo-node') {
 		pcb_PrimitiveVia: { getAll: async () => vias },
 		pcb_PrimitiveComponent: { getAll: async () => comps },
 		pcb_PrimitivePad: { getAll: async () => [] },
+		// 丝印：一段字太小的说明文字；U1 的位号放在 U1 上方，第二个器件的位号隐藏
+		pcb_PrimitiveString: { getAll: async () => [{ getState_Layer: () => 3, getState_Text: () => 'tiny', getState_X: () => 200, getState_Y: () => 200, getState_FontSize: () => 20, getState_LineWidth: () => 3, getState_Rotation: () => 0, getState_Mirror: () => false, getState_AlignMode: () => 5 }] },
+		pcb_PrimitiveAttribute: { getAll: async () => comps.map(c => ({ getState_Layer: () => 3, getState_Key: () => 'Designator', getState_Value: () => c.getState_Designator(), getState_ParentPrimitiveId: () => c.getState_PrimitiveId(), getState_X: () => -3000, getState_Y: () => -3000, getState_FontSize: () => 40, getState_LineWidth: () => 6, getState_Rotation: () => 0, getState_Mirror: () => false, getState_ValueVisible: () => c !== comps[1], getState_AlignMode: () => 5 })) },
 		pcb_PrimitivePolyline: { getAll: async () => [] },
 		// 两块示例板的底层都整层铺了 GND
 		pcb_PrimitivePour: { getAll: async () => [{ getState_Net: () => 'GND', getState_Layer: () => 2, getState_ComplexPolygon: () => ({ getSource: () => [-200, -200, 'L', 3000, -200, 3000, 3000, -200, 3000] }) }] },
@@ -157,6 +160,12 @@ it('设计确认未放行时拒绝写回；面板逐级确认后才能写回，�
 	for (const t of pd.tiers) v = await rpc(f, 'tierConfirm', { tier: t.tier });
 	v = await rpc(f, 'briefConfirm', { gate: 'G4', typed: v.status.gates.find((x: any) => x.gate === 'G4').code });
 	assert.equal(v.status.stages.route.length, 0);
+	// 能力边界：放行走线要点名网络，“全部”、太多网络、夹带没点名的网络都拒绝
+	const plan1 = { layers: ['TOP', 'BOTTOM'], nets: [{ name: 'SDA', segs: [[0, 0, 0, 5, 0, 0.2, false]], vias: [], pads: [] }] };
+	await assert.rejects(rpc(f, 'gate', { board: plan1 }), /能力边界/);
+	await assert.rejects(rpc(f, 'gate', { board: plan1, nets: ['全部'] }), /做不了/);
+	await assert.rejects(rpc(f, 'gate', { board: { ...plan1, nets: [...plan1.nets, { name: 'SCL', segs: [[0, 0, 1, 5, 1, 0.2, false]], vias: [], pads: [] }] }, nets: ['SDA'] }), /没点名/);
+	assert.equal((await rpc(f, 'gate', { board: plan1, nets: ['SDA'] })).pass, true);
 	await rpc(f, 'fixPlan');
 	const r = await rpc(f, 'fixApply');
 	assert.ok(r.added > 0 && r.removed > 0);
@@ -174,4 +183,20 @@ it('快速检查弹出得分', async () => {
 	const ext = loadExt(f.eda);
 	await ext.quickCheck();
 	assert.ok(f.log.some(l => l.startsWith('info 布线质量 59.1')));
+});
+
+it('出图前检查：读丝印文字和位号，读不到泪滴时转人工确认，记录为 G5 依据', async () => {
+	const f = fakeEda('principles-bad');
+	const ext = loadExt(f.eda);
+	ext.activate();
+	const r = await rpc(f, 'finishCheck', { record: true });
+	const rules = new Set(r.report.issues.map((v: any) => v.rule));
+	assert.ok(rules.has('SLK-03'), 'tiny 字高不够');
+	assert.ok(rules.has('SLK-06'), '位号隐藏');
+	assert.ok(rules.has('SLK-07'), '位号离器件太远');
+	assert.equal(r.report.teardrop_source, 'none');
+	assert.equal(r.report.silk_graphics_source, 'text');
+	assert.ok(r.model.texts.some((t: any) => t.kind === 'ref' && t.owner === 'U1'));
+	assert.equal(r.brief.brief.G5_finish.result.kind, 'lpiot-finish-lint');
+	assert.ok(r.brief.status.gates.find((g: any) => g.gate === 'G5').detail.some((m: string) => m.includes('推荐')));
 });

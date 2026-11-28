@@ -1,7 +1,8 @@
 /**
  * 嘉立创 EDA 专业版 ↔ 检查核心之间的适配：读板（mil → mm）、选中定位、写回修复（mm → mil，命令组可撤销）。
  */
-import type { Board, Net, Pad, Pt, Seg, Via } from './core';
+import type { Board, FinishText, Net, Pad, Pt, Seg, Via } from './core';
+import { textBBox } from './core';
 
 export const MIL = 0.0254; // mm / mil
 const mm = (v: number) => v * MIL;
@@ -245,4 +246,80 @@ export async function applyChanges(changes: { net: string; remove: string[]; add
 		throw e;
 	}
 	return { removed, added };
+}
+
+// ------------------------------------------------------------------ 丝印（出图前检查用）
+const SILK_LAYERS: Record<number, 'top' | 'bottom'> = { 3: 'top', 4: 'bottom' };
+
+/** 对齐方式 1…9 → 锚点比例（列：左 / 中 / 右，行：上 / 中 / 下；y 向上）。读不到时按居中。 */
+function anchorOf(mode: any): [number, number] {
+	const m = Number(mode);
+	if (!Number.isInteger(m) || m < 1 || m > 9)
+		return [0.5, 0.5];
+	return [Math.floor((m - 1) / 3) * 0.5, 1 - ((m - 1) % 3) * 0.5];
+}
+
+export interface SilkRead { texts: FinishText[]; refCounts: Record<string, number>; warnings: string[] }
+
+/**
+ * 读取顶层 / 底层丝印的文字和位号属性。嘉立创扩展 API 读不到封装自带的丝印线和泪滴，
+ * 所以模型里 silk_graphics_source = 'text'、teardrop_source = 'none'，这两项由用户在 G5 里人工确认。
+ */
+export async function readSilk(): Promise<SilkRead> {
+	const texts: FinishText[] = [];
+	const warnings: string[] = [];
+	const refCounts: Record<string, number> = {};
+	const owner = new Map<string, string>();
+	try {
+		for (const c of await eda.pcb_PrimitiveComponent.getAll()) {
+			const ref = c.getState_Designator() ?? '';
+			if (ref)
+				refCounts[ref] = (refCounts[ref] ?? 0) + 1;
+			try {
+				owner.set(c.getState_PrimitiveId(), ref);
+			}
+			catch {}
+		}
+	}
+	catch {
+		warnings.push('读取器件列表失败');
+	}
+	const push = (s: string, kind: FinishText['kind'], own: string, side: string, xMil: number, yMil: number, hMil: number, wMil: number, rot: number, mirror: boolean, hidden: boolean, align: any, id?: string) => {
+		const h = mm(hMil || 40);
+		const [ax, ay] = anchorOf(align);
+		const x = mm(xMil);
+		const y = mm(yMil);
+		texts.push({ text: s, kind, owner: own, side, x, y, h, w: mm(wMil || 6), rot: ((Number(rot) || 0) % 360 + 360) % 360, mirror: !!mirror, hidden, bbox: textBBox(x, y, Math.max(1, s.length) * h * 0.9, h, Number(rot) || 0, mirror ? 1 - ax : ax, ay), id });
+	};
+	try {
+		for (const t of await (eda as any).pcb_PrimitiveString.getAll()) {
+			const side = SILK_LAYERS[Number(t.getState_Layer())];
+			if (!side)
+				continue;
+			push(String(t.getState_Text() ?? ''), 'text', '', side, t.getState_X(), t.getState_Y(), t.getState_FontSize(), t.getState_LineWidth(), t.getState_Rotation(), t.getState_Mirror(), false, t.getState_AlignMode(), t.getState_PrimitiveId?.());
+		}
+	}
+	catch {
+		warnings.push('读取丝印文字失败');
+	}
+	try {
+		for (const a of await (eda as any).pcb_PrimitiveAttribute.getAll()) {
+			const side = SILK_LAYERS[Number(a.getState_Layer())];
+			const key = String(a.getState_Key() ?? '');
+			if (!side || !/^designator$/i.test(key))
+				continue;
+			const x = a.getState_X();
+			const y = a.getState_Y();
+			const own = owner.get(a.getState_ParentPrimitiveId?.()) ?? String(a.getState_Value() ?? '');
+			if (x === null || x === undefined || y === null || y === undefined) {
+				warnings.push(`${own} 的位号位置读不到，按隐藏处理`);
+				continue;
+			}
+			push(String(a.getState_Value() ?? own), 'ref', own, side, x, y, a.getState_FontSize(), a.getState_LineWidth(), a.getState_Rotation(), a.getState_Mirror(), a.getState_ValueVisible() === false, a.getState_AlignMode(), a.getState_PrimitiveId?.());
+		}
+	}
+	catch {
+		warnings.push('读取位号属性失败');
+	}
+	return { texts, refCounts, warnings };
 }

@@ -1,6 +1,6 @@
 {
 	"kind": "lpiot-design-brief",
-	"version": 1,
+	"version": 2,
 	"project": {
 		"name": "BLE 运动传感器节点（演示）",
 		"owner": "演示"
@@ -174,7 +174,54 @@
 			"human_review": true
 		}
 	},
-	"G5_acceptance": {
+	"G5_finish": {
+		"silk": {
+			"process": "标准丝印",
+			"text_height_mm": 1.0,
+			"line_width_mm": 0.15,
+			"pad_clearance_mm": 0.15,
+			"designators": "全部显示",
+			"orientation": "0° 和 90°",
+			"polarity": "芯片 1 脚圆点，LED 阴极横杠，排针 1 脚方焊盘加短线",
+			"labels": [
+				{
+					"ref": "J1",
+					"text": "UART"
+				},
+				{
+					"ref": "SW1",
+					"text": "RST"
+				}
+			],
+			"board_marking": {
+				"name": "FINISH-DEMO",
+				"version": "V1.0"
+			},
+			"warnings": [
+				"3V3 ONLY"
+			],
+			"compliance": "无",
+			"jlc_order_no": "指定位置",
+			"bottom_silk": "需要",
+			"review": {
+				"screenshot": "待填：用户看过的丝印截图",
+				"polarity_checked": "待填：是否已对照原理图逐个核对极性器件和 1 脚标记？（已核对）"
+			}
+		},
+		"annotation": {
+			"scheme": "按位置重新编号",
+			"back_annotated": "是",
+			"bom": ""
+		},
+		"teardrops": {
+			"policy": "仅过孔和插件孔",
+			"exclude_rf_diff": "去掉",
+			"done": "待填：泪滴执行了吗？（已执行并重新铺铜 / 不加泪滴）"
+		},
+		"report": "待填",
+		"accepted_exceptions": "无"
+	},
+	"G6_acceptance": {
 		"route_report": "待填",
 		"drc_errors": "待填",
 		"screenshots": "待填"
