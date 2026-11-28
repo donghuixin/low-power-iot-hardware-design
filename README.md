@@ -198,6 +198,8 @@ $ python scripts/route_lint.py lint fixed.kicad_pcb
 
 **布线指导思想**（[`references/18-routing-philosophy.md`](references/18-routing-philosophy.md)）：按功能块边读懂电路、边查证资料（联网或读文件前先征得同意）、边定约束、边布线、边检查；综合 ADI AN-1142《高速 ADC PCB 布局布线技巧》与 TI ZHCAAE6B《电机驱动器电路板布局的最佳实践》——电流走环路、单一完整地加分区、去耦电容与芯片同层不隔过孔、裸露焊盘过孔阵列、开尔文连接、优先 45° 拐弯、绝不出现随机角度。
 
+**嘉立创 EDA 扩展**（[`eext/lpiot-routing-check`](eext/lpiot-routing-check)）：把同一套检查搬进嘉立创 EDA 专业版——读当前 PCB 检查打分，用板子动画讲清楚问题（电流流动、回流路径、去耦回路、布线顺序回放、修复前后形变），一键修复几何问题（可撤销），接入你自己的大模型做解读，并提供本地 HTTP / MCP 桥给 Claude Code 等 AI 代理调用。安装包在 [`release/`](eext/lpiot-routing-check/release)。
+
 **走线原则**（[`references/17-routing-principles.md`](references/17-routing-principles.md)，检查器 `scripts/route_principles.py`）：
 
 - **关键信号优先**：射频 → 晶振 → 开关回路与高压 → 高速差分 → 时钟 → 模拟 → 电源 → 一般信号 → 地。`route_lint.py order` 按档位给出逐网布线顺序；`lint` 会抓“优先级倒挂”——关键网络因为直连通道被一般信号占了而绕行或打孔。
@@ -248,6 +250,8 @@ scripts/
   route_lint.py                  布线几何检查与评分、写入 EDA 前的闸门、生成布线约束文件
   route_fix.py                   把任意角度、锐角、抖动、斜出焊盘的走线修成八方向折线
   route_principles.py            走线原则检查（就近、差分、优先级倒挂、隔离）与推荐布线顺序
+eext/
+  lpiot-routing-check/           嘉立创 EDA 专业版扩展：布线检查面板、动画、修复写回、AI 接口、本地 MCP 桥
 assets/
   layout-planner.html            布局规划器（单文件，内置示例）
   layout-planner/                规划器源码与 Three.js（MIT）

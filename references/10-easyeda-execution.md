@@ -65,6 +65,8 @@
 
 ## PCB 走线写入前的闸门
 
+用户装了布线检查助手扩展（`eext/lpiot-routing-check`）并运行了本地 MCP 桥时，直接用它的 `routing_gate` 做闸门、`routing_check` 回读评分、`routing_fix_plan` / `routing_fix_apply` 修复，不必自己导出文件；没装时按下面的步骤做。
+
 通过扩展 API 往 PCB 写走线（`eda.pcb_PrimitiveLine.create(net, layer, startX, startY, endX, endY, lineWidth, primitiveLock)`，坐标和线宽单位是 mil）时，几何必须先离线算好、过闸门，再整批写入。规则与评分见 `16-routing-constraints.md`。
 
 1. **从焊盘真实几何出发**：回读两端焊盘的中心、尺寸和角度，确定长轴；第一段沿长轴直出到焊盘外，再拐弯。

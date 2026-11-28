@@ -1,0 +1,70 @@
+{
+	"name": "lpiot-routing-check",
+	"uuid": "c0417a1a448044239e2d8f06ac1b5464",
+	"displayName": "布线检查助手 / Routing Check Assistant",
+	"description": "PCB 走线检查与评分：任意角度、锐角、抖动、出焊盘方向、过孔预算、绕行、就近原则、差分对、布线优先级；带板子动画、一键修复预览和 AI 解读接口。",
+	"version": "0.1.0",
+	"publisher": "donghuixin",
+	"engines": {
+		"eda": "^3.2.0"
+	},
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "github",
+		"url": "https://github.com/donghuixin/low-power-iot-hardware-design"
+	},
+	"categories": "PCB",
+	"keywords": [
+		"PCB",
+		"布线",
+		"Routing",
+		"DRC",
+		"AI",
+		"差分",
+		"检查"
+	],
+	"images": {
+		"logo": "./images/logo.png",
+		"banner": "./images/banner.png"
+	},
+	"homepage": "https://github.com/donghuixin/low-power-iot-hardware-design/tree/main/eext/lpiot-routing-check",
+	"bugs": "https://github.com/donghuixin/low-power-iot-hardware-design/issues",
+	"activationEvents": {},
+	"entry": "./dist/index",
+	"dependentExtensions": {},
+	"headerMenus": {
+		"pcb": [
+			{
+				"id": "lpiotRouting",
+				"title": "布线检查",
+				"menuItems": [
+					{
+						"id": "openPanel",
+						"title": "打开布线检查面板",
+						"registerFn": "openPanel"
+					},
+					{
+						"id": "quickCheck",
+						"title": "快速检查",
+						"registerFn": "quickCheck"
+					},
+					{
+						"id": "connectAgent",
+						"title": "连接本地 AI 助手…",
+						"registerFn": "connectAgent"
+					},
+					{
+						"id": "disconnectAgent",
+						"title": "断开本地 AI 助手",
+						"registerFn": "disconnectAgent"
+					},
+					{
+						"id": "about",
+						"title": "关于",
+						"registerFn": "about"
+					}
+				]
+			}
+		]
+	}
+}

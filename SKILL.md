@@ -226,6 +226,7 @@ description: 低功耗物联网(IoT)硬件设计与评审的完整流程：嘉�
 - `scripts/fab_rules.py show | template | import <工艺表> | read <设计文件…> | check <设计文件…> [--profile 档案.json] | emit --tier <档位> --layers N`：读取板厂工艺（内置 `assets/fab-profiles/jlcpcb.json`，也可导入用户的工艺表）、读取设计规则与实际最小线宽和过孔、对照价格档位、生成 KiCad 规则和网络类建议。只依赖标准库。
 - `scripts/extract_copper.py <board.kicad_pcb> | --gerber ... --outline ... --ipc356 ... [--project 布局.json] -o copper-pack.json`：从布好的 PCB 提取铜皮，生成验证器的铜皮数据包（需要 numpy、scipy、Pillow），同时附上布线质量检查结果。
 - `scripts/route_lint.py lint <板子.kicad_pcb | copper-pack.json> | gate <plan.json> | constraints <板子> --layers N`：布线几何检查与质量评分（VF-16…30）、写入 EDA 前的八方向闸门、生成布线约束文件和网络类推导。
+- `eext/lpiot-routing-check/`：嘉立创 EDA 专业版扩展（同一套规则的 TypeScript 版），用户在编辑器里点“布线检查”即可检查、看动画、预览并写回修复；`node bridge/bridge.mjs --mcp` 起本地 MCP 服务后，Claude 可以通过 `routing_check`、`routing_order`、`routing_locate`、`routing_fix_plan`、`routing_fix_apply`、`routing_gate` 直接操作用户正在编辑的板子（写回前编辑器会弹窗请用户确认）。
 - `scripts/route_lint.py order <板子>`：按布线优先级给出逐网布线顺序；就近、差分、优先级倒挂、隔离检查在 `scripts/route_principles.py`，随 `lint` 一起运行。
 - `scripts/route_fix.py <板子.kicad_pcb | plan.json> [-o 输出] [--diff diff.json]`：把任意角度、锐角、抖动、斜出焊盘、悬空线头和重叠线段自动修成八方向折线，保持连通关系和间距，修不了的标为 needs_manual。
 - `scripts/hw_calc.py`：常用小计算——I2C 上拉取值范围 (`i2c-pullup`)、脉冲负载所需储能电容 (`bulk-cap`)、分压器电流与输出阻抗 (`divider`)、晶体负载电容 (`xtal`)、续航 (`life`)。运行 `python scripts/hw_calc.py -h` 查看参数。
