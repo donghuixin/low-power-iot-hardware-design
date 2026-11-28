@@ -10,6 +10,9 @@
     python design_gate.py summary design-brief.json G2          # 给用户看的摘要 + 确认码
     python design_gate.py confirm design-brief.json G2 --quote "确认 G2-3fa9c1"
     python design_gate.py require design-brief.json --stage place|route|deliver
+    python design_gate.py priorities design-brief.json --board board.kicad_pcb --write   # 按板子功能梳理网络优先级草稿
+    python design_gate.py summary design-brief.json T1        # 第 1 档的网络、理由、走法和确认码
+    python design_gate.py confirm-tier design-brief.json 1 --quote "确认 T1-xxxxxx"
 
 确认规则：
   - 只有用户能确认。AI 必须把 summary 的内容和确认码发给用户，等用户回复包含确认码的原话，
@@ -17,6 +20,8 @@
   - 每个闸门的确认码由它和前面所有闸门的内容算出。前面任何内容被改，后面的确认自动失效。
   - 在终端里也可以 --tty，由用户亲手输入确认码。
   - require 不通过时退出码为 3；route_fix.py、route_lint.py gate 和 EDA 扩展的写回都会调用它。
+  - 布线优先级按档位逐档确认：第 n 档的确认码由第 1…n 档的内容算出，必须先确认前一档；
+    所有档位确认后 G4 才算信息齐全，再整体确认 G4。
 """
 from __future__ import annotations
 
@@ -262,6 +267,139 @@ def req_drc_zero(b, base=None):
     return []
 
 
+def tier_list(b):
+    v = get(b, "G4_routing_plan.priorities")
+    return [t for t in v if isinstance(t, dict)] if isinstance(v, list) else []
+
+
+def tier_hash(b, idx):
+    """第 idx 档（从 0 数）的哈希：第 1…idx+1 档的内容，外加 G0–G3 的哈希（前面改了，档位确认也作废）。"""
+    tiers = [{k: v for k, v in t.items() if k != "confirmed"} for t in tier_list(b)[: idx + 1]]
+    return hashlib.sha256(canonical({"base": gate_hash(b, "G3"), "tiers": tiers}).encode("utf-8")).hexdigest()
+
+
+def tier_code(b, idx):
+    t = tier_list(b)[idx]
+    return f"T{t.get('tier', idx + 1)}-{tier_hash(b, idx)[:6]}"
+
+
+def tier_states(b):
+    """[(档位, 档名, 状态, 确认码)]，状态：confirmed / pending / blocked / stale。"""
+    out, prev_ok = [], True
+    conf = (b.get("confirmations") or {}).get("tiers") or {}
+    for i, t in enumerate(tier_list(b)):
+        key = str(t.get("tier", i + 1))
+        c = conf.get(key)
+        code = tier_code(b, i)
+        if c and c.get("hash") == tier_hash(b, i):
+            st = "confirmed"
+        elif not prev_ok:
+            st = "blocked"
+        else:
+            st = "stale" if c else "pending"
+        out.append((t.get("tier", i + 1), t.get("name", ""), st, code))
+        prev_ok = st == "confirmed"
+    return out
+
+
+def req_tiers_confirmed(b, base=None):
+    sts = tier_states(b)
+    left = [f"第 {t} 档{('（' + n + '）') if n else ''}" for t, n, st, _ in sts if st != "confirmed"]
+    if sts and left:
+        return [f"布线优先级还要逐档确认：{'、'.join(left[:4])}{' 等' if len(left) > 4 else ''}（design_gate.py summary <brief> T<档位>）"]
+    return []
+
+
+def confirm_tier(b, tier, quote, by="user"):
+    tiers = tier_list(b)
+    idx = next((i for i, t in enumerate(tiers) if str(t.get("tier", i + 1)) == str(tier)), None)
+    if idx is None:
+        raise SystemExit(f"没有第 {tier} 档；先用 priorities 梳理或在 G4_routing_plan.priorities 里写好")
+    for i, (t, n, st, _) in enumerate(tier_states(b)[:idx]):
+        if st != "confirmed":
+            raise SystemExit(f"不能确认：先确认第 {t} 档（{n}）")
+    code = tier_code(b, idx)
+    if not quote or code.lower() not in re.sub(r"\s+", "", quote).lower():
+        raise SystemExit(f"不能确认：用户的原话里没有确认码 {code}")
+    b.setdefault("confirmations", {}).setdefault("tiers", {})[str(tier)] = {
+        "code": code, "hash": tier_hash(b, idx), "quote": quote.strip()[:500], "by": by,
+        "at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")}
+    return code
+
+
+def tier_summary(b, tier):
+    tiers = tier_list(b)
+    idx = next((i for i, t in enumerate(tiers) if str(t.get("tier", i + 1)) == str(tier)), None)
+    if idx is None:
+        return f"没有第 {tier} 档"
+    t = tiers[idx]
+    st = dict(((str(x[0]), x[2]) for x in tier_states(b)))[str(t.get("tier", idx + 1))]
+    lines = [f"【第 {t.get('tier')} 档 · {t.get('name', '')}】（{ {'confirmed': '已确认', 'pending': '待确认', 'blocked': '先确认前一档', 'stale': '内容改过，需要重新确认'}[st] }）",
+             f"网络：{'、'.join(t.get('nets', []))}", f"为什么排在这一档：{t.get('why', '')}"]
+    for nm, why in (t.get("notes") or {}).items():
+        lines.append(f"  · {nm}：{why}")
+    lines += [f"走法：{t.get('method', '')}", f"规则：{t.get('rules', '')}"]
+    if st in ("pending", "stale"):
+        lines += ["", f"网络归档、走法和规则都同意，请回复：确认 {tier_code(b, idx)}；要调整（挪档、改走法）请直接说。"]
+    return "\n".join(lines)
+
+
+CLASS_ZH = {"RF50": "射频 50 Ω", "XTAL": "晶振", "SW": "开关节点", "HV": "高压", "USB90": "USB 差分", "DIFF100": "100 Ω 差分",
+            "CLK": "时钟", "ANALOG": "模拟", "PWR_MAIN": "主电源", "PWR_LOW": "电源", "SIG": "一般信号", "GND": "地"}
+ROLE_ZH = {"antenna": "天线", "rf_match": "射频匹配", "crystal": "晶振", "inductor": "电感", "connector": "接口", "cap": "电容", "res": "电阻",
+           "diode": "二极管", "ic": "芯片", "soc_rf": "无线 SoC", "dcdc": "DCDC", "ldo": "LDO", "charger": "充电", "imu": "IMU", "button": "按键",
+           "testpoint": "测试点", "battery": "电池", "magnetometer": "磁力计", "temp_humidity": "温湿度", "rf_module": "无线模组"}
+
+RULES_BY_CLASS = {
+    "RF50": "50 Ω 共面波导（线宽按叠层计算），不打过孔、不分支，两侧密打地过孔，拐角 135° 或圆弧",
+    "XTAL": "≤ 5 mm、不打过孔，负载电容贴晶振，下方完整地，远离开关节点和时钟",
+    "SW": "热回路面积最小，开关节点铜皮最小，线宽 ≥ 0.6 mm",
+    "HV": "先按电压定间距和爬电距离，再布线",
+    "USB90": "90 Ω 差分，同层、并行、等距、对内等长 ≤ 0.5 mm，过孔成对",
+    "DIFF100": "100 Ω 差分，同层、并行、等距、对内等长 ≤ 0.13 mm，过孔成对",
+    "CLK": "串阻贴驱动端，少拐弯少过孔，远离模拟和射频",
+    "ANALOG": "远离攻击网络，走在完整地正上方，必要时包地",
+    "PWR_MAIN": "按电流定线宽（见电源网络表），先干线后支路，去耦就近",
+    "PWR_LOW": "按电流定线宽（见电源网络表），去耦电容贴引脚",
+    "SIG": "八方向、拐角只用 135°，总线成束等距",
+    "GND": "最后铺铜、补缝合过孔，修补被切开的地",
+}
+
+
+def draft_priorities(pack):
+    """按网络类和布线优先级档位梳理草稿：[{tier, name, classes, nets, notes, why, method, rules}]。"""
+    import route_principles as RP
+    RL = _rl()
+    nets = [RL.norm_net(n) for n in pack.get("nets", [])]
+    import layout_lint as LL
+    values = {p["ref"]: p.get("value") for p in pack.get("parts", [])}
+    classes, notes = {}, {}
+    for n in nets:
+        c, _, why = RL.infer_class(n["name"], n["pads"])
+        classes[n["name"]] = c
+        notes[n["name"]] = "按网络名判断" if "网络名匹配" in why else why
+    RL.upgrade_pairs(classes, nets, RL.merge_cons(None), [])
+    for n in nets:
+        refs = []
+        for p in n["pads"]:
+            r = p["ref"]
+            if r and r not in refs:
+                refs.append(r)
+        lab = [f"{r}（{ROLE_ZH.get(LL.role_of(r, values.get(r), {}), '')}{(' ' + values[r]) if values.get(r) else ''}）".replace("（）", "") for r in refs[:5]]
+        notes[n["name"]] = f"{CLASS_ZH.get(classes[n['name']], classes[n['name']])}，{notes[n['name']]}；连接 {'、'.join(lab)}{' 等' if len(refs) > 5 else ''}"
+    rows = RP.routing_order(nets, classes)
+    out = []
+    for t, name, cls, why in RP.TIERS:
+        ns = [r["net"] for r in rows if r["tier"] == t]
+        if not ns:
+            continue
+        out.append({"tier": t, "name": name, "classes": sorted({classes[x] for x in ns}), "nets": ns,
+                    "notes": {x: notes[x] for x in ns}, "why": why,
+                    "method": "铺铜" if t == 9 else ("工具辅助" if t == 8 else "手工"),
+                    "rules": "；".join(RULES_BY_CLASS[c] for c in sorted({classes[x] for x in ns}) if c in RULES_BY_CLASS)})
+    return out
+
+
 REQUIRE = {
     "G0": [
         req_text("project.name", "项目名"),
@@ -296,6 +434,7 @@ REQUIRE = {
         req_list("G4_routing_plan.stackup", "叠层用途", 1, ("layer", "use")),
         req_stackup_layers,
         req_list("G4_routing_plan.priorities", "布线优先级", 1, ("tier", "nets", "method")),
+        req_tiers_confirmed,
         req_list("G4_routing_plan.diff_pairs", "差分对", allow_none=True),
         req_list("G4_routing_plan.power_nets", "电源网络与电流", 1, ("net", "current_ma")),
         req_min_score,
@@ -396,6 +535,9 @@ def status_text(b, base=None):
             lines.append(f"      · 确认码 {det[0].split('：')[-1]}；用 summary 把内容发给用户，等用户回复“确认 {code_of(b, g)}”")
         elif st == "blocked":
             lines.append(f"      · {det[0]}")
+        if g == "G4" and tier_list(b):
+            for t, n, tst, code in tier_states(b):
+                lines.append(f"      第 {t} 档 {n}：{ {'confirmed': '已确认', 'pending': '待确认 ' + code, 'blocked': '等前一档', 'stale': '已失效 ' + code}[tst] }")
     for s, gs in STAGES.items():
         ok = all(gate_state(b, g, base)[0] == "confirmed" for g in gs)
         lines.append(f"  {'✓' if ok else '✗'} {STAGE_NAME[s]}（需要 {'、'.join(gs)}）")
@@ -449,6 +591,12 @@ def require(b, stage, base=None):
     return out
 
 
+def _rl():
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import route_lint
+    return route_lint
+
+
 def require_or_exit(brief_path, stage):
     """给其他脚本调用：不满足就打印原因并退出 3。"""
     if not brief_path:
@@ -476,9 +624,17 @@ def main(argv=None):
     p = sub.add_parser("status", help="各闸门的状态")
     p.add_argument("brief")
     p.add_argument("--json", action="store_true")
-    p = sub.add_parser("summary", help="生成发给用户核对的摘要和确认码")
+    p = sub.add_parser("summary", help="生成发给用户核对的摘要和确认码（G0…G5，或 T1…T9 某一档优先级）")
     p.add_argument("brief")
-    p.add_argument("gate", choices=GATES)
+    p.add_argument("gate")
+    p = sub.add_parser("priorities", help="按板子功能梳理网络优先级草稿")
+    p.add_argument("brief")
+    p.add_argument("--board", required=True, help=".kicad_pcb 或 copper-pack.json（也可以是 eda_bridge.py export 导出的板子）")
+    p.add_argument("--write", action="store_true", help="写进 G4_routing_plan.priorities（会清掉已有的档位确认）")
+    p = sub.add_parser("confirm-tier", help="记录用户对某一档优先级的确认（必须带用户原话）")
+    p.add_argument("brief")
+    p.add_argument("tier")
+    p.add_argument("--quote", required=True)
     p = sub.add_parser("confirm", help="记录用户的确认（必须带用户原话）")
     p.add_argument("brief")
     p.add_argument("gate", choices=GATES)
@@ -509,7 +665,28 @@ def main(argv=None):
             print(status_text(b, base))
         return 0
     if a.cmd == "summary":
-        print(summary_text(b, a.gate, base))
+        if re.fullmatch(r"[Tt]\d+", a.gate):
+            print(tier_summary(b, a.gate[1:]))
+        elif a.gate in GATES:
+            print(summary_text(b, a.gate, base))
+        else:
+            raise SystemExit("gate 只能是 G0…G5 或 T1…T9")
+        return 0
+    if a.cmd == "priorities":
+        pack, _ = _rl().load_any(a.board)
+        draft = draft_priorities(pack)
+        for t in draft:
+            print(f"第 {t['tier']} 档 {t['name']}（{t['method']}）：{'、'.join(t['nets'])}")
+        if a.write:
+            b.setdefault("G4_routing_plan", {})["priorities"] = draft
+            (b.get("confirmations") or {}).pop("tiers", None)
+            save(a.brief, b)
+            print(f"已写入 {a.brief}。这是按网络名和连接关系推断的草稿：结合板子的功能核对每一档，再逐档发给用户确认。")
+        return 0
+    if a.cmd == "confirm-tier":
+        code = confirm_tier(b, a.tier, a.quote)
+        save(a.brief, b)
+        print(f"已记录第 {a.tier} 档的确认（{code}）。")
         return 0
     if a.cmd == "code":
         print(code_of(b, a.gate))

@@ -39,7 +39,7 @@
 | **G1 机械约束** | 板子长什么样、什么东西的位置已经被外壳定死 | 板框尺寸或外壳导出的 DXF、外壳材料与限高、固定孔（没有写“无”）、**每个固定件**（接口、按键、灯、天线、电池、传感器开窗）贴哪条边、沿边位置与容差、禁布区（没有写“无”） | **开始摆放器件** |
 | **G2 功能分区** | 每个功能块放在哪 | 至少两个功能块，每块的器件位号、区域（左 / 右 / 上 / 下 / 角 / 三分之一，或板框比例坐标）、理由；电源与信号流向；**用户看过并认可的布局截图** | 布局检查 |
 | **G3 布局检查** | 摆放有没有问题 | `layout_lint.py --brief` 的 JSON 报告，无 P0，且基于当前的 G0–G2；用户同意保留的 P1/P2 及理由（没有写“无”） | 布线规划 |
-| **G4 布线规划** | 怎么布、先布什么、什么算合格 | 每层用途（层数要对上）；布线优先级表（档位、网络、手工还是工具辅助、规则）；差分对（没有写“无”）；电源网络与电流；验收分数（route_lint ≥ 75，建议 ≥ 80） | **开始布线**：手工布线、工具辅助布线、`route_fix.py`、`route_lint.py gate`、扩展写回 |
+| **G4 布线规划** | 怎么布、先布什么、什么算合格 | 每层用途（层数要对上）；布线优先级表（档位、网络、每个网络的作用、手工还是工具辅助、规则），**逐档确认**；差分对（没有写“无”）；电源网络与电流；验收分数（route_lint ≥ 75，建议 ≥ 80） | **开始布线**：手工布线、工具辅助布线、`route_fix.py`、`route_lint.py gate`、扩展写回 |
 | **G5 交付验收** | 布完了吗 | `route_lint.py lint --json` 报告达到验收分数且无 P0；EDA 原生 DRC 错误数为 0；用户看过的布线截图 | **宣布完成、交付打样** |
 
 每一级都建立在前一级上：前面的内容一改，后面的确认自动失效，必须重新确认。
@@ -97,6 +97,7 @@ python scripts/design_gate.py confirm design-brief.json G1 --quote "确认 G1-4c
 | 通过 EDA MCP 写走线（`10-easyeda-execution.md`） | route | 写入前先跑 `require --stage route`，不通过不写 |
 | 扩展：写回修复、MCP `routing_fix_apply`、`routing_gate` | G0–G4 已在面板确认 | 拒绝并提示打开“设计确认” |
 | 扩展：MCP `design_brief_confirm` | — | 不存在：确认只能在面板里做 |
+| 扩展：布线优先级逐档确认 | 前一档已确认 | 只接受面板里的点击；AI 代理调用会被拒绝 |
 
 只读的检查（`route_lint.py lint`、`order`、`layout_lint.py`、扩展的检查与动画）不受闸门限制，但没有设计确认文件时，报告顶部会说明哪些检查没做。
 
@@ -109,7 +110,8 @@ python scripts/design_gate.py confirm design-brief.json G1 --quote "确认 G1-4c
 - `G1_mechanical.keepouts[]`：`{rect_frac: [fx0, fy0, fx1, fy1], reason}`（板框比例，原点左下）或 `{rect_mm: [x0, y0, x1, y1], reason}`（板文件坐标）。
 - `G2_partition.blocks[]`：`{name, parts: [...], region, why}`。`region` 可写 `left`、`right`、`top`、`bottom`、`top-left`、`top-right`、`bottom-left`、`bottom-right`、`center`、`left-third`、`middle-third`、`right-third`、`top-third`、`bottom-third`，或比例矩形。天线的匹配网络放进天线所在的块，就不会被当成占用净空区。
 - `G3_layout_check.report`：`layout_lint.py 板子 --brief design-brief.json --json layout-lint.json` 的输出。报告里记着 G0–G2 的哈希，分区一改就要重新跑。
-- `G4_routing_plan.priorities[]`：`{tier, class, nets, method, rules}`。`method` 写“手工”或“工具辅助”。档位顺序参照 `17-routing-principles.md`：射频 → 晶振 → 开关回路与高压 → 高速差分 → 时钟 → 模拟 → 电源 → 一般信号 → 地。
+- `G4_routing_plan.priorities[]`：`{tier, name, classes, nets, notes: {网络: 作用}, why, method, rules}`。`method` 写“手工”“工具辅助”或“铺铜”。档位顺序参照 `17-routing-principles.md`：射频 → 晶振 → 开关回路与高压 → 高速差分 → 时钟 → 模拟 → 电源 → 一般信号 → 地。`design_gate.py priorities --board 板子 --write`（或扩展的“从板子梳理”）按网络名、连接的器件（位号与型号推断角色）和网络类生成草稿，AI 再结合板子功能修正。
+- **逐档确认**：第 n 档的确认码 `T<档位>-xxxxxx` 由第 1…n 档的内容和 G0–G3 的哈希算出，必须先确认前一档；所有档位确认后 G4 才算信息齐全，再整体确认 G4。挪动网络或改走法，从这一档往后的确认自动失效。记录在 `confirmations.tiers`。
 - `G5_acceptance`：`route_report`（`route_lint.py lint 板子 --json route-lint.json`）、`drc_errors`（数字）、`screenshots`（文件名列表）。
 
 ### 布局检查器 `layout_lint.py` 的规则
@@ -126,6 +128,11 @@ python scripts/design_gate.py confirm design-brief.json G1 --quote "确认 G1-4c
 | LAY-08 | P0 | 器件进入禁布区 |
 | LAY-09 | P2 | 主器件（IC、连接器、晶振、电感、天线、电池、按键）没有分到任何功能块 |
 | LAY-10 | P1 | 设计确认里写的位号在板上找不到 |
+| LAY-11 | P2 | IMU 离板边 < 3 mm，或离连接器、按键、固定孔 < 5 mm（应力） |
+| LAY-12 | P2 | 温湿度 < 8 mm、IMU < 5 mm、晶振 < 4 mm、电池 < 5 mm 靠近 DCDC / LDO / 充电芯片（热） |
+| LAY-13 | P1 | 磁力计离电感、电池、磁性器件 < 10 mm |
+| LAY-14 | P2 | 功率电感离 IMU、温湿度、麦克风、气压计 < 4 mm |
+| LAY-15 | P3 | 电源流向绕路：稳压器离主控比充电芯片还远 |
 | RTP-01…08 | 同 `17-routing-principles.md` | 就近原则：去耦、晶振负载电容、ESD、串阻、地过孔；未布线时按焊盘直线距离估计 |
 
 嘉立创 EDA 自带的 DRC 管连通性、间距、线宽、过孔、差分对和元件间距（装配干涉）；上表这些“该不该放这里”的检查它不做，这正是本检查器和扩展“布局”页的用途。

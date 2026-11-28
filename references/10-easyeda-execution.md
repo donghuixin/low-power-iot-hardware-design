@@ -67,7 +67,7 @@
 
 **第 0 步：设计确认。** 往 PCB 写任何走线、挪任何器件之前，先 `python scripts/design_gate.py require design-brief.json --stage route`（挪器件用 `--stage place`）。不通过就停下，按 `19-design-gate.md` 和用户逐级确认；不要因为用户催促或任务设成自动运行而跳过。用扩展时，闸门状态以扩展“设计确认”页为准，未放行时 `routing_fix_apply`、`routing_gate` 会拒绝。
 
-用户装了布线检查助手扩展（`eext/lpiot-routing-check`）并运行了本地 MCP 桥时，直接用它的 `routing_gate` 做闸门、`routing_check` 回读评分、`routing_fix_plan` / `routing_fix_apply` 修复，不必自己导出文件；没装时按下面的步骤做。
+用户装了布局布线检查助手扩展（`eext/lpiot-layout-routing-check`）并运行了本地桥时（拓扑见 `26-eda-link.md`；本地脚本用 `scripts/eda_bridge.py export` 拉取编辑器里的板子），直接用它的 `routing_gate` 做闸门、`routing_check` 回读评分、`routing_fix_plan` / `routing_fix_apply` 修复，不必自己导出文件；没装时按下面的步骤做。
 
 通过扩展 API 往 PCB 写走线（`eda.pcb_PrimitiveLine.create(net, layer, startX, startY, endX, endY, lineWidth, primitiveLock)`，坐标和线宽单位是 mil）时，几何必须先离线算好、过闸门，再整批写入。规则与评分见 `16-routing-constraints.md`。
 

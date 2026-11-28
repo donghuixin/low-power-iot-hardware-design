@@ -323,7 +323,7 @@ L6 落线适配  （确定性）EDA 写入前闸门 → 写入 → 回读复检 
 | M4 网络类推导与规程 | 名字 + 拓扑推导、第 8 节规程；走线原则检查与布线顺序（`17-routing-principles.md`） | 已完成；推导准确率未在真实原理图上统计 |
 | M5 详细布线器 | 整网八方向 A*、逃逸模板、成束车道、升级阶梯 | 未开始 |
 | M6 全局布线 | 瓦片拥塞图、协商拥塞、走廊、回到布局判据 | 未开始 |
-| M7 EDA 适配 | 嘉立创 EDA 写入与回读、KiCad IPC、FreeRouting 管道 | 嘉立创 EDA 扩展 `eext/lpiot-routing-check` 已完成：读板、检查评分、修复预览与写回（可撤销命令组）、AI 解读、本地 HTTP / MCP 桥；只用假 eda 对象测过，还没在真实编辑器里验证。KiCad IPC、FreeRouting 未开始 |
+| M7 EDA 适配 | 嘉立创 EDA 写入与回读、KiCad IPC、FreeRouting 管道 | 嘉立创 EDA 扩展 `eext/lpiot-layout-routing-check` 已完成：读板、检查评分、修复预览与写回（可撤销命令组）、AI 解读、本地 HTTP / MCP 桥；只用假 eda 对象测过，还没在真实编辑器里验证。KiCad IPC、FreeRouting 未开始 |
 
 局限：
 

@@ -216,7 +216,9 @@ $ python scripts/route_lint.py lint fixed.kicad_pcb
 
 **布线指导思想**（[`references/18-routing-philosophy.md`](references/18-routing-philosophy.md)）：按功能块边读懂电路、边查证资料（联网或读文件前先征得同意）、边定约束、边布线、边检查；综合 ADI AN-1142《高速 ADC PCB 布局布线技巧》与 TI ZHCAAE6B《电机驱动器电路板布局的最佳实践》——电流走环路、单一完整地加分区、去耦电容与芯片同层不隔过孔、裸露焊盘过孔阵列、开尔文连接、拐角只用 135°、不接受直角、绝不出现随机角度。
 
-**嘉立创 EDA 扩展**（[`eext/lpiot-routing-check`](eext/lpiot-routing-check)）：把同一套检查搬进嘉立创 EDA 专业版——在“设计确认”页逐级填写并确认设计信息（确认码只能由人输入），在“布局”页对照确认内容检查分区、固定件、天线净空和去耦距离（分区色块、目标位置箭头、去耦回路动画），读当前 PCB 检查布线打分，用板子动画讲清楚问题（电流流动、回流路径、去耦回路、布线顺序回放、修复前后形变），G0–G4 确认后一键修复几何问题（可撤销），接入你自己的大模型做解读，并提供本地 HTTP / MCP 桥给 Claude Code 等 AI 代理调用。安装包在 [`release/`](eext/lpiot-routing-check/release)。
+**嘉立创 EDA 扩展“布局布线检查助手”**（[`eext/lpiot-layout-routing-check`](eext/lpiot-layout-routing-check)，单独上架扩展广场）：在“确认”页逐级填写并确认设计信息（确认码只能由人输入），按板子的功能把网络梳理成 9 档优先级并逐档确认（板子上只亮这一档的网络），对照确认内容检查布局（固定件、分区、禁布区、天线净空、IMU 应力与热、磁力计、去耦距离，带动画），检查布线并打分，G0–G4 放行后一键修复（拐角只用 135°，可撤销），接入你自己的大模型；本地桥（MCP / HTTP + 令牌，枢纽 + 转发端）让本机 AI 客户端和 `scripts/eda_bridge.py` 与编辑器联动，拓扑见 [`references/26-eda-link.md`](references/26-eda-link.md)。安装包在 [`release/`](eext/lpiot-layout-routing-check/release)。
+
+![布局布线检查助手演示](eext/lpiot-layout-routing-check/docs/demo.gif)
 
 **走线原则**（[`references/17-routing-principles.md`](references/17-routing-principles.md)，检查器 `scripts/route_principles.py`）：
 
@@ -250,7 +252,8 @@ references/
   16-routing-constraints.md      布线约束与质量评分：八方向几何、线宽线长过孔层约束、检查器与修复器、写入闸门、AI 布线规程
   17-routing-principles.md       走线原则：布线优先级、就近、差分、隔离及对应检查器
   18-routing-philosophy.md       布线指导思想与工作方法（ADI AN-1142、TI ZHCAAE6B）
-  19-design-gate.md              强制确认流程：六道闸门、AI 规则、确认码、工具强制点、布局检查规则、误用案例复盘
+  19-design-gate.md              强制确认流程：六道闸门、布线优先级逐档确认、AI 规则、确认码、工具强制点、布局检查规则、误用案例复盘
+  26-eda-link.md                 本地 AI 与嘉立创 EDA 扩展联动：拓扑、接入方式、高效检查、安全、排错
   20-hv-pulser-tr-safety.md      扩展：高压脉冲、T/R、高压电源与联锁、间距
   21-ultrasound-afe-clock.md     扩展：超声 AFE、采样与 IQ、时钟抖动
   22-low-noise-power-thermal.md  扩展：持续功耗模型、纹波与开关同步、手持热设计
@@ -260,7 +263,8 @@ references/
   checklists.md                  各阶段逐项核对清单
 scripts/
   design_gate.py                 强制确认流程：模板、各闸门状态、摘要与确认码、记录确认、阶段放行检查
-  layout_lint.py                 实板布局检查（对照设计确认文件）：LAY-01…10 与就近原则
+  layout_lint.py                 实板布局检查（对照设计确认文件）：LAY-01…15 与就近原则
+  eda_bridge.py                  经本地桥与嘉立创 EDA 扩展联动：导出板子、同步设计确认、梳理优先级、交叉核对
   power_budget.py                功耗预算与峰值压降检查
   hw_calc.py                     I2C 上拉、储能电容、分压器、晶体负载电容、续航；抖动、纹波、高压储能、数据率
   make_layout_project.py         校验项目数据，生成布局规划页面或验证页面（--verifier / --copper）
@@ -272,7 +276,7 @@ scripts/
   route_fix.py                   把任意角度、锐角、抖动、斜出焊盘的走线修成八方向折线
   route_principles.py            走线原则检查（就近、差分、优先级倒挂、隔离）与推荐布线顺序
 eext/
-  lpiot-routing-check/           嘉立创 EDA 专业版扩展：设计确认、布局检查、布线检查、动画、修复写回（需确认）、AI 接口、本地 MCP 桥
+  lpiot-layout-routing-check/    嘉立创 EDA 扩展“布局布线检查助手”：设计确认、优先级逐档确认、布局检查、布线检查、动画、修复写回（需确认）、AI 接口、本地桥
 assets/
   layout-planner.html            布局规划器（单文件，内置示例）
   layout-planner/                规划器源码与 Three.js（MIT）
@@ -337,6 +341,9 @@ python scripts/design_gate.py summary design-brief.json G1
 python scripts/design_gate.py confirm design-brief.json G1 --quote "确认 G1-4c09ae"
 python scripts/design_gate.py require design-brief.json --stage route
 python scripts/layout_lint.py board.kicad_pcb --brief design-brief.json --json layout-lint.json
+python scripts/design_gate.py priorities design-brief.json --board board.kicad_pcb --write
+python scripts/design_gate.py summary design-brief.json T1
+python scripts/eda_bridge.py export -o board-pack.json
 python scripts/power_budget.py assets/power-budget-example.json
 python scripts/hw_calc.py i2c-pullup --vdd 1.8 --cb-pf 40 --speed 400k
 python scripts/hw_calc.py bulk-cap --ipeak-ma 15 --pulse-ms 5 --dv 0.2
@@ -354,7 +361,7 @@ python scripts/route_lint.py order board.kicad_pcb
 python scripts/route_fix.py board.kicad_pcb --brief design-brief.json -o board-fixed.kicad_pcb
 ```
 
-除 `extract_copper.py` 和 `route_fix.py`（需要 numpy、scipy、Pillow；`route_lint.py` 读 `.kicad_pcb` 时也会用到）外只依赖 Python 3 标准库（`fab_rules.py` 导入 xlsx 时需要 openpyxl）。规划器与验证器的单元测试：`node --test tests/*.test.js`（Node 18+，无第三方依赖）；铜皮提取、工艺规则、布线检查修复、确认流程与布局检查：`python -m unittest tests/test_extract_copper.py tests/test_fab_rules.py tests/test_routing.py tests/test_design_gate.py`。
+除 `extract_copper.py` 和 `route_fix.py`（需要 numpy、scipy、Pillow；`route_lint.py` 读 `.kicad_pcb` 时也会用到）外只依赖 Python 3 标准库（`fab_rules.py` 导入 xlsx 时需要 openpyxl）。规划器与验证器的单元测试：`node --test tests/*.test.js`（Node 18+，无第三方依赖）；铜皮提取、工艺规则、布线检查修复、确认流程与布局检查：`python -m unittest tests/test_extract_copper.py tests/test_fab_rules.py tests/test_routing.py tests/test_design_gate.py tests/test_eda_bridge.py`。
 
 ## 参与改进
 

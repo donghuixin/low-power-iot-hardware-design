@@ -46,7 +46,21 @@ ROLE_RULES = [
     (r"^(LED|D)\d", "diode"), (r"^U\d|^IC\d|^M\d", "ic"), (r"^C\d", "cap"), (r"^R\d", "res"), (r"^FB\d", "ferrite"),
     (r"^TP\d", "testpoint"), (r"^H\d|^MH\d", "hole"),
 ]
-MAJOR = {"antenna", "battery", "connector", "crystal", "inductor", "ic", "button", "rf_module", "dcdc", "mcu", "soc_rf"}
+# 按型号推断角色（位号推断之后再细分；设计确认里的 roles 优先）
+VALUE_ROLES = [
+    (r"1117|ME62|RT90|XC62|TLV7|AP21|LP59|HT7[0-9]|MIC5|\bLDO\b", "ldo"),
+    (r"TPS6|TLV62|SY8|MP15|MP23|RT8|LMR|XL15|\bbuck\b|\bboost\b|DCDC", "dcdc"),
+    (r"TP40|BQ2[45]|MCP738|LTC40|ETA60|CN30", "charger"),
+    (r"BMI\d|LSM6|MPU-?\d|ICM-?\d|LIS2|ADXL|BMA\d|KX\d{3}", "imu"),
+    (r"MMC\d|QMC\d|LIS3MDL|BMM\d|AK09", "magnetometer"),
+    (r"SHT\d|SHTC|HDC\d|AHT\d|Si70|HTU\d|TMP1\d", "temp_humidity"),
+    (r"BMP\d|LPS\d|DPS\d|MS56", "barometer"),
+    (r"SPH\d|ICS-4\d|MSM26|MEMS ?MIC", "microphone"),
+    (r"nRF5|ESP32|STM32WB|CC26|EFR32|BL6\d|CH58|DA14", "soc_rf"),
+]
+HEAT = {"dcdc", "ldo", "charger", "pa"}
+MAJOR = {"antenna", "battery", "connector", "crystal", "inductor", "ic", "button", "rf_module", "dcdc", "mcu", "soc_rf",
+         "ldo", "charger", "imu", "magnetometer", "temp_humidity", "barometer", "microphone"}
 
 # 最小距离（mm），取自布局规划器 rules.js 的默认值
 MIN_DIST = [
@@ -54,6 +68,13 @@ MIN_DIST = [
     ("LAY-07", "P1", {"inductor"}, {"antenna", "rf_module"}, 8.0, "功率电感离天线太近：开关噪声会耦合进射频"),
     ("LAY-07", "P2", {"inductor"}, {"crystal"}, 4.0, "功率电感离晶振太近：磁场耦合会增加相噪、影响起振"),
     ("LAY-07", "P2", {"crystal"}, {"antenna", "rf_module"}, 4.0, "晶振离天线太近：射频会注入振荡回路"),
+    ("LAY-11", "P2", {"imu"}, {"connector", "button", "hole"}, 5.0, "IMU 离连接器、按键或固定孔太近：插拔、按压和锁螺丝的应力会让零偏漂移"),
+    ("LAY-12", "P2", {"temp_humidity"}, HEAT, 8.0, "温湿度传感器离发热器件太近：读数会偏高"),
+    ("LAY-12", "P2", {"imu"}, HEAT, 5.0, "IMU 离发热器件太近：温漂会进入零偏"),
+    ("LAY-12", "P2", {"crystal"}, HEAT, 4.0, "晶振离发热器件太近：频率随温度漂移"),
+    ("LAY-12", "P2", {"battery"}, HEAT, 5.0, "电池离发热器件太近：温度升高加速老化"),
+    ("LAY-13", "P1", {"magnetometer"}, {"inductor", "battery", "speaker", "motor"}, 10.0, "磁力计离电感、电池或磁性器件太近：硬铁干扰无法完全校准"),
+    ("LAY-14", "P2", {"inductor"}, {"imu", "temp_humidity", "microphone", "barometer"}, 4.0, "功率电感离敏感传感器太近：磁场和开关噪声会耦合进去"),
 ]
 
 
@@ -64,6 +85,12 @@ def role_of(ref, value, roles):
         if re.match(pat, ref, re.I):
             if r == "ic" and value and re.search(r"module|模组|ESP32-[A-Z]|-WROOM|-MINI", value, re.I):
                 return "rf_module"
+            if r == "inductor" and value and re.search(r"\d\s*nH", value, re.I):
+                return "rf_match"                     # nH 级电感是射频匹配，不是功率电感
+            if r in ("ic", "other") and value:
+                for vp, vr in VALUE_ROLES:
+                    if re.search(vp, value, re.I):
+                        return vr
             return r
     return "other"
 
@@ -263,6 +290,19 @@ class Lint:
                         continue
                     if overlap(q["rect"], z, 0.0) and rect_dist(q["rect"], r) < 3 - 1e-6:
                         self.add("LAY-06", "P1", [ref, o], f"{o} 在天线 {ref} 的 3 mm 净空区内", "移出净空区（匹配网络器件请在 G2 里和天线放进同一功能块）", at=self.center(q["rect"]), zone=z)
+        for ref, p in self.parts.items():                   # LAY-11 IMU 离板边
+            if p["role"] == "imu":
+                r = p["rect"]
+                d = min(r[0] - self.bb[0], self.bb[2] - r[2], r[1] - self.bb[1], self.bb[3] - r[3])
+                if d < 3.0 - 1e-6:
+                    self.add("LAY-11", "P2", [ref], f"IMU {ref} 离板边 {d:.1f} mm（建议 ≥ 3 mm）：板边受力最大，分板和装配应力会影响零偏", "往板内挪", at=self.center(r))
+        pick = lambda roles: next((p for p in self.parts.values() if p["role"] in roles), None)   # noqa: E731
+        chg, reg, main = pick({"charger"}), pick({"dcdc", "ldo"}), pick({"soc_rf", "mcu", "rf_module"})
+        if chg and reg and main:                          # LAY-15 电源流向
+            dc, dr = rect_dist(chg["rect"], main["rect"]), rect_dist(reg["rect"], main["rect"])
+            if dr > dc + 1:
+                self.add("LAY-15", "P3", [chg["ref"], reg["ref"], main["ref"]], f"电源流向绕路：稳压器 {reg['ref']} 离主控比充电芯片 {chg['ref']} 还远，电源要先绕到远处再回来",
+                         "按 输入 → 充电 → 稳压 → 主控 的顺序排成一条线", at=self.center(reg["rect"]))
         seen = set()
         for rule, sev, A, B, dmin, why in MIN_DIST:
             for ra, a in self.parts.items():
@@ -292,7 +332,7 @@ class Lint:
         before = len(self.ctx.out)
         RP.check_proximity(self.ctx, nets, classes, values, nL, has_plane)
         for v in self.ctx.out[before:]:
-            refs = re.findall(r"\b(?:[A-Z]{1,3}\d+)\b", v["msg"])
+            refs = re.findall(r"(?<![.\w])[A-Z]{1,3}\d+\b", v["msg"])
             self.add(v["rule"], v["sev"], list(dict.fromkeys(refs))[:3], v["msg"], at=v.get("at"))
 
     def run(self):

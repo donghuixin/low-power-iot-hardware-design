@@ -1,0 +1,389 @@
+{
+ "brief": {
+  "kind": "lpiot-design-brief",
+  "version": 1,
+  "project": {
+   "name": "BLE 运动传感器节点（演示）",
+   "owner": "演示"
+  },
+  "roles": {
+   "U1": "soc_rf",
+   "U2": "dcdc",
+   "L2": "rf_match",
+   "U3": "imu"
+  },
+  "G0_requirements": {
+   "function": "腕戴运动记录器：nRF52 读取 IMU 姿态数据，经 BLE 发到手机，USB-C 充电和烧录",
+   "power": {
+    "source": "USB 5 V，板上降压 DCDC 到 3.0 V（演示板不含电池）",
+    "peak_ma": 15,
+    "sleep_ua": 5
+   },
+   "wireless": "BLE 5（2.4 GHz 片状天线）",
+   "environment": "室内外 -10–45 °C，腕戴，防汗",
+   "fab": {
+    "layers": 2,
+    "thickness_mm": 1.0,
+    "fab": "JLC",
+    "tier": "standard"
+   }
+  },
+  "G1_mechanical": {
+   "outline": {
+    "shape": "rect",
+    "w_mm": 50,
+    "h_mm": 32,
+    "file": ""
+   },
+   "enclosure": {
+    "material": "塑料",
+    "max_height_top_mm": 2.5,
+    "max_height_bottom_mm": 0.8
+   },
+   "holes": "无",
+   "fixed": [
+    {
+     "ref": "J1",
+     "what": "USB-C",
+     "edge": "left",
+     "along_mm": 13.3,
+     "tol_mm": 1.5,
+     "side": "top",
+     "reason": "外壳左侧 USB 开孔"
+    },
+    {
+     "ref": "ANT1",
+     "what": "片状天线",
+     "edge": "top",
+     "tol_mm": 2,
+     "side": "top",
+     "reason": "天线朝外壳顶部，远离手腕"
+    },
+    {
+     "ref": "SW1",
+     "what": "按键",
+     "edge": "right",
+     "along_mm": 20,
+     "tol_mm": 1.5,
+     "side": "top",
+     "reason": "外壳右侧按键孔"
+    }
+   ],
+   "keepouts": "无"
+  },
+  "G2_partition": {
+   "blocks": [
+    {
+     "name": "主控",
+     "parts": [
+      "U1",
+      "Y1",
+      "C1",
+      "C2",
+      "C4",
+      "C5"
+     ],
+     "region": "center",
+     "why": "四周都要出线"
+    },
+    {
+     "name": "射频",
+     "parts": [
+      "L2",
+      "ANT1"
+     ],
+     "region": "top-right",
+     "why": "天线在右上角板边"
+    },
+    {
+     "name": "USB 与电源",
+     "parts": [
+      "J1",
+      "D1",
+      "C7",
+      "U2",
+      "L1",
+      "C3"
+     ],
+     "region": "left-third",
+     "why": "USB 在左侧，开关电源远离天线和 IMU"
+    },
+    {
+     "name": "传感器",
+     "parts": [
+      "U3",
+      "C8"
+     ],
+     "region": "right",
+     "why": "IMU 远离开关电源和热源"
+    },
+    {
+     "name": "人机",
+     "parts": [
+      "SW1",
+      "D2"
+     ],
+     "region": "any",
+     "why": "按键贴外壳开孔，LED 靠近导光柱"
+    }
+   ],
+   "signal_flow": "USB-C(左) 进电 → DCDC(左下) → VDD 沿底边到主控(中)和 IMU(右)；射频从主控上方走到右上角天线；I2C 从主控右侧到 IMU",
+   "layout_review": {
+    "screenshot": "demo-layout.png",
+    "notes": "演示"
+   }
+  },
+  "G3_layout_check": {
+   "report": "待填",
+   "accepted_exceptions": "无"
+  },
+  "G4_routing_plan": {
+   "stackup": [
+    {
+     "layer": "TOP",
+     "use": "器件与全部信号"
+    },
+    {
+     "layer": "BOTTOM",
+     "use": "完整地平面，不走线"
+    }
+   ],
+   "priorities": [
+    {
+     "tier": 1,
+     "name": "射频与天线",
+     "classes": [
+      "RF50"
+     ],
+     "nets": [
+      "RF_OUT",
+      "RF_ANT"
+     ],
+     "notes": {
+      "RF_OUT": "射频 50 Ω，按网络名判断；连接 U1（无线 SoC nRF52832）、L2（射频匹配 3.9nH）",
+      "RF_ANT": "射频 50 Ω，按网络名判断；连接 L2（射频匹配 3.9nH）、ANT1（天线 2.4GHz）"
+     },
+     "why": "照抄参考设计，最短最直、0 过孔、不分叉，先占住最好的位置",
+     "method": "手工",
+     "rules": "50 Ω 共面波导（线宽按叠层计算），不打过孔、不分支，两侧密打地过孔，拐角 135° 或圆弧"
+    },
+    {
+     "tier": 2,
+     "name": "时钟源",
+     "classes": [
+      "XTAL"
+     ],
+     "nets": [
+      "XIN",
+      "XOUT"
+     ],
+     "notes": {
+      "XIN": "晶振，按网络名判断；连接 U1（无线 SoC nRF52832）、Y1（晶振 32MHz）、C4（电容 12pF）",
+      "XOUT": "晶振，按网络名判断；连接 U1（无线 SoC nRF52832）、Y1（晶振 32MHz）、C5（电容 12pF）"
+     },
+     "why": "晶振线 ≤ 5 mm、0 过孔，负载电容贴着晶振，下方完整地",
+     "method": "手工",
+     "rules": "≤ 5 mm、不打过孔，负载电容贴晶振，下方完整地，远离开关节点和时钟"
+    },
+    {
+     "tier": 3,
+     "name": "开关回路与高压",
+     "classes": [
+      "SW"
+     ],
+     "nets": [
+      "SW"
+     ],
+     "notes": {
+      "SW": "开关节点，按网络名判断；连接 U2（DCDC TPS62840）、L1（电感 2.2uH）"
+     },
+     "why": "热回路面积最小、开关节点铜最小；高压先定间距和爬电",
+     "method": "手工",
+     "rules": "热回路面积最小，开关节点铜皮最小，线宽 ≥ 0.6 mm"
+    },
+    {
+     "tier": 4,
+     "name": "高速差分",
+     "classes": [
+      "USB90"
+     ],
+     "nets": [
+      "USB_DM",
+      "USB_DP"
+     ],
+     "notes": {
+      "USB_DM": "USB 差分，连到 USB 连接器的 D+/D- 脚；连接 U1（无线 SoC nRF52832）、J1（接口 USB-C）、D1（二极管 ESD5V）",
+      "USB_DP": "USB 差分，按网络名判断；连接 U1（无线 SoC nRF52832）、J1（接口 USB-C）、D1（二极管 ESD5V）"
+     },
+     "why": "成对、同层、等距、等长，过孔成对",
+     "method": "手工",
+     "rules": "90 Ω 差分，同层、并行、等距、对内等长 ≤ 0.5 mm，过孔成对"
+    },
+    {
+     "tier": 7,
+     "name": "电源",
+     "classes": [
+      "PWR_LOW",
+      "PWR_MAIN"
+     ],
+     "nets": [
+      "VDD",
+      "VBUS"
+     ],
+     "notes": {
+      "VDD": "电源，按网络名判断；连接 U1（无线 SoC nRF52832）、L1（电感 2.2uH）、C3（电容 10uF）、C2（电容 100nF）、U3（IMU BMI270） 等",
+      "VBUS": "主电源，按网络名判断；连接 J1（接口 USB-C）、C7（电容 10uF）、U2（DCDC TPS62840）"
+     },
+     "why": "先干线后支路，宽线或铺铜；去耦电容就近到引脚",
+     "method": "手工",
+     "rules": "按电流定线宽（见电源网络表），去耦电容贴引脚；按电流定线宽（见电源网络表），先干线后支路，去耦就近"
+    },
+    {
+     "tier": 8,
+     "name": "一般信号",
+     "classes": [
+      "SIG"
+     ],
+     "nets": [
+      "DEC1",
+      "LED",
+      "INT1",
+      "SCL",
+      "SDA",
+      "BTN",
+      "TEST"
+     ],
+     "notes": {
+      "DEC1": "一般信号，默认；连接 U1（无线 SoC nRF52832）、C1（电容 100nF）",
+      "LED": "一般信号，默认；连接 U1（无线 SoC nRF52832）、D2（二极管 LED）",
+      "INT1": "一般信号，按网络名判断；连接 U1（无线 SoC nRF52832）、U3（IMU BMI270）",
+      "SCL": "一般信号，按网络名判断；连接 U1（无线 SoC nRF52832）、U3（IMU BMI270）",
+      "SDA": "一般信号，按网络名判断；连接 U1（无线 SoC nRF52832）、U3（IMU BMI270）",
+      "BTN": "一般信号，默认；连接 U1（无线 SoC nRF52832）、SW1（按键 KEY）",
+      "TEST": "一般信号，默认；连接 TP1（测试点）"
+     },
+     "why": "总线成束等距，按层主方向走",
+     "method": "工具辅助",
+     "rules": "八方向、拐角只用 135°，总线成束等距"
+    },
+    {
+     "tier": 9,
+     "name": "地",
+     "classes": [
+      "GND"
+     ],
+     "nets": [
+      "GND"
+     ],
+     "notes": {
+      "GND": "地，按网络名判断；连接 U1（无线 SoC nRF52832）、C1（电容 100nF）、C4（电容 12pF）、C5（电容 12pF）、J1（接口 USB-C） 等"
+     },
+     "why": "铺铜和缝合过孔放在最后，补齐被切开的地",
+     "method": "铺铜",
+     "rules": "最后铺铜、补缝合过孔，修补被切开的地"
+    }
+   ],
+   "diff_pairs": [
+    {
+     "p": "USB_DP",
+     "n": "USB_DM",
+     "impedance_ohm": 90,
+     "skew_mm": 0.5
+    }
+   ],
+   "power_nets": [
+    {
+     "net": "VBUS",
+     "current_ma": 500,
+     "width_mm": 0.5
+    },
+    {
+     "net": "VDD",
+     "current_ma": 50,
+     "width_mm": 0.3
+    }
+   ],
+   "acceptance": {
+    "route_lint_min_score": 85,
+    "drc_zero": true,
+    "human_review": true
+   }
+  },
+  "G5_acceptance": {
+   "route_report": "待填",
+   "drc_errors": "待填",
+   "screenshots": "待填"
+  },
+  "confirmations": {}
+ },
+ "codes": [
+  "T1-23b456",
+  "T2-a8c7db",
+  "T3-390551",
+  "T4-4b4891",
+  "T7-74b40f",
+  "T8-d18be1",
+  "T9-9a8ea8"
+ ],
+ "tiers": [
+  [
+   1,
+   [
+    "RF_OUT",
+    "RF_ANT"
+   ],
+   "手工"
+  ],
+  [
+   2,
+   [
+    "XIN",
+    "XOUT"
+   ],
+   "手工"
+  ],
+  [
+   3,
+   [
+    "SW"
+   ],
+   "手工"
+  ],
+  [
+   4,
+   [
+    "USB_DM",
+    "USB_DP"
+   ],
+   "手工"
+  ],
+  [
+   7,
+   [
+    "VDD",
+    "VBUS"
+   ],
+   "手工"
+  ],
+  [
+   8,
+   [
+    "DEC1",
+    "LED",
+    "INT1",
+    "SCL",
+    "SDA",
+    "BTN",
+    "TEST"
+   ],
+   "工具辅助"
+  ],
+  [
+   9,
+   [
+    "GND"
+   ],
+   "铺铜"
+  ]
+ ]
+}

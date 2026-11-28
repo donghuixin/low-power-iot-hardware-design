@@ -1,0 +1,76 @@
+{
+	"name": "lpiot-layout-routing-check",
+	"uuid": "c0417a1a448044239e2d8f06ac1b5464",
+	"displayName": "布局布线检查助手 / Layout & Routing Check Assistant",
+	"description": "布局布线前的强制设计确认（需求、外壳与固定件、功能分区、布局检查、布线规划逐级由用户确认），对照确认内容的布局检查，走线检查与评分（拐角只用 135°、不接受直角，任意角度、锐角、出焊盘、过孔、就近、差分、优先级）；带板子动画、修复预览和 AI 接口。",
+	"version": "0.3.0",
+	"publisher": "donghuixin",
+	"engines": {
+		"eda": "^3.2.0"
+	},
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "github",
+		"url": "https://github.com/donghuixin/low-power-iot-hardware-design"
+	},
+	"categories": "PCB",
+	"keywords": [
+		"PCB",
+		"布线",
+		"Routing",
+		"DRC",
+		"AI",
+		"差分",
+		"检查",
+		"布局"
+	],
+	"images": {
+		"logo": "./images/logo.png",
+		"banner": "./images/banner.jpg"
+	},
+	"homepage": "https://github.com/donghuixin/low-power-iot-hardware-design/tree/main/eext/lpiot-layout-routing-check",
+	"bugs": "https://github.com/donghuixin/low-power-iot-hardware-design/issues",
+	"activationEvents": {},
+	"entry": "./dist/index",
+	"dependentExtensions": {},
+	"headerMenus": {
+		"pcb": [
+			{
+				"id": "lpiotLayoutRouting",
+				"title": "布局布线检查",
+				"menuItems": [
+					{
+						"id": "openPanel",
+						"title": "打开布局布线检查面板",
+						"registerFn": "openPanel"
+					},
+					{
+						"id": "quickLayout",
+						"title": "快速布局检查",
+						"registerFn": "quickLayout"
+					},
+					{
+						"id": "quickCheck",
+						"title": "快速布线检查",
+						"registerFn": "quickCheck"
+					},
+					{
+						"id": "connectAgent",
+						"title": "连接本地 AI 助手…",
+						"registerFn": "connectAgent"
+					},
+					{
+						"id": "disconnectAgent",
+						"title": "断开本地 AI 助手",
+						"registerFn": "disconnectAgent"
+					},
+					{
+						"id": "about",
+						"title": "关于",
+						"registerFn": "about"
+					}
+				]
+			}
+		]
+	}
+}

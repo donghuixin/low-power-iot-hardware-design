@@ -1,6 +1,0 @@
-布线检查助手 / Routing Check Assistant
-Copyright 2026 donghuixin
-
-本扩展基于嘉立创 EDA 官方扩展开发工具 easyeda-api-sdk（Apache License 2.0，Copyright 2024 JLCEDA）搭建，
-build/ 与 config/ 下的打包脚本来自该 SDK。检查规则移植自 low-power-iot-hardware-design（同一作者）的
-scripts/route_lint.py、route_principles.py 与 route_fix.py。

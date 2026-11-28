@@ -32,6 +32,9 @@ def confirmed_brief(d, board=GOOD, upto="G4"):
     pack, _ = R.load_any(board)
     (Path(d) / "layout-lint.json").write_text(json.dumps(LL.run(pack, b), ensure_ascii=False), encoding="utf-8")
     for g in DG.GATES[: DG.GATES.index(upto) + 1]:
+        if g == "G4":                                   # 布线优先级先逐档确认
+            for i, t in enumerate(DG.tier_list(b)):
+                DG.confirm_tier(b, t["tier"], f"确认 {DG.tier_code(b, i)}")
         DG.confirm(b, g, f"确认 {DG.code_of(b, g)}", base=d)
     DG.save(path, b)
     return path
@@ -170,3 +173,70 @@ class LayoutLint(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LayoutRulesExtra(unittest.TestCase):
+    """LAY-11…15：IMU 板边与应力、发热、磁力计、电感与传感器、电源流向；按型号推断角色。"""
+
+    def pack(self, parts):
+        return {"board": {"outline": [[0, 0], [40, 0], [40, 30], [0, 30]]}, "layers": ["F.Cu", "B.Cu"], "nets": [],
+                "parts": [{"ref": r, "rect": rect, "side": "top", "value": v} for r, rect, v in parts]}
+
+    def rules(self, parts, brief=None):
+        rep = LL.run(self.pack(parts), brief)
+        return {(v["rule"], tuple(v["refs"])) for v in rep["issues"]}, rep
+
+    def test_value_roles(self):
+        _, rep = self.rules([("U1", [10, 10, 12, 12], "BMI270"), ("U2", [20, 10, 22, 12], "TPS62840"), ("U3", [30, 10, 32, 12], "SHT40"),
+                             ("L1", [5, 5, 6, 6], "2.2uH"), ("L2", [5, 20, 6, 21], "3.9nH"), ("U4", [20, 20, 22, 22], "TP4056")])
+        self.assertEqual([rep["parts"][r] for r in ("U1", "U2", "U3", "L1", "L2", "U4")], ["imu", "dcdc", "temp_humidity", "inductor", "rf_match", "charger"])
+
+    def test_imu_edge_stress_heat(self):
+        got, _ = self.rules([("U1", [1, 10, 3, 12], "BMI270"), ("J1", [1, 14, 3, 16], "USB"), ("U2", [6, 10, 8, 12], "TPS62840")])
+        rules = {r for r, _ in got}
+        self.assertTrue({"LAY-11", "LAY-12"} <= rules, got)
+
+    def test_magnetometer_and_inductor(self):
+        got, _ = self.rules([("U1", [10, 10, 12, 12], "MMC5603"), ("L1", [15, 10, 17, 12], "4.7uH"), ("U2", [20, 20, 22, 22], "SPH0645")])
+        self.assertIn(("LAY-13", ("U1", "L1")), got)
+        got, _ = self.rules([("L1", [10, 10, 12, 12], "4.7uH"), ("U2", [13, 10, 15, 12], "SPH0645")])
+        self.assertIn(("LAY-14", ("L1", "U2")), got)
+
+    def test_power_flow(self):
+        got, _ = self.rules([("U1", [18, 14, 22, 18], "nRF52832"), ("U2", [23, 14, 25, 16], "TP4056"), ("U3", [2, 2, 4, 4], "ME6211")])
+        self.assertIn("LAY-15", {r for r, _ in got})
+
+
+class TierConfirmation(unittest.TestCase):
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.b = DG.load(confirmed_brief(self.d, upto="G3"))
+        pack, _ = R.load_any(FIX / "demo-node.kicad_pcb")
+        self.b["G4_routing_plan"]["priorities"] = DG.draft_priorities(pack)
+
+    def tearDown(self):
+        shutil.rmtree(self.d)
+
+    def test_draft_groups_by_function(self):
+        tiers = {t["tier"]: t for t in self.b["G4_routing_plan"]["priorities"]}
+        self.assertEqual(set(tiers[1]["nets"]), {"RF_OUT", "RF_ANT"})
+        self.assertEqual(set(tiers[2]["nets"]), {"XIN", "XOUT"})
+        self.assertIn("天线", tiers[1]["notes"]["RF_ANT"])
+        self.assertEqual(tiers[8]["method"], "工具辅助")
+
+    def test_tiers_in_order_and_required_for_g4(self):
+        self.assertIn("逐档确认", "\n".join(DG.missing(self.b, "G4", self.d)))
+        tl = DG.tier_list(self.b)
+        with self.assertRaises(SystemExit):                     # 不能跳档
+            DG.confirm_tier(self.b, tl[1]["tier"], f"确认 {DG.tier_code(self.b, 1)}")
+        with self.assertRaises(SystemExit):                     # 没有确认码
+            DG.confirm_tier(self.b, tl[0]["tier"], "好的")
+        for i, t in enumerate(tl):
+            DG.confirm_tier(self.b, t["tier"], f"确认 {DG.tier_code(self.b, i)}")
+        self.assertEqual(DG.missing(self.b, "G4", self.d), [])
+        # 把一个网络挪档后，从那一档开始的确认作废
+        tl[2]["nets"].append("SCL")
+        sts = DG.tier_states(self.b)
+        self.assertEqual([st for _, _, st, _ in sts[:2]], ["confirmed", "confirmed"])
+        self.assertEqual(sts[2][2], "stale")
+        self.assertTrue(all(st != "confirmed" for _, _, st, _ in sts[3:]))
